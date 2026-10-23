@@ -1,7 +1,7 @@
 {
   "id": "inventario",
   "name": "Inventario",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "icon": "boxes",
   "description": "Existencias por almacén y producto, y movimientos de entrada, salida, ajuste y traspaso. Las recepciones confirmadas de Compras generan sus entradas solas.",
   "requires": ["compras"],
@@ -167,6 +167,13 @@
               "events": [{ "on": "create" }, { "on": "update" }], "role": "Integración de tienda",
               "fields": ["Almacen", "Producto", "Cantidad", "BajoMinimo"] }
           ] }
+      ] } },
+    { "version": "1.4.0",
+      "description": "Multi-empresa: existencias, movimientos y traspasos son de cada empresa. Una recepción mueve las existencias de su propia empresa; los productos se comparten.",
+      "plan": { "description": "Inventario 1.4.0: empresas", "operations": [
+        { "op": "updateEntity", "entity": "Existencia", "perCompany": true },
+        { "op": "updateEntity", "entity": "MovimientoInventario", "perCompany": true },
+        { "op": "updateEntity", "entity": "Traspaso", "perCompany": true }
       ] } }
   ],
   "roles": [

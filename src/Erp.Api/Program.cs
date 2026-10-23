@@ -150,6 +150,7 @@ app.MapAudit();
 app.MapAnalytics();
 app.MapIntegrations();
 app.MapEnvironments();
+app.MapCompanies();
 app.MapGet("/api/health", () => Results.Ok(new { status = "ok" })).AllowAnonymous();
 app.MapFallback("/api/{**path}", () => Results.Problem(title: "Ruta no encontrada.", statusCode: 404));
 

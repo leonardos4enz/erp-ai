@@ -59,6 +59,8 @@ interface Draft {
   description: string;
   displayField: string;
   group: string;
+  /** Spec 010: un registro por empresa. */
+  perCompany: boolean;
   fields: DraftField[];
   rulesJson: string;
   workflowJson: string;
@@ -85,7 +87,7 @@ function draftFrom(def?: EntityDef): Draft {
   if (!def) {
     const f = blankField(0);
     f.label = 'Nombre'; f.name = 'Nombre'; f.required = true; f.maxLength = 150;
-    return { name: '', label: '', labelPlural: '', icon: 'package', description: '', displayField: '', group: '', fields: [f], rulesJson: '', workflowJson: '', automationsJson: '', securityJson: '', layoutJson: '', viewsJson: '', reportsJson: '', webhooksJson: '' };
+    return { name: '', label: '', labelPlural: '', icon: 'package', description: '', displayField: '', group: '', perCompany: false, fields: [f], rulesJson: '', workflowJson: '', automationsJson: '', securityJson: '', layoutJson: '', viewsJson: '', reportsJson: '', webhooksJson: '' };
   }
   const fields = def.fields
     .slice()
@@ -93,7 +95,7 @@ function draftFrom(def?: EntityDef): Draft {
     .map((f): DraftField => ({ ...f, options: f.options ?? [], requiredForRoles: f.requiredForRoles ?? [], _key: newKey(), _isNew: false, _nameTouched: true, _original: f }));
   return {
     name: def.name, label: def.label, labelPlural: def.labelPlural, icon: def.icon || 'database',
-    description: def.description ?? '', displayField: def.displayField ?? '', group: def.group ?? '', fields,
+    description: def.description ?? '', displayField: def.displayField ?? '', group: def.group ?? '', perCompany: !!def.perCompany, fields,
     rulesJson: def.rules?.length ? pretty(def.rules) : '',
     workflowJson: def.workflow ? pretty(def.workflow) : '',
     automationsJson: def.automations?.length ? pretty(def.automations) : '',
@@ -197,6 +199,7 @@ export function buildOperations(original: EntityDef | undefined, d: Draft): Oper
       icon: d.icon || undefined, description: d.description.trim() || undefined,
       displayField: d.displayField || undefined,
       group: d.group.trim() || undefined,
+      perCompany: d.perCompany || undefined,
       fields: active.filter((f) => !f.isArchived).map((f, i) => cleanField(f, i)),
     }, ...behaviourOperations(d.name.trim(), undefined, d)];
   }
@@ -209,6 +212,7 @@ export function buildOperations(original: EntityDef | undefined, d: Draft): Oper
   if (d.description.trim() !== (original.description ?? '')) { meta.description = d.description.trim(); metaChanged = true; }
   if (d.displayField !== (original.displayField ?? '')) { meta.displayField = d.displayField; metaChanged = true; }
   if (d.group.trim() !== (original.group ?? '')) { meta.group = d.group.trim(); metaChanged = true; }
+  if (d.perCompany && !original.perCompany) { meta.perCompany = true; metaChanged = true; }
   if (metaChanged) ops.push(meta);
 
   const moved = reorderedPositions(original, d.fields);
@@ -596,12 +600,28 @@ export function EntityEditor({ original, entities, onCancel, onReview }: EntityE
         </div>
       </section>
 
-      <details className="card card-pad advanced-section" open={!!(original?.rules?.length || original?.workflow || original?.automations?.length || original?.security || original?.layout || original?.views?.length || original?.reports?.length || original?.webhooks?.length) || undefined}>
+      <details className="card card-pad advanced-section" open={!!(original?.perCompany || original?.rules?.length || original?.workflow || original?.automations?.length || original?.security || original?.layout || original?.views?.length || original?.reports?.length || original?.webhooks?.length) || undefined}>
         <summary className="advanced-summary">
           <span className="section-title">Reglas, proceso, automatizaciones, seguridad e interfaz</span>
           <span className="subtle">Avanzado · validaciones de negocio, estados del documento, efectos en otros registros y quién ve o edita qué</span>
         </summary>
         <div className="stack" style={{ marginTop: 'var(--space-4)' }}>
+          {/* Spec 010: catálogo compartido o por empresa. Pasar a por empresa no se puede deshacer. */}
+          <Field
+            label="Empresas"
+            hint={d.fields.some((f) => f.type === 'parent')
+              ? 'Las partidas siguen la empresa de su documento.'
+              : original?.perCompany
+                ? 'Cada empresa ve y captura solo sus registros. Un catálogo por empresa no vuelve a ser compartido.'
+                : 'Compartido: todas las empresas ven los mismos registros. Por empresa: cada una ve y captura solo los suyos (los existentes quedan en la empresa predeterminada). No se puede deshacer.'}
+          >
+            <Switch
+              checked={d.perCompany}
+              disabled={!!original?.perCompany || d.fields.some((f) => f.type === 'parent')}
+              onChange={(v) => setD((s) => ({ ...s, perCompany: v }))}
+              label="Un registro por empresa"
+            />
+          </Field>
           <Textarea
             className="mono json-editor"
             label="Reglas (JSON)"

@@ -14,6 +14,8 @@ interface AuthState {
   reloadEntities: () => Promise<void>;
   /** Vuelve a leer permisos y catálogos (p. ej. después de instalar un módulo). */
   refresh: () => Promise<void>;
+  /** Spec 010: cambia la empresa actual (recarga permisos, catálogos y la página). */
+  switchCompany: (companyId: number) => Promise<void>;
   perms: (entity: string) => EntityPerms;
 }
 
@@ -77,6 +79,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try { setMe(await authApi.me()); } catch (e) { if (!(e instanceof ApiError)) throw e; }
   }, []);
 
+  const switchCompany = useCallback(async (companyId: number) => {
+    setMe(await authApi.switchCompany(companyId));
+  }, []);
+
   const visible = useMemo(
     () => entities
       .filter((e) => !e.isArchived && !e.isChild && (me?.isSuperuser || perms(e.name).read))
@@ -85,8 +91,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const value = useMemo<AuthState>(() => ({
-    me, loading, login, logout, entities: visible, entitiesLoading, reloadEntities, refresh, perms,
-  }), [me, loading, login, logout, visible, entitiesLoading, reloadEntities, refresh, perms]);
+    me, loading, login, logout, entities: visible, entitiesLoading, reloadEntities, refresh, perms, switchCompany,
+  }), [me, loading, login, logout, visible, entitiesLoading, reloadEntities, refresh, perms, switchCompany]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

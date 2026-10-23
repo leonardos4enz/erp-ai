@@ -51,7 +51,7 @@ public sealed partial class RecordService
             var draft = await LoadDraftAsync(c.Cn, c.Tx, e, c.Model, id, c.Ct);
             if (draft is null) return;
             var loader = new RelatedLoader(c.Cn, c.Tx, c.Model);
-            if (auto.When is not null && !ExprEvaluator.Test(auto.When, HeaderScope(draft, e, c.Model, loader), Env(c.User, draft), whenNull: false))
+            if (auto.When is not null && !ExprEvaluator.Test(auto.When, HeaderScope(draft, e, c.Model, loader), Env(c.User, draft, loader), whenNull: false))
                 continue;
             var inner = c with { Depth = c.Depth + 1, Chain = [.. c.Chain, $"{e.Label}: {auto.Label}"] };
             try
@@ -75,7 +75,7 @@ public sealed partial class RecordService
         var draft = await LoadDraftAsync(c.Cn, c.Tx, e, c.Model, id, c.Ct);
         if (draft is null) return;
         var loader = new RelatedLoader(c.Cn, c.Tx, c.Model);
-        var env = Env(c.User, draft);
+        var env = Env(c.User, draft, loader);
         var lineScopes = new Dictionary<string, List<DocScope>>(StringComparer.OrdinalIgnoreCase);
         var header = HeaderScope(draft, e, c.Model, loader, lineScopes);
         var scopeEntity = AutomationRules.Scope(e, a, c.Model)!;
@@ -187,7 +187,7 @@ public sealed partial class RecordService
         if (!changed) return;
 
         var loader = new RelatedLoader(c.Cn, c.Tx, c.Model);
-        var env = Env(c.User, draft);
+        var env = Env(c.User, draft, loader);
         Compute(draft, root, c.Model, loader, env, defaults: false);
         // Solo las reglas del registro que cambió: una regla del encabezado no bloquea acumular en una partida.
         var errors = new Dictionary<string, string[]>();
@@ -223,7 +223,7 @@ public sealed partial class RecordService
         var draft = (await LoadDraftAsync(c.Cn, c.Tx, target, c.Model, id, c.Ct))!;
         if (!t.From.Contains(draft.Header.GetValueOrDefault(Workflow.StateField) as string ?? "", StringComparer.OrdinalIgnoreCase)) return;
         var loader = new RelatedLoader(c.Cn, c.Tx, c.Model);
-        if (t.When is not null && !ExprEvaluator.Test(t.When, HeaderScope(draft, target, c.Model, loader), Env(c.User, draft), whenNull: false))
+        if (t.When is not null && !ExprEvaluator.Test(t.When, HeaderScope(draft, target, c.Model, loader), Env(c.User, draft, loader), whenNull: false))
             throw new AppException(400, t.WhenMessage ?? $"No se cumplen las condiciones de «{t.Label}» en {target.Label}.");
         foreach (var rf in t.RequiredFields ?? [])
             if (target.FindField(rf) is { } f && IsBlank(draft.Header.GetValueOrDefault(f.Name)))
@@ -265,9 +265,12 @@ public sealed partial class RecordService
             await AppLockAsync(c, $"erp-rollup:{target.Name}:" + string.Join("|", keys.Select(k => Convert.ToString(k.Value, CultureInfo.InvariantCulture))));
             await using (var find = new SqlCommand { Connection = c.Cn, Transaction = c.Tx })
             {
+                // Spec 010: en un catálogo por empresa el destino es el de la misma empresa: nunca se acumula en otra.
+                var company = target.PerCompany ? $" AND {Quote(DdlGenerator.CompanyColumn)} = @company" : "";
                 find.CommandText = $"SELECT TOP 1 [Id] FROM {AppTable(target.Name)} WITH (UPDLOCK, HOLDLOCK) WHERE " +
-                                   string.Join(" AND ", keys.Select((k, i) => $"{Quote(k.Dest.Name)} = @f{i}")) + " AND [IsDeleted] = 0 ORDER BY [Id]";
+                                   string.Join(" AND ", keys.Select((k, i) => $"{Quote(k.Dest.Name)} = @f{i}")) + company + " AND [IsDeleted] = 0 ORDER BY [Id]";
                 for (var i = 0; i < keys.Count; i++) find.Parameters.Add(new SqlParameter($"@f{i}", keys[i].Value));
+                if (target.PerCompany) find.Parameters.Add(new SqlParameter("@company", (object?)c.User.Company?.Id ?? 0));
                 targetId = await find.ExecuteScalarAsync(c.Ct) as long?;
             }
             for (var i = 0; i < keys.Count; i++)
@@ -344,12 +347,18 @@ public sealed partial class RecordService
         await using (var cmd = new SqlCommand($"SELECT [Id] FROM {AppTable(root.Name)} WHERE [IsDeleted] = 0", cn, tx))
         await using (var r = await cmd.ExecuteReaderAsync(ct))
             while (await r.ReadAsync(ct)) ids.Add(r.GetInt64(0));
+        // Spec 010: cada registro se calcula con su propia empresa (moneda base), no con la de quien cambia el modelo.
+        var companies = new Dictionary<int, (string Code, string Currency)>();
+        await using (var cmd = new SqlCommand("SELECT Id, Code, BaseCurrency FROM meta.Company", cn, tx))
+        await using (var r = await cmd.ExecuteReaderAsync(ct))
+            while (await r.ReadAsync(ct)) companies[r.GetInt32(0)] = (r.GetString(1), r.GetString(2).Trim());
 
         foreach (var id in ids)
         {
             var d = (await LoadDraftAsync(cn, tx, root, model, id, ct))!;
             var loader = new RelatedLoader(cn, tx, model);
-            var env = new ExprEnv(0, [], d.CreatorId);
+            (string Code, string Currency)? company = d.CompanyId is { } co && companies.TryGetValue(co, out var info) ? info : null;
+            var env = new ExprEnv(0, [], d.CreatorId) { Company = company?.Code, BaseCurrency = company?.Currency, Rates = loader };
             var header = HeaderScope(d, root, model, loader);
             foreach (var (field, list) in d.Lines)
             {

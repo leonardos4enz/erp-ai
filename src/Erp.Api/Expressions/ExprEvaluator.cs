@@ -12,10 +12,23 @@ public interface IExprScope
     IReadOnlyList<IExprScope> Lines(string linesField);
 }
 
-/// <summary>Quién evalúa: necesario para HASROLE, ISCREATOR, CURRENTUSER y CURRENTUNIT.</summary>
+/// <summary>Spec 010: tipos de cambio registrados en el entorno.</summary>
+public interface ICurrencyRates
+{
+    /// <summary>Unidades de <paramref name="to"/> por una de <paramref name="from"/> vigentes en la fecha; null si no hay.</summary>
+    decimal? Rate(string from, string to, DateTime date);
+}
+
+/// <summary>
+/// Quién evalúa: necesario para HASROLE, ISCREATOR, CURRENTUSER y CURRENTUNIT. Spec 010: empresa del contexto (clave y
+/// moneda base) y tipos de cambio para BASECURRENCY, CURRENTCOMPANY, RATE y CONVERT.
+/// </summary>
 public sealed record ExprEnv(int UserId, IReadOnlyCollection<string> Roles, int? CreatorId, string? Unit = null)
 {
     public static readonly ExprEnv System = new(0, [], null);
+    public string? Company { get; init; }
+    public string? BaseCurrency { get; init; }
+    public ICurrencyRates? Rates { get; init; }
 }
 
 public static partial class ExprEvaluator
@@ -132,6 +145,16 @@ public static partial class ExprEvaluator
             case "CURRENTUNIT": return env.Unit;
             case "HASROLE": return env.Roles.Contains(Text(Arg(0)), StringComparer.OrdinalIgnoreCase);
             case "ISCREATOR": return env.CreatorId is null || env.CreatorId == env.UserId;
+            case "BASECURRENCY": return env.BaseCurrency;
+            case "CURRENTCOMPANY": return env.Company;
+            case "RATE": return Rate(Arg(0), Arg(1), c.Args.Count > 2 ? Arg(2) : DateTime.Today, env);
+            case "CONVERT":
+            {
+                var amount = Arg(0);
+                if (amount is null) return null;
+                var rate = Rate(Arg(1), Arg(2), c.Args.Count > 3 ? Arg(3) : DateTime.Today, env);
+                return rate is null ? null : Num(amount) * rate.Value;
+            }
             case "SUM":
             {
                 var p = (PathRef)c.Args[0];
@@ -144,6 +167,17 @@ public static partial class ExprEvaluator
             }
             default: throw new ExprException($"Función desconocida: {c.Name}.");
         }
+    }
+
+    /// <summary>Spec 010: misma moneda = 1; moneda o fecha vacías, o sin tipo registrado = nulo (desconocido).</summary>
+    private static decimal? Rate(object? from, object? to, object? date, ExprEnv env)
+    {
+        var f = Text(from).Trim().ToUpperInvariant();
+        var t = Text(to).Trim().ToUpperInvariant();
+        if (f.Length == 0 || t.Length == 0) return null;
+        if (f == t) return 1m;
+        if (date is not DateTime d) return null;
+        return env.Rates?.Rate(f, t, d.Date);
     }
 
     // ---------------- Conversión de valores ----------------

@@ -157,11 +157,16 @@ public static partial class PlanCompiler
         var parents = e.ActiveFields.Count(f => f.Type == FieldTypes.Parent);
         if (parents > 1) msgs.Add($"{e.Name} solo puede tener un campo de tipo documento padre.");
         if (e.IsChild && e.Workflow is not null) msgs.Add($"{e.Name} es una partida: el proceso se define en su documento.");
+        if (e.IsChild && e.PerCompany) msgs.Add($"{e.Name} es una partida: sigue la empresa de su documento y no se declara por empresa.");
+        // Spec 010: en un catálogo compartido la moneda base o la empresa dependerían de quién guarda el registro.
+        var shared = !(e.IsChild ? model.TryGetValue(e.ParentEntity ?? "", out var doc) && doc.PerCompany : e.PerCompany);
 
         foreach (var f in e.ActiveFields)
         {
             Check(f.DefaultValue, $"valor por defecto de {f.Name}");
             Check(f.Formula, $"fórmula de {f.Name}");
+            if (shared && f.Formula is not null && Expressions.ExprAnalyzer.UsedFunctions(f.Formula).FirstOrDefault(Expressions.ExprAnalyzer.CompanyFunctions.Contains) is { } fn)
+                msgs.Add($"{e.Name} › fórmula de {f.Name}: {fn}() solo se usa en fórmulas de catálogos por empresa (en uno compartido el resultado dependería de quién guarda).");
             if (f.LookupFilter is { } lf) msgs.AddRange(ValidateLookupFilter(e, f, lf, model));
             if (f.Type == FieldTypes.Lines)
             {
@@ -255,12 +260,13 @@ public static partial class PlanCompiler
             Name = op.Name, Label = op.Label.Trim(), LabelPlural = op.LabelPlural.Trim(),
             Icon = op.Icon ?? "database", Description = op.Description?.Trim(), Fields = fields,
             Group = string.IsNullOrWhiteSpace(op.Group) ? null : op.Group.Trim(),
+            PerCompany = op.PerCompany,
         };
         if (!ValidateDisplayField(ctx, entity, op.DisplayField)) return null;
         entity = entity with { DisplayField = op.DisplayField };
 
-        return new(entity, $"Crear catálogo '{entity.Label}' con {fields.Count} campo(s)",
-            DdlGenerator.CreateTable(entity.Name, fields));
+        return new(entity, $"Crear catálogo '{entity.Label}' con {fields.Count} campo(s){(op.PerCompany ? ", un registro por empresa" : "")}",
+            DdlGenerator.CreateTable(entity.Name, fields, op.PerCompany));
     }
 
     private static OpResult? UpdateEntity(Ctx ctx, UpdateEntityOp op)
@@ -273,6 +279,12 @@ public static partial class PlanCompiler
         if (op.Description?.Length > MaxDescription) ctx.Error("La descripción es demasiado larga.");
         if (op.DisplayField is not null && !ValidateDisplayField(ctx, e, op.DisplayField)) return null;
         if (op.Group?.Trim().Length > MaxGroup) { ctx.Error($"El grupo del menú admite máximo {MaxGroup} caracteres."); return null; }
+        // Spec 010: pasar a un registro por empresa no se puede deshacer (los registros ya tienen dueña).
+        var toCompany = op.PerCompany == true && !e.PerCompany;
+        if (op.PerCompany == false && e.PerCompany)
+            return ctx.Fail($"'{e.Label}' es por empresa: un catálogo por empresa no puede volver a ser compartido.");
+        if (toCompany && e.IsChild)
+            return ctx.Fail($"'{e.Label}' es una partida: sigue la empresa de su documento.");
 
         var updated = e with
         {
@@ -282,7 +294,11 @@ public static partial class PlanCompiler
             Description = op.Description?.Trim() ?? e.Description,
             DisplayField = op.DisplayField ?? e.DisplayField,
             Group = op.Group is null ? e.Group : op.Group.Trim() is { Length: > 0 } g ? g : null,
+            PerCompany = e.PerCompany || toCompany,
         };
+        if (toCompany)
+            return new(updated, $"'{updated.Label}' pasa a un registro por empresa (los registros existentes quedan en la empresa predeterminada)",
+                DdlGenerator.MakePerCompany(e.Name, e.Fields));
         return new(updated, $"Actualizar propiedades del catálogo '{updated.Label}'", []);
     }
 
@@ -315,7 +331,7 @@ public static partial class PlanCompiler
 
         return new(e with { Fields = [.. e.Fields, field] },
             $"Agregar campo '{field.Label}' ({field.Type}) a '{e.Label}'",
-            DdlGenerator.AddColumn(e.Name, field));
+            DdlGenerator.AddColumn(e.Name, field, e.PerCompany));
     }
 
     private static OpResult? UpdateField(Ctx ctx, UpdateFieldOp op)

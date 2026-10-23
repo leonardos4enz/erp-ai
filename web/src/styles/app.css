@@ -207,6 +207,20 @@ code, pre, .mono { font-family: var(--font-mono); font-size: 0.8125rem; }
 .avatar { width: 30px; height: 30px; border-radius: 50%; background: var(--surface-3); color: var(--text); display: grid; place-items: center; font-size: var(--text-xs); font-weight: 600; flex-shrink: 0; }
 .user-btn { display: flex; align-items: center; gap: var(--space-2); background: none; border: 0; padding: 4px; border-radius: var(--radius-full); cursor: pointer; }
 .user-btn:hover { background: var(--surface-2); }
+/* Spec 010: empresa actual en la barra superior. */
+.company-btn { display: flex; align-items: center; gap: 6px; max-width: 240px; min-width: 0; height: 32px; padding: 0 var(--space-2);
+  background: none; border: 1px solid var(--border); border-radius: var(--radius-md); color: var(--text); cursor: pointer; font: inherit; font-size: var(--text-sm); }
+.company-btn:hover { background: var(--surface-2); }
+.company-btn:disabled { opacity: .6; cursor: progress; }
+.company-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+@media (max-width: 600px) { .company-btn { max-width: 120px; } }
+@media (max-width: 480px) { .company-name { display: none; } }
+/* Regresión (revisión exploratoria 010, F-02): con el selector de empresa las migas se encimaban; en móvil solo va la actual. */
+@media (max-width: 600px) { .breadcrumb > .row:not(:last-child), .breadcrumb > .row:last-child > svg { display: none; } }
+.rate-fields { display: grid; grid-template-columns: 90px 90px minmax(150px, 1fr) minmax(180px, 1.4fr) auto; gap: var(--space-3); align-items: start; }
+.rate-submit { padding-top: 26px; }
+.rate-filter { width: 80px; }
+@media (max-width: 760px) { .rate-fields { grid-template-columns: 1fr 1fr; } .rate-submit { padding-top: 0; grid-column: 1 / -1; } }
 
 /* ---------- Dialog / Drawer ---------- */
 .overlay { position: fixed; inset: 0; background: var(--overlay); z-index: 50; display: grid; place-items: center; padding: var(--space-4); animation: fade var(--dur) var(--ease);

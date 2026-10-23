@@ -13,9 +13,11 @@ public static partial class AdminEndpoints
     private static partial Regex UsernamePattern();
 
     public sealed record UserDto(int Id, string Username, string DisplayName, bool IsActive, DateTime? LastLoginAt,
-        DateTime? LockoutEnd, IReadOnlyList<int> RoleIds, string? Unit);
-    public sealed record CreateUserRequest(string? Username, string? DisplayName, string? Password, int[]? RoleIds, string? Unit = null);
-    public sealed record UpdateUserRequest(string? DisplayName, bool IsActive, int[]? RoleIds, string? Password, string? Unit = null);
+        DateTime? LockoutEnd, IReadOnlyList<int> RoleIds, string? Unit, IReadOnlyList<int> CompanyIds);
+    /// <param name="CompanyIds">Spec 010: omitido = la empresa predeterminada.</param>
+    public sealed record CreateUserRequest(string? Username, string? DisplayName, string? Password, int[]? RoleIds, string? Unit = null, int[]? CompanyIds = null);
+    /// <param name="CompanyIds">Spec 010: omitido = sin cambio.</param>
+    public sealed record UpdateUserRequest(string? DisplayName, bool IsActive, int[]? RoleIds, string? Password, string? Unit = null, int[]? CompanyIds = null);
 
     public const int MaxUnit = 100;
 
@@ -106,8 +108,10 @@ public static partial class AdminEndpoints
             "INSERT meta.[User] (Username, DisplayName, PasswordHash, Unit) OUTPUT inserted.Id VALUES (@username, @displayName, @hash, @unit)",
             new { username, displayName, hash = passwords.Hash(req.Password!), unit }, tx);
         await SetRolesAsync(cn, tx, id, req.RoleIds ?? []);
+        var companyIds = req.CompanyIds ?? await cn.QueryAsync<int>("SELECT Id FROM meta.Company WHERE IsDefault = 1", transaction: tx);
+        await SetCompaniesAsync(cn, tx, id, companyIds);
         await Audit.WriteAsync(cn, tx, http, AuditActions.UserChange, "Usuario", id.ToString(),
-            after: new { username, displayName, roleIds = req.RoleIds, unit });
+            after: new { username, displayName, roleIds = req.RoleIds, unit, companyIds });
         await tx.CommitAsync();
         return Results.Created($"/api/admin/users/{id}", (await LoadUsersAsync(cn)).First(u => u.Id == id));
     }
@@ -131,9 +135,11 @@ public static partial class AdminEndpoints
         await using var tx = await cn.BeginTransactionAsync();
         var roleIds = req.RoleIds ?? [];
         var rolesChanged = !before.RoleIds.Order().SequenceEqual(roleIds.Distinct().Order());
-        // Cambiar contraseña, roles, unidad o desactivar invalida las sesiones abiertas (nuevo SecurityStamp):
-        // la unidad decide qué registros ve (spec 006).
-        var revoke = !string.IsNullOrEmpty(req.Password) || rolesChanged || (before.IsActive && !req.IsActive) || before.Unit != unit;
+        var companyIds = req.CompanyIds ?? before.CompanyIds;
+        var companiesChanged = !before.CompanyIds.Order().SequenceEqual(companyIds.Distinct().Order());
+        // Cambiar contraseña, roles, unidad, empresas o desactivar invalida las sesiones abiertas (nuevo SecurityStamp):
+        // la unidad (spec 006) y las empresas (spec 010) deciden qué registros ve.
+        var revoke = !string.IsNullOrEmpty(req.Password) || rolesChanged || companiesChanged || (before.IsActive && !req.IsActive) || before.Unit != unit;
         await cn.ExecuteAsync("""
             UPDATE meta.[User] SET DisplayName = @displayName, IsActive = @IsActive, Unit = @unit,
                 PasswordHash = COALESCE(@hash, PasswordHash),
@@ -147,10 +153,11 @@ public static partial class AdminEndpoints
             hash = string.IsNullOrEmpty(req.Password) ? null : passwords.Hash(req.Password),
         }, tx);
         await SetRolesAsync(cn, tx, id, roleIds);
+        if (companiesChanged) await SetCompaniesAsync(cn, tx, id, companyIds);
         await EnsureSuperuserRemainsAsync(cn, tx);
         await Audit.WriteAsync(cn, tx, http, AuditActions.UserChange, "Usuario", id.ToString(),
-            before: new { before.DisplayName, before.IsActive, before.RoleIds, before.Unit },
-            after: new { DisplayName = displayName, req.IsActive, RoleIds = roleIds, Unit = unit, PasswordChanged = !string.IsNullOrEmpty(req.Password) });
+            before: new { before.DisplayName, before.IsActive, before.RoleIds, before.Unit, before.CompanyIds },
+            after: new { DisplayName = displayName, req.IsActive, RoleIds = roleIds, Unit = unit, CompanyIds = companyIds, PasswordChanged = !string.IsNullOrEmpty(req.Password) });
         await tx.CommitAsync();
         return (await LoadUsersAsync(cn)).First(u => u.Id == id);
     }
@@ -172,6 +179,19 @@ public static partial class AdminEndpoints
             await cn.ExecuteAsync("INSERT meta.UserRole (UserId, RoleId) VALUES (@userId, @roleId)", new { userId, roleId }, tx);
     }
 
+    /// <summary>Spec 010: empresas que puede elegir. Si su empresa actual ya no está entre ellas, se olvida.</summary>
+    private static async Task SetCompaniesAsync(System.Data.Common.DbConnection cn, System.Data.Common.DbTransaction tx, int userId, IEnumerable<int> companyIds)
+    {
+        var ids = companyIds.Distinct().ToArray();
+        var existing = (await cn.QueryAsync<int>("SELECT Id FROM meta.Company WHERE Id IN @ids", new { ids }, tx)).Count();
+        if (existing != ids.Length) throw new ValidationFailed(new Dictionary<string, string[]> { ["companyIds"] = ["Hay empresas que no existen."] });
+        await cn.ExecuteAsync("DELETE meta.UserCompany WHERE UserId = @userId", new { userId }, tx);
+        foreach (var companyId in ids)
+            await cn.ExecuteAsync("INSERT meta.UserCompany (UserId, CompanyId) VALUES (@userId, @companyId)", new { userId, companyId }, tx);
+        await cn.ExecuteAsync("UPDATE meta.[User] SET CompanyId = NULL WHERE Id = @userId AND CompanyId NOT IN (SELECT CompanyId FROM meta.UserCompany WHERE UserId = @userId)",
+            new { userId }, tx);
+    }
+
     private static async Task EnsureSuperuserRemainsAsync(System.Data.Common.DbConnection cn, System.Data.Common.DbTransaction tx)
     {
         var count = await cn.ExecuteScalarAsync<int>("""
@@ -185,8 +205,9 @@ public static partial class AdminEndpoints
     {
         var users = await cn.QueryAsync<UserRow>("SELECT Id, Username, DisplayName, IsActive, LastLoginAt, LockoutEnd, Unit FROM meta.[User] WHERE IsService = 0 ORDER BY Username");
         var roles = (await cn.QueryAsync<(int UserId, int RoleId)>("SELECT UserId, RoleId FROM meta.UserRole")).ToLookup(x => x.UserId, x => x.RoleId);
+        var companies = (await cn.QueryAsync<(int UserId, int CompanyId)>("SELECT UserId, CompanyId FROM meta.UserCompany")).ToLookup(x => x.UserId, x => x.CompanyId);
         return users.Select(u => new UserDto(u.Id, u.Username, u.DisplayName, u.IsActive, u.LastLoginAt,
-            u.LockoutEnd > DateTime.UtcNow ? u.LockoutEnd : null, roles[u.Id].ToList(), u.Unit)).ToList();
+            u.LockoutEnd > DateTime.UtcNow ? u.LockoutEnd : null, roles[u.Id].ToList(), u.Unit, companies[u.Id].Order().ToList())).ToList();
     }
 
     // ---------------- Roles ----------------

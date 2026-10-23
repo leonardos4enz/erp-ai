@@ -172,6 +172,12 @@ public sealed class ApiKeyService(Db db, PasswordService passwords)
             """, new { username = $"svc.{publicId}", name = name![..Math.Min(name!.Length, 150)], hash = passwords.Hash(WebhookSignature.NewSecret()) }, tx);
         foreach (var r in roleIds)
             await cn.ExecuteAsync("INSERT meta.UserRole (UserId, RoleId) VALUES (@userId, @r)", new { userId, r }, tx);
+        // Spec 010: la clave trabaja en la empresa actual de quien la crea.
+        if (u.Company is { } company)
+            await cn.ExecuteAsync("""
+                INSERT meta.UserCompany (UserId, CompanyId) VALUES (@userId, @c);
+                UPDATE meta.[User] SET CompanyId = @c WHERE Id = @userId;
+                """, new { userId, c = company.Id }, tx);
         var id = await cn.ExecuteScalarAsync<int>("""
             INSERT meta.ApiKey (Name, PublicId, SecretHash, UserId, CreatedBy, ExpiresAt)
             OUTPUT inserted.Id VALUES (@name, @publicId, @hash, @userId, @uid, @expires)

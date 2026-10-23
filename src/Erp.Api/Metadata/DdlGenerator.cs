@@ -60,7 +60,10 @@ public static class DdlGenerator
         ];
     }
 
-    public static IReadOnlyList<string> CreateTable(string entity, IEnumerable<FieldDef> fields)
+    /// <summary>Spec 010: columna de sistema con la empresa del registro en los catálogos por empresa.</summary>
+    public const string CompanyColumn = "CompanyId";
+
+    public static IReadOnlyList<string> CreateTable(string entity, IEnumerable<FieldDef> fields, bool perCompany = false)
     {
         var list = fields.ToList();
         var cols = new List<string>
@@ -68,6 +71,8 @@ public static class DdlGenerator
             $"[Id] bigint IDENTITY(1,1) NOT NULL CONSTRAINT {Constraint("PK", entity)} PRIMARY KEY",
         };
         cols.AddRange(list.Where(f => !FieldTypes.IsVirtual(f.Type)).Select(f => ColumnDefinition(entity, f)));
+        if (perCompany)
+            cols.Add($"{Quote(CompanyColumn)} int NOT NULL CONSTRAINT {Constraint("FK", entity, CompanyColumn)} REFERENCES [meta].[Company] ([Id])");
         cols.AddRange(
         [
             $"[CreatedAt] datetime2(3) NOT NULL CONSTRAINT {Constraint("DF", entity, "CreatedAt")} DEFAULT SYSUTCDATETIME()",
@@ -82,23 +87,56 @@ public static class DdlGenerator
         {
             $"CREATE TABLE {AppTable(entity)} (\n    {string.Join(",\n    ", cols)}\n);",
         };
-        foreach (var f in list) statements.AddRange(Indexes(entity, f));
+        if (perCompany) statements.Add(CompanyIndex(entity));
+        foreach (var f in list) statements.AddRange(Indexes(entity, f, perCompany));
         return statements;
     }
 
-    public static IReadOnlyList<string> AddColumn(string entity, FieldDef f)
+    public static IReadOnlyList<string> AddColumn(string entity, FieldDef f, bool perCompany = false)
     {
         if (FieldTypes.IsVirtual(f.Type)) return [];
         var statements = new List<string> { $"ALTER TABLE {AppTable(entity)} ADD {ColumnDefinition(entity, f)};" };
-        statements.AddRange(Indexes(entity, f));
+        statements.AddRange(Indexes(entity, f, perCompany));
         return statements;
     }
 
-    private static IEnumerable<string> Indexes(string entity, FieldDef f)
+    /// <summary>
+    /// Spec 010: un catálogo existente pasa a un registro por empresa. Los registros que ya tiene quedan en la empresa
+    /// predeterminada (subconsulta: ningún valor se concatena) y sus campos únicos pasan a serlo dentro de cada empresa.
+    /// Cada sentencia va en su lote: SQL Server no ve la columna nueva en el mismo lote.
+    /// </summary>
+    public static IReadOnlyList<string> MakePerCompany(string entity, IEnumerable<FieldDef> fields)
+    {
+        var table = AppTable(entity);
+        var col = Quote(CompanyColumn);
+        var statements = new List<string>
+        {
+            $"ALTER TABLE {table} ADD {col} int NULL;",
+            $"UPDATE {table} SET {col} = (SELECT TOP 1 [Id] FROM [meta].[Company] WHERE [IsDefault] = 1 ORDER BY [Id]) WHERE {col} IS NULL;",
+            $"ALTER TABLE {table} ALTER COLUMN {col} int NOT NULL;",
+            $"ALTER TABLE {table} ADD CONSTRAINT {Constraint("FK", entity, CompanyColumn)} FOREIGN KEY ({col}) REFERENCES [meta].[Company] ([Id]);",
+            CompanyIndex(entity),
+        };
+        foreach (var f in fields.Where(f => f.Unique && !f.IsArchived && f.Type != FieldTypes.Autonumber))
+        {
+            statements.Add($"DROP INDEX {Constraint("UX", entity, f.Name)} ON {table};");
+            statements.AddRange(Indexes(entity, f, perCompany: true));
+        }
+        return statements;
+    }
+
+    private static string CompanyIndex(string entity) =>
+        $"CREATE INDEX {Constraint("IX", entity, CompanyColumn)} ON {AppTable(entity)} ({Quote(CompanyColumn)}) WHERE [IsDeleted] = 0;";
+
+    /// <summary>Spec 010: en un catálogo por empresa un campo único lo es dentro de cada empresa; el folio sigue siendo global.</summary>
+    private static IEnumerable<string> Indexes(string entity, FieldDef f, bool perCompany)
     {
         if (f.Unique || f.Type == FieldTypes.Autonumber)
-            yield return $"CREATE UNIQUE INDEX {Constraint("UX", entity, f.Name)} ON {AppTable(entity)} ({Quote(f.Name)}) " +
+        {
+            var key = perCompany && f.Type != FieldTypes.Autonumber ? $"{Quote(CompanyColumn)}, {Quote(f.Name)}" : Quote(f.Name);
+            yield return $"CREATE UNIQUE INDEX {Constraint("UX", entity, f.Name)} ON {AppTable(entity)} ({key}) " +
                          $"WHERE {Quote(f.Name)} IS NOT NULL AND [IsDeleted] = 0;";
+        }
         else if (f.Type is FieldTypes.Reference or FieldTypes.Parent or FieldTypes.User)
             yield return $"CREATE INDEX {Constraint("IX", entity, f.Name)} ON {AppTable(entity)} ({Quote(f.Name)});";
     }

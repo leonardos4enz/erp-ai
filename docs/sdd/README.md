@@ -53,4 +53,5 @@ y cada sesión queda como registro de una sola entrega. Al cerrar la spec:
 | 007 | [Metadatos de interfaz: layouts, vistas, reportes y tableros](specs/007-metadatos-interfaz/spec.md) | Implementado |
 | 008 | [Integraciones: webhooks, claves de API, importación y exportación](specs/008-integraciones/spec.md) | Implementado |
 | 009 | [Entornos: ciclo de vida de metadatos (sandbox → pruebas → producción)](specs/009-entornos/spec.md) | Implementado |
-| 010–011 | Multi-empresa, IA | [Roadmap](roadmap.md) |
+| 010 | [Multi-empresa y multi-moneda](specs/010-multi-empresa-moneda/spec.md) | Implementado |
+| 011 | Asistente IA | [Roadmap](roadmap.md) |

@@ -16,7 +16,32 @@ public static class ExprAnalyzer
         ["TODAY"] = (0, 0), ["NOW"] = (0, 0), ["ADDDAYS"] = (2, 2), ["DAYS"] = (2, 2),
         ["CURRENTUSER"] = (0, 0), ["CURRENTUNIT"] = (0, 0), ["HASROLE"] = (1, 1), ["ISCREATOR"] = (0, 0),
         ["SUM"] = (1, 1), ["COUNT"] = (1, 1),
+        // Spec 010: empresa y monedas.
+        ["BASECURRENCY"] = (0, 0), ["CURRENTCOMPANY"] = (0, 0), ["RATE"] = (2, 3), ["CONVERT"] = (3, 4),
     };
+
+    /// <summary>Spec 010: funciones cuyo valor depende de la empresa del contexto.</summary>
+    public static readonly IReadOnlySet<string> CompanyFunctions = new HashSet<string> { "BASECURRENCY", "CURRENTCOMPANY" };
+
+    /// <summary>Nombres de las funciones que usa la expresión (vacío si no se puede analizar).</summary>
+    public static IReadOnlySet<string> UsedFunctions(string source)
+    {
+        var used = new HashSet<string>();
+        try { Collect(ExprParser.Parse(source)); }
+        catch (ExprException) { return used; }
+        return used;
+
+        void Collect(Node n)
+        {
+            switch (n)
+            {
+                case Unary u: Collect(u.Operand); break;
+                case Binary b: Collect(b.Left); Collect(b.Right); break;
+                case InList i: Collect(i.Value); foreach (var x in i.Items) Collect(x); break;
+                case Call c: used.Add(c.Name); foreach (var a in c.Args) Collect(a); break;
+            }
+        }
+    }
 
     /// <summary>Campos del usuario relacionados que se pueden leer con <c>CampoUsuario.X</c>.</summary>
     public static readonly IReadOnlySet<string> UserFields = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Nombre", "Usuario" };

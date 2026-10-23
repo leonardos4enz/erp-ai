@@ -17,6 +17,8 @@ public sealed class DocDraft
 {
     public long? Id { get; init; }
     public int? CreatorId { get; init; }
+    /// <summary>Spec 010: empresa del documento guardado (catálogos por empresa).</summary>
+    public int? CompanyId { get; init; }
     public Values Header { get; init; } = new();
     public Dictionary<string, List<LineDraft>> Lines { get; } = new(StringComparer.OrdinalIgnoreCase);
 }
@@ -29,12 +31,14 @@ public sealed class LineDraft
 
 /// <summary>
 /// Carga perezosa (con caché por operación) de registros relacionados para expresiones como
-/// <c>Producto.CostoUltimo</c>. Los nombres de tabla y columna salen de los metadatos.
+/// <c>Producto.CostoUltimo</c>. Los nombres de tabla y columna salen de los metadatos. Spec 010: también los tipos de
+/// cambio de <c>RATE</c> y <c>CONVERT</c>.
 /// </summary>
-public sealed class RelatedLoader(SqlConnection cn, SqlTransaction? tx, IReadOnlyDictionary<string, EntityDef> model)
+public sealed class RelatedLoader(SqlConnection cn, SqlTransaction? tx, IReadOnlyDictionary<string, EntityDef> model) : ICurrencyRates
 {
     private readonly Dictionary<(string, long), Values?> _rows = new();
     private readonly Dictionary<int, Values?> _users = new();
+    private readonly Dictionary<(string, string, DateTime), decimal?> _rates = new();
 
     public SqlConnection Connection => cn;
     public SqlTransaction? Transaction => tx;
@@ -67,6 +71,33 @@ public sealed class RelatedLoader(SqlConnection cn, SqlTransaction? tx, IReadOnl
         cmd.Parameters.Add(new SqlParameter("@id", id));
         p.AddTo(cmd.Parameters);
         return cmd.ExecuteScalar() is not null;
+    }
+
+    /// <summary>
+    /// Spec 010: el tipo más reciente en o antes de la fecha, directo (de → a) o inverso (a → de, 1 / tasa); con la misma
+    /// fecha gana el directo. Monedas ya validadas por el evaluador; van como parámetros.
+    /// </summary>
+    public decimal? Rate(string from, string to, DateTime date)
+    {
+        if (_rates.TryGetValue((from, to, date), out var cached)) return cached;
+        using var cmd = new SqlCommand("""
+            SELECT TOP 1 x.Inverse, x.Rate FROM (
+                SELECT 0 AS Inverse, Rate, RateDate FROM meta.ExchangeRate WHERE FromCurrency = @f AND ToCurrency = @t AND RateDate <= @d
+                UNION ALL
+                SELECT 1, Rate, RateDate FROM meta.ExchangeRate WHERE FromCurrency = @t AND ToCurrency = @f AND RateDate <= @d
+            ) x ORDER BY x.RateDate DESC, x.Inverse
+            """, cn, tx);
+        cmd.Parameters.Add(new SqlParameter("@f", System.Data.SqlDbType.Char, 3) { Value = from });
+        cmd.Parameters.Add(new SqlParameter("@t", System.Data.SqlDbType.Char, 3) { Value = to });
+        cmd.Parameters.Add(new SqlParameter("@d", System.Data.SqlDbType.Date) { Value = date.Date });
+        using var r = cmd.ExecuteReader();
+        decimal? rate = null;
+        if (r.Read())
+        {
+            var value = r.GetDecimal(1);
+            rate = r.GetInt32(0) == 0 ? value : decimal.Round(1m / value, 10);
+        }
+        return _rates[(from, to, date)] = rate;
     }
 
     public Values? User(int id)

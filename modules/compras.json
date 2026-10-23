@@ -1,7 +1,7 @@
 {
   "id": "compras",
   "name": "Compras",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "icon": "shopping-cart",
   "description": "Requisiciones, órdenes de compra con autorización por montos y recepción de mercancía con cantidades recibidas y pendientes. Incluye proveedores, productos y catálogos base.",
   "plan": {
@@ -451,6 +451,55 @@
               "events": [{ "on": "enterState", "state": "Autorizada" }], "role": "Integración de almacén",
               "fields": ["Folio", "Proveedor", "Fecha", "FechaEntrega", "Almacen", "Estado", "Partidas"] }
           ] }
+      ] } },
+    { "version": "1.6.0",
+      "description": "Multi-empresa y multi-moneda: almacenes, requisiciones, órdenes y recepciones son de cada empresa (proveedores, productos y catálogos base se comparten). El tipo de cambio de la orden se sugiere con el registrado para su fecha y la moneda base de la empresa, y los importes «MXN» pasan a «moneda base».",
+      "plan": { "description": "Compras 1.6.0: empresas y moneda base", "operations": [
+        { "op": "updateEntity", "entity": "Almacen", "perCompany": true },
+        { "op": "updateEntity", "entity": "Requisicion", "perCompany": true },
+        { "op": "updateEntity", "entity": "OrdenCompra", "perCompany": true },
+        { "op": "updateEntity", "entity": "Recepcion", "perCompany": true },
+        { "op": "updateField", "entity": "OrdenCompra", "field": "TipoCambio", "defaultValue": "RATE(Moneda.Clave, BASECURRENCY(), Fecha)" },
+        { "op": "updateField", "entity": "OrdenCompra", "field": "TotalMXN", "label": "Total en moneda base" },
+        { "op": "updateField", "entity": "OrdenCompraPartida", "field": "CostoMXN", "label": "Costo unitario (moneda base)" },
+        { "op": "setRules", "entity": "OrdenCompra", "rules": [
+            { "name": "EntregaPosterior", "field": "FechaEntrega", "assert": "FechaEntrega >= Fecha", "message": "La fecha de entrega no puede ser anterior a la fecha de la orden." },
+            { "name": "ProveedorActivo", "field": "Proveedor", "assert": "Proveedor.Activo = TRUE", "message": "El proveedor está inactivo; no se le pueden hacer órdenes." },
+            { "name": "TipoCambioPositivo", "field": "TipoCambio", "assert": "TipoCambio > 0", "message": "El tipo de cambio debe ser mayor a cero." },
+            { "name": "PesosSinTipoCambio", "field": "TipoCambio", "when": "Moneda.Clave = BASECURRENCY()", "assert": "TipoCambio = 1", "message": "En la moneda base de la empresa el tipo de cambio debe ser 1." }
+          ] },
+        { "op": "setLayout", "entity": "OrdenCompra", "layout": { "sections": [
+            { "name": "Datos", "label": "Datos de la orden", "tab": "General", "fields": ["Folio", "Proveedor", "Requisicion", "Fecha", "FechaEntrega", "Almacen", "Comprador"] },
+            { "name": "Pago", "label": "Condiciones de pago", "tab": "General",
+              "fields": ["Moneda", { "field": "TipoCambio", "visibleWhen": "NOT ISBLANK(Moneda) AND Moneda.Clave <> BASECURRENCY()" }, "CondicionPago"] },
+            { "name": "Notas", "label": "Notas", "tab": "General", "columns": 1, "fields": ["Notas"] },
+            { "name": "Autorizacion", "label": "Autorización", "tab": "Seguimiento", "fields": ["AutorizadoPor", "FechaAutorizacion"] },
+            { "name": "Motivos", "label": "Motivos", "tab": "Seguimiento", "columns": 1,
+              "fields": [{ "field": "MotivoRechazo", "visibleWhen": "Estado = 'Rechazada'" }, { "field": "MotivoCancelacion", "visibleWhen": "Estado = 'Cancelada'" }] }
+          ] } },
+        { "op": "setReports", "entity": "OrdenCompra", "reports": [
+            { "name": "ComprasPorProveedor", "label": "Compras por proveedor", "description": "Órdenes autorizadas en adelante (sin canceladas), en la moneda base de la empresa.",
+              "groupBy": [{ "field": "Proveedor" }], "measures": [{ "fn": "count", "label": "Órdenes" }, { "fn": "sum", "field": "TotalMXN", "label": "Total en moneda base" }],
+              "filter": "Estado IN ('Autorizada', 'Enviada', 'RecibidaParcial', 'Recibida', 'Cerrada')", "orderBy": "measure", "limit": 20, "chart": "bar" },
+            { "name": "ComprasPorMes", "label": "Compras por mes", "description": "Total comprado por mes de la orden (sin borradores, rechazadas ni canceladas).",
+              "groupBy": [{ "field": "Fecha", "period": "month", "label": "Mes" }], "measures": [{ "fn": "sum", "field": "TotalMXN", "label": "Total en moneda base" }, { "fn": "count", "label": "Órdenes" }],
+              "filter": "Estado IN ('Autorizada', 'Enviada', 'RecibidaParcial', 'Recibida', 'Cerrada')", "chart": "line" },
+            { "name": "MontoComprado", "label": "Monto comprado", "description": "Total en la moneda base de la empresa de las órdenes autorizadas en adelante.",
+              "measures": [{ "fn": "sum", "field": "TotalMXN", "label": "Total en moneda base" }],
+              "filter": "Estado IN ('Autorizada', 'Enviada', 'RecibidaParcial', 'Recibida', 'Cerrada')" },
+            { "name": "OrdenesAbiertas", "label": "Órdenes abiertas", "description": "Por autorizar, autorizadas o en espera de recibirse.",
+              "measures": [{ "fn": "count", "label": "Órdenes" }], "filter": "Estado IN ('PorAutorizar', 'Autorizada', 'Enviada', 'RecibidaParcial')" }
+          ] },
+        { "op": "setDashboard", "dashboard": { "name": "Compras", "label": "Compras", "icon": "shopping-cart",
+            "description": "Órdenes abiertas, monto comprado, tendencia mensual y principales proveedores y productos.",
+            "widgets": [
+              { "type": "kpi", "entity": "OrdenCompra", "report": "OrdenesAbiertas" },
+              { "type": "kpi", "entity": "OrdenCompra", "report": "MontoComprado", "label": "Monto comprado (moneda base)" },
+              { "type": "chart", "entity": "Requisicion", "report": "PorEstado" },
+              { "type": "chart", "entity": "OrdenCompra", "report": "ComprasPorMes", "wide": true },
+              { "type": "chart", "entity": "OrdenCompra", "report": "ComprasPorProveedor", "measure": 1, "wide": true },
+              { "type": "table", "entity": "OrdenCompraPartida", "report": "ProductosMasComprados", "wide": true }
+            ] } }
       ] } }
   ],
   "roles": [    { "name": "Solicitante", "description": "Crea y envía requisiciones de compra.", "canManageModel": false, "canManageUsers": false, "canViewAudit": false,

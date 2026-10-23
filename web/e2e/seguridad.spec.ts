@@ -452,6 +452,6 @@ test('H4 CA3: el almacenista no ve precios ni importes de la orden; el comprador
   await page.goto(`/c/OrdenCompra/${oc.id}`);
   await expect(page.getByRole('columnheader', { name: 'Cantidad' })).toBeVisible();
   await expect(page.getByRole('columnheader', { name: 'Precio unitario' })).toHaveCount(0);
-  await expect(page.getByText('Total MXN')).toHaveCount(0);
+  await expect(page.getByText('Total en moneda base')).toHaveCount(0); // Compras 1.6.0: antes «Total MXN»
   await page.context().close();
 });

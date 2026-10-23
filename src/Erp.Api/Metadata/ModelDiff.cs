@@ -47,7 +47,7 @@ public static class ModelDiff
             creates.Add(new CreateEntityOp
             {
                 Name = d.Name, Label = d.Label, LabelPlural = d.LabelPlural, Icon = d.Icon, Description = d.Description,
-                DisplayField = d.DisplayField, Group = d.Group,
+                DisplayField = d.DisplayField, Group = d.Group, PerCompany = d.PerCompany,
                 Fields = fields.Where(f => !Later(f)).Select(Clean).ToList(),
             });
             adds.AddRange(fields.Where(Later).Select(f => new AddFieldOp { Entity = d.Name, Field = Clean(f) }));
@@ -67,6 +67,9 @@ public static class ModelDiff
                               $"{(t.IsChild ? $"partida de {t.ParentEntity}" : "un catálogo")} en este entorno.");
                 continue;
             }
+            // Spec 010: pasar a un registro por empresa es un cambio; volver a compartido no tiene operación.
+            if (t.PerCompany && !d.PerCompany)
+                conflicts.Add($"«{d.Label}» es por empresa en este entorno y compartido en el paquete: un catálogo por empresa no vuelve a ser compartido.");
             if (EntityChange(d, t, warnings) is { } ue) updates.Add(ue);
 
             foreach (var df in d.ActiveFields.Where(f => f.Type != FieldTypes.State))
@@ -209,8 +212,9 @@ public static class ModelDiff
             Description = !StrEq(d.Description, t.Description) ? d.Description ?? "" : null,
             DisplayField = displayField,
             Group = !StrEq(d.Group, t.Group) ? d.Group ?? "" : null,
+            PerCompany = d.PerCompany && !t.PerCompany ? true : null,
         };
-        return op is { Label: null, LabelPlural: null, Icon: null, Description: null, DisplayField: null, Group: null } ? null : op;
+        return op is { Label: null, LabelPlural: null, Icon: null, Description: null, DisplayField: null, Group: null, PerCompany: null } ? null : op;
     }
 
     /// <summary>Lo que <c>updateField</c> no puede cambiar.</summary>

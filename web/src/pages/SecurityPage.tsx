@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { KeyRound, Pencil, Plus, ShieldCheck, UserPlus, Users } from 'lucide-react';
 import { ApiError, fieldError } from '../api/client';
-import { adminApi, modelApi, type RoleInput } from '../api/endpoints';
-import type { EntityDef, EntityPermission, Role, User } from '../api/types';
+import { adminApi, companiesApi, modelApi, type RoleInput } from '../api/endpoints';
+import type { Company, EntityDef, EntityPermission, Role, User } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { Dialog } from '../components/Dialog';
 import { useToast } from '../components/Toast';
@@ -14,7 +14,7 @@ type Tab = 'users' | 'roles';
 
 /* ----------------------------- Users ----------------------------- */
 
-function UserDialog({ user, roles, open, onClose, onSaved }: { user: User | null; roles: Role[]; open: boolean; onClose: () => void; onSaved: () => void }) {
+function UserDialog({ user, roles, companies, open, onClose, onSaved }: { user: User | null; roles: Role[]; companies: Company[]; open: boolean; onClose: () => void; onSaved: () => void }) {
   const toast = useToast();
   const isNew = !user;
   const [username, setUsername] = useState('');
@@ -24,6 +24,9 @@ function UserDialog({ user, roles, open, onClose, onSaved }: { user: User | null
   const [roleIds, setRoleIds] = useState<number[]>([]);
   const [unit, setUnit] = useState('');
   const [units, setUnits] = useState<string[]>([]);
+  const [companyIds, setCompanyIds] = useState<number[]>([]);
+  // Spec 010: con una sola empresa no hay nada que elegir (el servidor asigna la predeterminada).
+  const pickCompanies = companies.length > 1;
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
   const [local, setLocal] = useState<Record<string, string>>({});
@@ -36,11 +39,12 @@ function UserDialog({ user, roles, open, onClose, onSaved }: { user: User | null
     setIsActive(user?.isActive ?? true);
     setRoleIds(user?.roleIds ?? []);
     setUnit(user?.unit ?? '');
+    setCompanyIds(user?.companyIds ?? companies.filter((c) => c.isDefault).map((c) => c.id));
     setError(null);
     setLocal({});
     // Sugerencias: las unidades que ya tienen otros usuarios (evita «Norte» y «norte »).
     adminApi.units().then(setUnits, () => setUnits([]));
-  }, [open, user]);
+  }, [open, user, companies]);
 
   async function save() {
     const e: Record<string, string> = {};
@@ -54,8 +58,9 @@ function UserDialog({ user, roles, open, onClose, onSaved }: { user: User | null
     setError(null);
     try {
       const u = unit.trim() || null;
-      if (isNew) await adminApi.createUser({ username, displayName: displayName.trim(), password, roleIds, isActive, unit: u });
-      else await adminApi.updateUser(user!.id, { displayName: displayName.trim(), isActive, roleIds, password: password || undefined, unit: u });
+      const cs = pickCompanies ? companyIds : undefined;
+      if (isNew) await adminApi.createUser({ username, displayName: displayName.trim(), password, roleIds, isActive, unit: u, companyIds: cs });
+      else await adminApi.updateUser(user!.id, { displayName: displayName.trim(), isActive, roleIds, password: password || undefined, unit: u, companyIds: cs });
       toast.success(isNew ? 'Usuario creado' : 'Usuario actualizado');
       onSaved();
     } catch (err) {
@@ -115,6 +120,20 @@ function UserDialog({ user, roles, open, onClose, onSaved }: { user: User | null
             {roles.length === 0 && <span className="subtle">No hay roles definidos.</span>}
           </div>
         </Field>
+        {pickCompanies && (
+          <Field label="Empresas" error={fe('companyIds')} hint="Las que puede elegir en la barra superior. Sin ninguna no ve ni captura registros de catálogos por empresa.">
+            <div className="stack" style={{ gap: 'var(--space-2)' }}>
+              {companies.map((c) => (
+                <Checkbox
+                  key={c.id}
+                  checked={companyIds.includes(c.id)}
+                  onChange={(v) => setCompanyIds((ids) => (v ? [...ids, c.id] : ids.filter((x) => x !== c.id)))}
+                  label={<>{c.name}<span className="subtle"> · {c.code} · {c.baseCurrency}{c.isActive ? '' : ' · inactiva'}</span></>}
+                />
+              ))}
+            </div>
+          </Field>
+        )}
         <Switch checked={isActive} onChange={setIsActive} label="Usuario activo" />
       </div>
     </Dialog>
@@ -123,9 +142,12 @@ function UserDialog({ user, roles, open, onClose, onSaved }: { user: User | null
 
 function UsersTab({ roles }: { roles: Role[] }) {
   const { data, loading, error, reload } = useAsync<User[]>(() => adminApi.users(), []);
+  const { data: companies } = useAsync<Company[]>((s) => companiesApi.list(s), []);
   const [editing, setEditing] = useState<User | null>(null);
   const [open, setOpen] = useState(false);
   const roleName = (id: number) => roles.find((r) => r.id === id)?.name ?? `#${id}`;
+  const companyNames = (ids: number[]) => (companies ?? []).filter((c) => ids.includes(c.id)).map((c) => c.name).join(', ');
+  const manyCompanies = (companies?.length ?? 0) > 1;
 
   return (
     <>
@@ -151,6 +173,7 @@ function UsersTab({ roles }: { roles: Role[] }) {
                           <div>
                             <div style={{ fontWeight: 500 }}>{u.displayName}</div>
                             <div className="subtle"><span className="mono">{u.username}</span>{u.unit && <> · {u.unit}</>}</div>
+                            {manyCompanies && <div className="subtle" style={{ fontSize: 'var(--text-sm)' }}>{companyNames(u.companyIds) || 'Sin empresa'}</div>}
                           </div>
                         </div>
                       </td>
@@ -174,7 +197,7 @@ function UsersTab({ roles }: { roles: Role[] }) {
           </div>
         </div>
       )}
-      <UserDialog open={open} user={editing} roles={roles} onClose={() => setOpen(false)} onSaved={() => { setOpen(false); reload(); }} />
+      <UserDialog open={open} user={editing} roles={roles} companies={companies ?? []} onClose={() => setOpen(false)} onSaved={() => { setOpen(false); reload(); }} />
     </>
   );
 }

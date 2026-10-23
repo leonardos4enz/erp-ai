@@ -141,9 +141,9 @@ public sealed partial class ModuleService(Db db, MetadataStore store, PlanServic
             var keyField = e.FindField(s.Key) ?? throw new AppException(400, $"'{s.Key}' no es un campo de {e.Name}.");
             foreach (var rec in s.Records)
             {
-                var resolved = await ResolveRefsAsync(cn, tx, model, rec);
+                var resolved = await ResolveRefsAsync(cn, tx, model, rec, user.Company?.Id);
                 var keyValue = resolved[keyField.Name]?.ToString();
-                if (keyValue is not null && await ExistsAsync(cn, tx, e, keyField, keyValue)) continue;
+                if (keyValue is not null && await ExistsAsync(cn, tx, e, keyField, keyValue, user.Company?.Id)) continue;
                 using var doc = JsonDocument.Parse(resolved.ToJsonString());
                 await records.CreateInTransactionAsync(cn, tx, e, model, doc.RootElement, user, http, ct);
                 seeded++;
@@ -237,8 +237,12 @@ public sealed partial class ModuleService(Db db, MetadataStore store, PlanServic
         return await cn.ExecuteScalarAsync<string?>("SELECT Version FROM meta.Module WHERE Id = @id", new { id });
     }
 
-    /// <summary>Reemplaza <c>{ "$ref": "Entidad", "Campo": valor }</c> por el id del registro correspondiente.</summary>
-    private static async Task<JsonObject> ResolveRefsAsync(SqlConnection cn, SqlTransaction tx, IReadOnlyDictionary<string, EntityDef> model, JsonObject rec)
+    /// <summary>
+    /// Reemplaza <c>{ "$ref": "Entidad", "Campo": valor }</c> por el id del registro correspondiente. Spec 010: en un catálogo
+    /// por empresa, el de la empresa de quien instala (los datos iniciales se crean en ella).
+    /// </summary>
+    private static async Task<JsonObject> ResolveRefsAsync(SqlConnection cn, SqlTransaction tx, IReadOnlyDictionary<string, EntityDef> model, JsonObject rec,
+        int? companyId)
     {
         var result = new JsonObject();
         foreach (var (name, node) in rec)
@@ -249,8 +253,9 @@ public sealed partial class ModuleService(Db db, MetadataStore store, PlanServic
                 var (keyName, keyNode) = obj.First(kv => kv.Key != "$ref");
                 var keyField = target.FindField(keyName) ?? throw new AppException(400, $"'{keyName}' no es un campo de {target.Name}.");
                 await using var cmd = new SqlCommand(
-                    $"SELECT TOP 1 [Id] FROM {AppTable(target.Name)} WHERE {Quote(keyField.Name)} = @v AND [IsDeleted] = 0", cn, tx);
+                    $"SELECT TOP 1 [Id] FROM {AppTable(target.Name)} WHERE {Quote(keyField.Name)} = @v AND [IsDeleted] = 0{CompanySql(target)}", cn, tx);
                 cmd.Parameters.Add(new SqlParameter("@v", keyNode!.ToString()));
+                if (target.PerCompany) cmd.Parameters.Add(new SqlParameter("@company", companyId ?? 0));
                 var refId = await cmd.ExecuteScalarAsync() ?? throw new AppException(400, $"No se encontró {target.Name} con {keyName} = {keyNode}.");
                 result[name] = (long)refId;
             }
@@ -259,10 +264,13 @@ public sealed partial class ModuleService(Db db, MetadataStore store, PlanServic
         return result;
     }
 
-    private static async Task<bool> ExistsAsync(SqlConnection cn, SqlTransaction tx, EntityDef e, FieldDef key, string value)
+    private static async Task<bool> ExistsAsync(SqlConnection cn, SqlTransaction tx, EntityDef e, FieldDef key, string value, int? companyId)
     {
-        await using var cmd = new SqlCommand($"SELECT TOP 1 1 FROM {AppTable(e.Name)} WHERE {Quote(key.Name)} = @v AND [IsDeleted] = 0", cn, tx);
+        await using var cmd = new SqlCommand($"SELECT TOP 1 1 FROM {AppTable(e.Name)} WHERE {Quote(key.Name)} = @v AND [IsDeleted] = 0{CompanySql(e)}", cn, tx);
         cmd.Parameters.Add(new SqlParameter("@v", value));
+        if (e.PerCompany) cmd.Parameters.Add(new SqlParameter("@company", companyId ?? 0));
         return await cmd.ExecuteScalarAsync() is not null;
     }
+
+    private static string CompanySql(EntityDef e) => e.PerCompany ? $" AND {Quote(DdlGenerator.CompanyColumn)} = @company" : "";
 }

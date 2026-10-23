@@ -151,13 +151,13 @@ public sealed class PlanService(Db db, MetadataStore store, JsonSerializerOption
             WHEN MATCHED THEN UPDATE SET Label = @Label, LabelPlural = @LabelPlural, Icon = @Icon,
                 Description = @Description, DisplayField = @DisplayField, IsArchived = @IsArchived,
                 WorkflowJson = @WorkflowJson, RulesJson = @RulesJson, GroupName = @Group, AutomationsJson = @AutomationsJson, SecurityJson = @SecurityJson,
-                LayoutJson = @LayoutJson, ViewsJson = @ViewsJson, ReportsJson = @ReportsJson, WebhooksJson = @WebhooksJson, UpdatedAt = SYSUTCDATETIME()
-            WHEN NOT MATCHED THEN INSERT (Name, Label, LabelPlural, Icon, Description, DisplayField, IsArchived, WorkflowJson, RulesJson, GroupName, AutomationsJson, SecurityJson, LayoutJson, ViewsJson, ReportsJson, WebhooksJson)
-                VALUES (@Name, @Label, @LabelPlural, @Icon, @Description, @DisplayField, @IsArchived, @WorkflowJson, @RulesJson, @Group, @AutomationsJson, @SecurityJson, @LayoutJson, @ViewsJson, @ReportsJson, @WebhooksJson)
+                LayoutJson = @LayoutJson, ViewsJson = @ViewsJson, ReportsJson = @ReportsJson, WebhooksJson = @WebhooksJson, PerCompany = @PerCompany, UpdatedAt = SYSUTCDATETIME()
+            WHEN NOT MATCHED THEN INSERT (Name, Label, LabelPlural, Icon, Description, DisplayField, IsArchived, WorkflowJson, RulesJson, GroupName, AutomationsJson, SecurityJson, LayoutJson, ViewsJson, ReportsJson, WebhooksJson, PerCompany)
+                VALUES (@Name, @Label, @LabelPlural, @Icon, @Description, @DisplayField, @IsArchived, @WorkflowJson, @RulesJson, @Group, @AutomationsJson, @SecurityJson, @LayoutJson, @ViewsJson, @ReportsJson, @WebhooksJson, @PerCompany)
             OUTPUT inserted.Id;
             """, new
         {
-            e.Name, e.Label, e.LabelPlural, e.Icon, e.Description, e.DisplayField, e.IsArchived, e.Group,
+            e.Name, e.Label, e.LabelPlural, e.Icon, e.Description, e.DisplayField, e.IsArchived, e.Group, e.PerCompany,
             WorkflowJson = e.Workflow is null ? null : JsonSerializer.Serialize(e.Workflow, MetadataStore.Json),
             RulesJson = e.Rules is null ? null : JsonSerializer.Serialize(e.Rules, MetadataStore.Json),
             AutomationsJson = e.Automations is null ? null : JsonSerializer.Serialize(e.Automations, MetadataStore.Json),

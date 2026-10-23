@@ -47,6 +47,16 @@ public static class Bootstrap
                 VALUES (N'Usuario', N'Captura de información según permisos por catálogo.', 1, 0, 0, 0, 0);
             """);
 
+        // Spec 010: toda instalación tiene una empresa predeterminada, y todo usuario sin empresas queda en ella. Así una
+        // base existente sigue igual: sus registros pasan a esa empresa cuando un catálogo se vuelve «por empresa».
+        await cn.ExecuteAsync("""
+            IF NOT EXISTS (SELECT 1 FROM meta.Company)
+                INSERT meta.Company (Code, Name, BaseCurrency, IsDefault) VALUES (N'PRINCIPAL', N'Empresa principal', @currency, 1);
+            INSERT meta.UserCompany (UserId, CompanyId)
+                SELECT u.Id, c.Id FROM meta.[User] u CROSS JOIN meta.Company c
+                 WHERE c.IsDefault = 1 AND NOT EXISTS (SELECT 1 FROM meta.UserCompany uc WHERE uc.UserId = u.Id);
+            """, new { currency = DefaultCurrency(config) });
+
         if (await cn.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM meta.[User]") > 0) return;
 
         var configured = config["Bootstrap:AdminPassword"];
@@ -59,12 +69,20 @@ public static class Bootstrap
             OUTPUT inserted.Id VALUES (N'admin', N'Administrador', @hash);
             """, new { hash = passwords.Hash(password) });
         await cn.ExecuteAsync("INSERT meta.UserRole (UserId, RoleId) SELECT @id, Id FROM meta.Role WHERE Name = N'Administrador'", new { id });
+        await cn.ExecuteAsync("INSERT meta.UserCompany (UserId, CompanyId) SELECT @id, Id FROM meta.Company WHERE IsDefault = 1", new { id });
 
         if (string.IsNullOrEmpty(configured))
             // Se muestra una única vez en la consola local. Cámbiala al entrar.
             log.LogWarning("Usuario inicial creado: admin  /  contraseña: {Password}  (solo se muestra esta vez)", password);
         else
             log.LogInformation("Usuario inicial 'admin' creado con la contraseña configurada.");
+    }
+
+    /// <summary>Moneda base de la empresa predeterminada al crearla (código ISO de 3 letras).</summary>
+    private static string DefaultCurrency(IConfiguration config)
+    {
+        var c = (config["Companies:DefaultCurrency"] ?? "MXN").Trim().ToUpperInvariant();
+        return Companies.IsCurrency(c) ? c : throw new InvalidOperationException("Companies:DefaultCurrency debe ser un código ISO de 3 letras.");
     }
 
     private static string GeneratePassword()
@@ -355,6 +373,43 @@ public static class Bootstrap
             EntitiesJson nvarchar(max) NOT NULL,
             ExportedBy int NOT NULL REFERENCES meta.[User](Id),
             ExportedAt datetime2(3) NOT NULL DEFAULT SYSUTCDATETIME()
+        );
+
+        -- Spec 010: empresas, empresa actual de cada usuario, tipos de cambio y catálogos por empresa.
+        IF COL_LENGTH('meta.Entity', 'PerCompany') IS NULL ALTER TABLE meta.Entity ADD PerCompany bit NOT NULL CONSTRAINT DF_Entity_PerCompany DEFAULT 0;
+
+        IF OBJECT_ID('meta.Company') IS NULL
+        CREATE TABLE meta.Company (
+            Id int IDENTITY PRIMARY KEY,
+            Code nvarchar(20) NOT NULL CONSTRAINT UX_Company_Code UNIQUE,
+            Name nvarchar(150) NOT NULL,
+            BaseCurrency char(3) NOT NULL,
+            IsDefault bit NOT NULL DEFAULT 0,
+            IsActive bit NOT NULL DEFAULT 1,
+            CreatedAt datetime2(3) NOT NULL DEFAULT SYSUTCDATETIME(),
+            UpdatedAt datetime2(3) NULL
+        );
+
+        IF OBJECT_ID('meta.UserCompany') IS NULL
+        CREATE TABLE meta.UserCompany (
+            UserId int NOT NULL REFERENCES meta.[User](Id),
+            CompanyId int NOT NULL REFERENCES meta.Company(Id),
+            PRIMARY KEY (UserId, CompanyId)
+        );
+
+        IF COL_LENGTH('meta.[User]', 'CompanyId') IS NULL
+            ALTER TABLE meta.[User] ADD CompanyId int NULL CONSTRAINT FK_User_Company REFERENCES meta.Company(Id);
+
+        IF OBJECT_ID('meta.ExchangeRate') IS NULL
+        CREATE TABLE meta.ExchangeRate (
+            Id int IDENTITY PRIMARY KEY,
+            FromCurrency char(3) NOT NULL,
+            ToCurrency char(3) NOT NULL,
+            RateDate date NOT NULL,
+            Rate decimal(19,8) NOT NULL,
+            UpdatedBy int NOT NULL REFERENCES meta.[User](Id),
+            UpdatedAt datetime2(3) NOT NULL DEFAULT SYSUTCDATETIME(),
+            CONSTRAINT UX_ExchangeRate_Pair UNIQUE (FromCurrency, ToCurrency, RateDate)
         );
 
         -- Constitución II.4: la auditoría es de solo inserción, incluso para la propia aplicación.

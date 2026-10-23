@@ -15,8 +15,8 @@ en orden, no en paralelo: casi todas tocan el núcleo del motor (`PlanCompiler`,
 | 007 Vistas, layouts, reportes | Implementado ([spec](specs/007-metadatos-interfaz/spec.md)) |
 | 008 Integraciones | Implementado ([spec](specs/008-integraciones/spec.md)) |
 | 009 Entornos | Implementado ([spec](specs/009-entornos/spec.md)) |
-| 010 Multi-empresa / multi-moneda | **Siguiente** |
-| 011 Asistente IA | Pendiente |
+| 010 Multi-empresa / multi-moneda | Implementado ([spec](specs/010-multi-empresa-moneda/spec.md)) |
+| 011 Asistente IA | **Siguiente** |
 
 ## Diagnóstico
 | Brecha señalada | Situación actual | Spec |
@@ -26,7 +26,7 @@ en orden, no en paralelo: casi todas tocan el núcleo del motor (`PlanCompiler`,
 | Metadatos de interfaz | ~~El formulario se deriva del orden de los campos~~ Resuelto en la 007: layouts con secciones, pestañas y visibilidad condicional; vistas compartidas y personales; reportes exportables; tableros; todo con la seguridad de la 006 en el servidor | **007** |
 | Integraciones y webhooks | ~~No existen~~ Resuelto en la 008: webhooks firmados con bandeja transaccional y reintentos, claves de API por rol con rotación, importación masiva por el motor y exportación de listados, todo con la seguridad de la 006 | **008** |
 | Entornos (sandbox → producción) | ~~No se exporta lo hecho en el modelador~~ Resuelto en la 009: paquetes exportados con el formato de los módulos, firmados, con diff contra el destino (plan mínimo por el Plan de Cambios), aplicación versionada y aprobación de otro administrador en producción | **009** |
-| Multi-empresa y multi-moneda real | Una sola empresa; el tipo de cambio se captura a mano | **010** |
+| Multi-empresa y multi-moneda real | ~~Una sola empresa; el tipo de cambio se captura a mano~~ Resuelto en la 010: empresas con moneda base, catálogos compartidos o por empresa (filtro en el servidor junto con la 006, también para el superusuario), tipos de cambio por fecha y `RATE`/`CONVERT`/`BASECURRENCY()` en fórmulas | **010** |
 | Extensión con código | Prohibida por la constitución (I.1), a propósito | Decisión abajo |
 
 ## Orden y razón
@@ -83,6 +83,10 @@ en orden, no en paralelo: casi todas tocan el núcleo del motor (`PlanCompiler`,
 ### 010 — Multi-empresa y multi-moneda
 - Empresa como dimensión de seguridad por registro (requiere 006), con catálogos compartidos o por empresa.
 - Moneda base por empresa, tipos de cambio por fecha y conversión automática en fórmulas.
+- Implementado. `perCompany` es metadato (viaja en paquetes y el diff lo compara); empresas, empresas de cada usuario y
+  tipos de cambio son datos del entorno. Para la 011: la IA puede proponer `perCompany` y fórmulas con `RATE`/`CONVERT`
+  como cualquier metadato; no debe proponer datos del entorno (empresas, tipos de cambio). Pendiente: series de folios
+  por empresa, consolidación entre empresas, rol de finanzas para capturar tipos de cambio y carga automática.
 
 ### 011 — Asistente IA (MiniMax)
 Va al final a propósito: la IA solo propone planes de cambios, y cuanto más completo sea el lenguaje

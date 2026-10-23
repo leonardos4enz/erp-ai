@@ -30,9 +30,10 @@ public sealed partial class RecordService
         var state = draft.Header.GetValueOrDefault(Workflow.StateField) as string;
         foreach (var h in hooks)
         {
-            if (h.When is not null && !Expressions.ExprEvaluator.Test(h.When, HeaderScope(draft, e, c.Model, loader), Env(c.User, draft), whenNull: false))
+            if (h.When is not null && !Expressions.ExprEvaluator.Test(h.When, HeaderScope(draft, e, c.Model, loader), Env(c.User, draft, loader), whenNull: false))
                 continue;
-            var service = await ServiceRole.LoadAsync(c.Cn, c.Tx, h.Role);
+            // Spec 010: la carga se arma en la empresa del evento (la de quien lo disparó).
+            var service = await ServiceRole.LoadAsync(c.Cn, c.Tx, h.Role, c.User.Company);
             // El rol debe poder leer el catálogo y el registro; si no, no sale nada.
             if (!service.Access(e.Name).Read) continue;
             if (RecordFilter.For(e, service, write: false) is { } scope && !await MatchesAsync(c.Cn, c.Tx, e, id, scope, c.Ct)) continue;

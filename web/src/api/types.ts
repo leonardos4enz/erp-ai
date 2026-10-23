@@ -275,6 +275,8 @@ export interface EntityDef {
   reports?: ReportDef[] | null;
   /** Spec 008: solo la reciben los modeladores. */
   webhooks?: WebhookDef[] | null;
+  /** Spec 010: un registro por empresa (las partidas siguen a su documento). */
+  perCompany?: boolean;
   isChild?: boolean;
   parentEntity?: string;
 }
@@ -292,11 +294,19 @@ export interface Me {
   canViewAudit: boolean;
   entities: Record<string, EntityPerms>;
   unit?: string | null;
+  /** Spec 010: empresa en la que trabaja y las que puede elegir. */
+  company?: CompanyInfo | null;
+  companies: CompanyInfo[];
 }
 
+/** Spec 010: empresa del entorno (dato, no metadato). */
+export interface CompanyInfo { id: number; code: string; name: string; baseCurrency: string }
+export interface Company extends CompanyInfo { isDefault: boolean; isActive: boolean; users: number }
+export interface ExchangeRate { id: number; from: string; to: string; date: string; rate: number; updatedBy: string; updatedAt: string }
+
 export type Operation =
-  | { op: 'createEntity'; name: string; label: string; labelPlural: string; icon?: string; description?: string; displayField?: string; group?: string; fields: FieldDef[] }
-  | { op: 'updateEntity'; entity: string; label?: string; labelPlural?: string; icon?: string; description?: string; displayField?: string; group?: string }
+  | { op: 'createEntity'; name: string; label: string; labelPlural: string; icon?: string; description?: string; displayField?: string; group?: string; perCompany?: boolean; fields: FieldDef[] }
+  | { op: 'updateEntity'; entity: string; label?: string; labelPlural?: string; icon?: string; description?: string; displayField?: string; group?: string; perCompany?: boolean }
   | { op: 'archiveEntity'; entity: string }
   | { op: 'addField'; entity: string; field: FieldDef }
   | { op: 'updateField'; entity: string; field: string; label?: string; required?: boolean; showInList?: boolean; options?: string[]; requiredForRoles?: string[]; displayOrder?: number; defaultValue?: string; formula?: string; editable?: boolean; lookupFilter?: { field: string; source: string } }
@@ -426,6 +436,8 @@ export interface User {
   /** Spec 006: unidad (área o sucursal) para el alcance «de mi unidad». */
   unit?: string | null;
   lockoutEnd?: string | null;
+  /** Spec 010: empresas que puede elegir. */
+  companyIds: number[];
 }
 
 export interface AuditEntry {

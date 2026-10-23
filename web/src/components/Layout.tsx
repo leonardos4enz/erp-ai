@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
-  BarChart3, Blocks, ChevronRight, Gauge, GitCompareArrows, History, LayoutDashboard, LogOut, Moon, PanelLeftClose, PanelLeftOpen,
+  BarChart3, Blocks, Building2, Check, ChevronDown, ChevronRight, Gauge, GitCompareArrows, History, LayoutDashboard, LogOut, Moon, PanelLeftClose, PanelLeftOpen,
   ShieldCheck, Sun, Webhook, Workflow,
 } from 'lucide-react';
 import { dashboardsApi, reportsApi } from '../api/endpoints';
@@ -57,7 +57,7 @@ function useBreadcrumb(): { label: string; to?: string }[] {
     if (parts[1]) crumbs.push({ label: reports ? 'Reporte' : decodeURIComponent(parts[1]) });
   } else if (parts[0] === 'admin') {
     crumbs.push({ label: 'Configuración' });
-    const map: Record<string, string> = { model: 'Modelador', security: 'Usuarios y roles', audit: 'Auditoría', modules: 'Módulos', integrations: 'Integraciones', environments: 'Entornos' };
+    const map: Record<string, string> = { model: 'Modelador', security: 'Usuarios y roles', audit: 'Auditoría', modules: 'Módulos', integrations: 'Integraciones', environments: 'Entornos', companies: 'Empresas' };
     if (parts[1]) crumbs.push({ label: map[parts[1]] ?? parts[1] });
   }
   return crumbs;
@@ -89,6 +89,11 @@ function UserMenu() {
           <div className="menu-header">
             <div style={{ fontWeight: 500 }}>{me.displayName}</div>
             <div className="subtle" style={{ fontSize: 'var(--text-sm)' }}>{me.username}{me.roles.length ? ` · ${me.roles.join(', ')}` : ''}</div>
+            {me.company && (
+              <div className="subtle row" style={{ fontSize: 'var(--text-sm)', gap: 6, marginTop: 2 }}>
+                <Building2 size={13} aria-hidden /> {me.company.name} · {me.company.baseCurrency}
+              </div>
+            )}
           </div>
           <button
             className="menu-item"
@@ -97,6 +102,91 @@ function UserMenu() {
           >
             <LogOut size={15} aria-hidden /> Cerrar sesión
           </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Spec 010: empresa actual y cambio de empresa. Solo aparece con dos o más empresas: quien trabaja en una sola no ve
+ * nada nuevo. Al cambiar, el servidor valida la elección y la página se vuelve a montar con los datos de la otra empresa.
+ */
+function CompanySwitcher() {
+  const { me, switchCompany } = useAuth();
+  const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const ref = useRef<HTMLDivElement>(null);
+  const button = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    // El foco entra a la opción actual para poder elegir con las flechas.
+    ref.current?.querySelector<HTMLElement>('[aria-checked="true"]')?.focus();
+    const onDoc = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { setOpen(false); button.current?.focus(); return; }
+      if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+      e.preventDefault();
+      const items = [...(ref.current?.querySelectorAll<HTMLElement>('[role="menuitemradio"]') ?? [])];
+      const i = items.indexOf(document.activeElement as HTMLElement);
+      items[(i + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length]?.focus();
+    };
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('mousedown', onDoc); document.removeEventListener('keydown', onKey); };
+  }, [open]);
+
+  if (!me || me.companies.length < 2) return null;
+  const current = me.company;
+
+  const choose = async (id: number) => {
+    setOpen(false);
+    if (id === current?.id) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await switchCompany(id);
+      navigate('/');
+    } catch {
+      setError('No se pudo cambiar de empresa. Recarga la página e intenta de nuevo.');
+    } finally {
+      setBusy(false);
+      button.current?.focus();
+    }
+  };
+
+  return (
+    <div className="menu-anchor" ref={ref}>
+      <button
+        ref={button}
+        className="company-btn"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={`Empresa: ${current?.name ?? 'ninguna'}. Cambiar de empresa`}
+        title={current ? `${current.name} · ${current.baseCurrency}` : undefined}
+        disabled={busy}
+        onClick={() => setOpen((o) => !o)}
+      >
+        <Building2 size={16} aria-hidden />
+        <span className="company-name">{current?.name ?? 'Sin empresa'}</span>
+        <ChevronDown size={14} aria-hidden />
+      </button>
+      {error && <span className="sr-only" role="alert">{error}</span>}
+      {open && (
+        <div className="menu" role="menu" aria-label="Empresas">
+          <div className="menu-header subtle" style={{ fontSize: 'var(--text-sm)' }}>Trabajar en</div>
+          {me.companies.map((c) => (
+            <button key={c.id} className="menu-item" role="menuitemradio" aria-checked={c.id === current?.id} onClick={() => void choose(c.id)}>
+              <span className="grow" style={{ minWidth: 0 }}>
+                <span style={{ display: 'block', fontWeight: c.id === current?.id ? 500 : undefined }}>{c.name}</span>
+                <span className="subtle" style={{ fontSize: 'var(--text-xs)' }}>{c.code} · {c.baseCurrency}</span>
+              </span>
+              {c.id === current?.id && <Check size={15} aria-hidden />}
+            </button>
+          ))}
         </div>
       )}
     </div>
@@ -223,6 +313,11 @@ export function Layout() {
                   <GitCompareArrows size={17} aria-hidden /><span>Entornos</span>
                 </NavLink>
               )}
+              {me?.isSuperuser && (
+                <NavLink to="/admin/companies" className="nav-link" title="Empresas">
+                  <Building2 size={17} aria-hidden /><span>Empresas</span>
+                </NavLink>
+              )}
             </div>
           )}
           {/* Al final: no empuja «Configuración» fuera de la pantalla (regresión de la revisión exploratoria 003). */}
@@ -265,11 +360,13 @@ export function Layout() {
             ))}
           </nav>
           <div className="spacer" />
+          <CompanySwitcher />
           <Button variant="ghost" size="sm" iconOnly icon={theme === 'dark' ? Sun : Moon} aria-label={theme === 'dark' ? 'Usar tema claro' : 'Usar tema oscuro'} onClick={toggle} />
           <UserMenu />
         </header>
         <main className="content" id="main">
-          <Outlet />
+          {/* Spec 010: al cambiar de empresa la página se vuelve a montar (y vuelve a pedir sus datos). */}
+          <Outlet key={me?.company?.id ?? 0} />
         </main>
       </div>
     </div>

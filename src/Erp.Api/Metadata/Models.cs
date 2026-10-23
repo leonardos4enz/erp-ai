@@ -429,6 +429,8 @@ public sealed record EntityDef
     public IReadOnlyList<ReportDef>? Reports { get; init; }
     /// <summary>Spec 008: webhooks salientes (solo se envían a modeladores; el destino se configura por entorno).</summary>
     public IReadOnlyList<WebhookDef>? Webhooks { get; init; }
+    /// <summary>Spec 010: cada registro pertenece a una empresa (columna de sistema <c>CompanyId</c>). Las partidas siguen a su documento.</summary>
+    public bool PerCompany { get; init; }
 
     public bool SystemManaged => Security?.SystemManaged == true;
 
@@ -552,6 +554,8 @@ public sealed record CreateEntityOp : Operation
     public string? Description { get; init; }
     public string? DisplayField { get; init; }
     public string? Group { get; init; }
+    /// <summary>Spec 010: un registro por empresa.</summary>
+    public bool PerCompany { get; init; }
     public IReadOnlyList<FieldDef> Fields { get; init; } = [];
 }
 
@@ -565,6 +569,8 @@ public sealed record UpdateEntityOp : Operation
     public string? DisplayField { get; init; }
     /// <summary>Cadena vacía regresa el catálogo a la sección general.</summary>
     public string? Group { get; init; }
+    /// <summary>Spec 010: solo <c>true</c> (pasar a un registro por empresa); volver a compartido se rechaza.</summary>
+    public bool? PerCompany { get; init; }
 }
 
 public sealed record ArchiveEntityOp : Operation

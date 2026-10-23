@@ -30,6 +30,10 @@ public static class AuditActions
     public const string EnvironmentApprove = "environment.approve";
     public const string EnvironmentReject = "environment.reject";
     public const string EnvironmentApply = "environment.apply";
+    /// <summary>Spec 010: alta o cambio de una empresa; alta, reemplazo o baja de un tipo de cambio; cambio de empresa actual.</summary>
+    public const string CompanyChange = "company.change";
+    public const string RateChange = "rate.change";
+    public const string CompanySwitch = "user.company";
 }
 
 public static class Audit

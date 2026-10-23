@@ -266,12 +266,15 @@ public sealed partial class RecordService(Db db, MetadataStore store)
         var (cn, tx, model, user, ct) = (c.Cn, c.Tx, c.Model, c.User, c.Ct);
         var loader = new RelatedLoader(cn, tx, model);
         if (e.Workflow is not null) draft.Header[Workflow.StateField] = e.Workflow.Initial;
-        var env = Env(user, draft);
+        // Spec 010: el registro es de la empresa actual de quien lo crea (en una automatización, de quien disparó el evento).
+        int? company = !e.PerCompany ? null : user.Company?.Id
+            ?? throw new Forbidden($"No tienes una empresa asignada: pide al administrador una para capturar {e.LabelPlural.ToLowerInvariant()}.");
+        var env = Env(user, draft, loader);
         Compute(draft, e, model, loader, env);
         Validate(draft, e, model, loader, env, user);
 
         await AssignFoliosAsync(cn, tx, e, draft, ct);
-        var id = await InsertAsync(cn, tx, e, draft.Header, extra: null, user.Id, ct);
+        var id = await InsertAsync(cn, tx, e, draft.Header, extra: null, user.Id, ct, company);
         await SaveLinesAsync(cn, tx, e, model, id, draft, existing: null, user.Id, ct);
         if (e.Workflow is not null)
             await WriteHistoryAsync(cn, tx, e, id, null, e.Workflow.Initial, null, null, user.Id, ct);
@@ -300,7 +303,7 @@ public sealed partial class RecordService(Db db, MetadataStore store)
             throw new AppException(StatusCodes.Status409Conflict, $"El documento está en estado «{st.Label}» y ya no se puede editar.");
 
         await ParseIntoAsync(draft, e, model, body, loader, lenient: false, ct, new Writer(user, stateName));
-        var env = Env(user, draft);
+        var env = Env(user, draft, loader);
         Compute(draft, e, model, loader, env);
         Validate(draft, e, model, loader, env, user);
 
@@ -329,7 +332,7 @@ public sealed partial class RecordService(Db db, MetadataStore store)
         if (id is null && e.Workflow is not null) draft.Header[Workflow.StateField] = e.Workflow.Initial;
         await ParseIntoAsync(draft, e, model, values, loader, lenient: true, ct,
             new Writer(user, draft.Header.GetValueOrDefault(Workflow.StateField) as string));
-        var env = Env(user, draft);
+        var env = Env(user, draft, loader);
         Compute(draft, e, model, loader, env);
         var row = await FormatDraftAsync(cn, e, model, draft, ct);
         FieldAccess.Strip(e, row, user, model);
@@ -355,7 +358,7 @@ public sealed partial class RecordService(Db db, MetadataStore store)
         var loader = new RelatedLoader(cn, tx, model);
         var draft = await LoadDraftAsync(cn, tx, e, model, id, ct) ?? throw new NotFound("El registro no existe.");
         var before = Snapshot(draft);
-        var env = Env(user, draft);
+        var env = Env(user, draft, loader);
 
         var (allowed, reason, missingRole) = CanTransition(e, t, draft, model, loader, env, user);
         if (!allowed) throw missingRole ? new Forbidden(reason!) : new AppException(400, reason!);
@@ -399,7 +402,7 @@ public sealed partial class RecordService(Db db, MetadataStore store)
         WorkflowTransition t, string? comment, byte[]? rowVersion)
     {
         var loader = new RelatedLoader(c.Cn, c.Tx, c.Model);
-        var env = Env(c.User, draft);
+        var env = Env(c.User, draft, loader);
         var from = draft.Header.GetValueOrDefault(Workflow.StateField) as string;
         draft.Header[Workflow.StateField] = t.To;
         var scope = HeaderScope(draft, e, c.Model, loader);
@@ -461,7 +464,11 @@ public sealed partial class RecordService(Db db, MetadataStore store)
         return (e, await store.GetAsync(ct));
     }
 
-    private static ExprEnv Env(UserContext user, DocDraft draft) => new(user.Id, user.Roles, draft.CreatorId, user.Unit);
+    /// <summary>Spec 010: la empresa del contexto es la actual del usuario, que es la del registro (no ve los de otras).</summary>
+    private static ExprEnv Env(UserContext user, DocDraft draft, ICurrencyRates rates) => new(user.Id, user.Roles, draft.CreatorId, user.Unit)
+    {
+        Company = user.Company?.Code, BaseCurrency = user.Company?.BaseCurrency, Rates = rates,
+    };
 
     private static DocScope HeaderScope(DocDraft d, EntityDef e, IReadOnlyDictionary<string, EntityDef> model, RelatedLoader loader, Dictionary<string, List<DocScope>>? lineScopes = null)
     {
@@ -808,7 +815,7 @@ public sealed partial class RecordService(Db db, MetadataStore store)
     }
 
     private static async Task<long> InsertAsync(SqlConnection cn, SqlTransaction tx, EntityDef e, Values values,
-        (string Column, object Value)? extra, int userId, CancellationToken ct)
+        (string Column, object Value)? extra, int userId, CancellationToken ct, int? companyId = null)
     {
         await using var cmd = new SqlCommand { Connection = cn, Transaction = tx };
         var cols = new List<string>();
@@ -826,6 +833,12 @@ public sealed partial class RecordService(Db db, MetadataStore store)
             cols.Add(Quote(x.Column));
             pars.Add("@parent");
             cmd.Parameters.Add(new SqlParameter("@parent", x.Value));
+        }
+        if (companyId is { } co)
+        {
+            cols.Add(Quote(DdlGenerator.CompanyColumn));
+            pars.Add("@company");
+            cmd.Parameters.Add(new SqlParameter("@company", co));
         }
         cols.Add("[CreatedBy]");
         pars.Add("@uid");
@@ -932,6 +945,7 @@ public sealed partial class RecordService(Db db, MetadataStore store)
         IReadOnlyDictionary<string, EntityDef> model, long id, CancellationToken ct)
     {
         var cols = e.StoredFields.Select(f => Quote(f.Name)).Prepend("[CreatedBy]").Prepend("[Id]");
+        if (e.PerCompany) cols = cols.Append(Quote(DdlGenerator.CompanyColumn));
         Values? header = null;
         await using (var cmd = new SqlCommand($"SELECT {string.Join(", ", cols)} FROM {AppTable(e.Name)} WHERE [Id] = @id AND [IsDeleted] = 0", cn, tx))
         {
@@ -940,7 +954,9 @@ public sealed partial class RecordService(Db db, MetadataStore store)
             if (await r.ReadAsync(ct)) header = ReadValues(r);
         }
         if (header is null) return null;
-        var draft = new DocDraft { Id = id, CreatorId = header["CreatedBy"] as int?, Header = header };
+        // Spec 010: la empresa no es un campo; va aparte para no llegar a fórmulas, auditoría ni respuestas.
+        int? company = header.Remove(DdlGenerator.CompanyColumn, out var co) ? co as int? : null;
+        var draft = new DocDraft { Id = id, CreatorId = header["CreatedBy"] as int?, CompanyId = company, Header = header };
 
         foreach (var lf in e.ActiveFields.Where(f => f.Type == FieldTypes.Lines))
         {
@@ -998,7 +1014,7 @@ public sealed partial class RecordService(Db db, MetadataStore store)
         {
             var draft = (await LoadDraftAsync(cn, tx, e, model, id, ct))!;
             var loader = new RelatedLoader(cn, tx, model);
-            var env = Env(user, draft);
+            var env = Env(user, draft, loader);
             var stateName = draft.Header.GetValueOrDefault(Workflow.StateField) as string;
             var state = wf.FindState(stateName);
             row["_workflow"] = new
@@ -1022,7 +1038,7 @@ public sealed partial class RecordService(Db db, MetadataStore store)
         {
             var draft = (await LoadDraftAsync(cn, tx, e, model, id, ct))!;
             var loader = new RelatedLoader(cn, tx, model);
-            row["_layout"] = LayoutOutput(EvaluateLayout(e, model, HeaderScope(draft, e, model, loader), Env(user, draft), user));
+            row["_layout"] = LayoutOutput(EvaluateLayout(e, model, HeaderScope(draft, e, model, loader), Env(user, draft, loader), user));
         }
         FieldAccess.Strip(e, row, user, model);
         return row;

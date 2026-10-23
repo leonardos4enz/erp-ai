@@ -17,6 +17,8 @@ public static partial class Identifiers
     public static readonly IReadOnlySet<string> SystemColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
         "Id", "CreatedAt", "CreatedBy", "UpdatedAt", "UpdatedBy", "IsDeleted", "RowVer",
+        // Spec 010: empresa del registro en los catálogos por empresa.
+        "CompanyId",
     };
 
     // Palabras reservadas de T-SQL más comunes; se rechazan aunque se citen, para evitar confusión.

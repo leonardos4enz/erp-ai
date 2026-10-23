@@ -25,6 +25,10 @@ public sealed class UserContext
     public bool CanViewAudit { get; init; }
     /// <summary>Spec 008: cuenta de servicio de una clave de API.</summary>
     public bool IsService { get; init; }
+    /// <summary>Spec 010: empresa en la que trabaja (null si no tiene ninguna activa asignada).</summary>
+    public CompanyInfo? Company { get; init; }
+    /// <summary>Spec 010: empresas activas que puede elegir (el superusuario, todas); la predeterminada primero.</summary>
+    public IReadOnlyList<CompanyInfo> Companies { get; init; } = [];
     public IReadOnlyDictionary<string, EntityAccess> Entities { get; init; } = new Dictionary<string, EntityAccess>();
 
     public EntityAccess Access(string entity) =>
@@ -41,20 +45,22 @@ public sealed class UserContext
 /// </summary>
 public static class ServiceRole
 {
-    public static UserContext User(string role, IReadOnlyDictionary<string, EntityAccess> entities) => new()
+    public static UserContext User(string role, IReadOnlyDictionary<string, EntityAccess> entities, CompanyInfo? company = null) => new()
     {
         Id = 0, Username = $"webhook:{role}", DisplayName = role, SecurityStamp = Guid.Empty,
-        Roles = [role], Entities = entities,
+        Roles = [role], Entities = entities, Company = company, Companies = company is null ? [] : [company],
     };
 
-    public static async Task<UserContext> LoadAsync(System.Data.Common.DbConnection cn, System.Data.Common.DbTransaction? tx, string role)
+    /// <param name="company">Spec 010: la empresa del evento (la de quien lo disparó).</param>
+    public static async Task<UserContext> LoadAsync(System.Data.Common.DbConnection cn, System.Data.Common.DbTransaction? tx, string role,
+        CompanyInfo? company = null)
     {
         var perms = await cn.QueryAsync<(string EntityName, bool CanRead, bool CanCreate, bool CanUpdate, bool CanDelete)>("""
             SELECT p.EntityName, p.CanRead, p.CanCreate, p.CanUpdate, p.CanDelete
               FROM meta.EntityPermission p JOIN meta.Role r ON r.Id = p.RoleId WHERE r.Name = @role
             """, new { role }, tx);
         return User(role, perms.ToDictionary(p => p.EntityName, p => new EntityAccess(p.CanRead, p.CanCreate, p.CanUpdate, p.CanDelete),
-            StringComparer.OrdinalIgnoreCase));
+            StringComparer.OrdinalIgnoreCase), company);
     }
 }
 
@@ -78,7 +84,7 @@ public sealed class UserContextLoader(Db db)
     {
         await using var cn = await db.OpenAsync(ct);
         using var multi = await cn.QueryMultipleAsync("""
-            SELECT Id, Username, DisplayName, SecurityStamp, Unit, IsService FROM meta.[User] WHERE Id = @userId AND IsActive = 1;
+            SELECT Id, Username, DisplayName, SecurityStamp, Unit, IsService, CompanyId FROM meta.[User] WHERE Id = @userId AND IsActive = 1;
             SELECT r.Name, r.IsSuperuser, r.CanManageModel, r.CanManageUsers, r.CanViewAudit
               FROM meta.UserRole ur JOIN meta.Role r ON r.Id = ur.RoleId WHERE ur.UserId = @userId;
             SELECT p.EntityName,
@@ -86,12 +92,19 @@ public sealed class UserContextLoader(Db db)
                    CAST(MAX(CAST(p.CanUpdate AS int)) AS bit) AS CanUpdate, CAST(MAX(CAST(p.CanDelete AS int)) AS bit) AS CanDelete
               FROM meta.UserRole ur JOIN meta.EntityPermission p ON p.RoleId = ur.RoleId
              WHERE ur.UserId = @userId GROUP BY p.EntityName;
+            SELECT c.Id, c.Code, c.Name, c.BaseCurrency,
+                   CAST(CASE WHEN EXISTS (SELECT 1 FROM meta.UserCompany uc WHERE uc.UserId = @userId AND uc.CompanyId = c.Id) THEN 1 ELSE 0 END AS bit) AS Assigned
+              FROM meta.Company c WHERE c.IsActive = 1 ORDER BY c.IsDefault DESC, c.Name;
             """, new { userId });
 
         var user = await multi.ReadSingleOrDefaultAsync<UserRow>();
         if (user is null || user.SecurityStamp != expectedStamp) return null;
         var roles = (await multi.ReadAsync<RoleRow>()).ToList();
         var perms = await multi.ReadAsync<PermRow>();
+        var superuser = roles.Any(r => r.IsSuperuser);
+        // Spec 010: la empresa elegida solo vale mientras siga activa y asignada (el superusuario puede usar cualquiera activa).
+        var companies = (await multi.ReadAsync<CompanyRow>()).Where(c => superuser || c.Assigned)
+            .Select(c => new CompanyInfo(c.Id, c.Code, c.Name, c.BaseCurrency.Trim())).ToList();
 
         return new UserContext
         {
@@ -102,7 +115,9 @@ public sealed class UserContextLoader(Db db)
             IsService = user.IsService,
             SecurityStamp = user.SecurityStamp,
             Roles = roles.Select(r => r.Name).ToList(),
-            IsSuperuser = roles.Any(r => r.IsSuperuser),
+            IsSuperuser = superuser,
+            Companies = companies,
+            Company = companies.FirstOrDefault(c => c.Id == user.CompanyId) ?? companies.FirstOrDefault(),
             CanManageModel = roles.Any(r => r.IsSuperuser || r.CanManageModel),
             CanManageUsers = roles.Any(r => r.IsSuperuser || r.CanManageUsers),
             CanViewAudit = roles.Any(r => r.IsSuperuser || r.CanViewAudit),
@@ -111,7 +126,8 @@ public sealed class UserContextLoader(Db db)
         };
     }
 
-    private sealed record UserRow(int Id, string Username, string DisplayName, Guid SecurityStamp, string? Unit, bool IsService);
+    private sealed record UserRow(int Id, string Username, string DisplayName, Guid SecurityStamp, string? Unit, bool IsService, int? CompanyId);
+    private sealed record CompanyRow(int Id, string Code, string Name, string BaseCurrency, bool Assigned);
     private sealed record RoleRow(string Name, bool IsSuperuser, bool CanManageModel, bool CanManageUsers, bool CanViewAudit);
     private sealed record PermRow(string EntityName, bool CanRead, bool CanCreate, bool CanUpdate, bool CanDelete);
 }

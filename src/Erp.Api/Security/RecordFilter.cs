@@ -40,14 +40,18 @@ public static class RecordFilter
 {
     public const int MaxGrants = 20;
 
-    /// <summary>Quién consulta. En la validación del plan se usa un usuario ficticio.</summary>
-    public sealed record Who(int UserId, string? Unit, IReadOnlyCollection<string> Roles);
+    /// <summary>Quién consulta. En la validación del plan se usa un usuario ficticio. Spec 010: <c>CompanyId</c> = empresa actual.</summary>
+    public sealed record Who(int UserId, string? Unit, IReadOnlyCollection<string> Roles, int? CompanyId = null);
 
-    public static Who Of(UserContext u) => new(u.Id, u.Unit, u.Roles);
+    public static Who Of(UserContext u) => new(u.Id, u.Unit, u.Roles, u.Company?.Id);
 
-    /// <summary>Condición de lectura (o de escritura) del usuario; <c>null</c> = sin restricción.</summary>
+    /// <summary>
+    /// Condición de lectura (o de escritura) del usuario; <c>null</c> = sin restricción. Spec 010: en un catálogo por
+    /// empresa solo los registros de su empresa actual, también para el superusuario (la empresa es contexto, no
+    /// privilegio); los permisos por registro (006) sí se los salta el superusuario.
+    /// </summary>
     public static SqlPredicate? For(EntityDef e, UserContext user, bool write) =>
-        user.IsSuperuser ? null : Build(e, Of(user), write);
+        Build(e, Of(user), write, grants: !user.IsSuperuser);
 
     /// <summary>
     /// Igual que <see cref="For"/>, pero una partida hereda el alcance de su documento (buscadores y referencias
@@ -61,10 +65,20 @@ public static class RecordFilter
         return p with { Sql = $"t.{Quote(e.ParentField!.Name)} IN (SELECT t.[Id] FROM {AppTable(parent.Name)} t WHERE t.[IsDeleted] = 0 AND {p.Sql})" };
     }
 
-    internal static SqlPredicate? Build(EntityDef e, Who who, bool write)
+    internal static SqlPredicate? Build(EntityDef e, Who who, bool write, bool grants = true)
+    {
+        var bag = new ParamBag();
+        // Spec 010: sin empresa no hay registros de un catálogo por empresa (el id 0 no existe).
+        var company = e.PerCompany ? $"t.[CompanyId] = {bag.Add(who.CompanyId ?? 0)}" : null;
+        var records = grants ? Grants(e, who, write, bag) : null;
+        if (company is null) return records is null ? null : new SqlPredicate(records, bag.Items);
+        return new SqlPredicate(records is null ? company : $"({company} AND {records})", bag.Items);
+    }
+
+    /// <summary>Spec 006: <c>OR</c> de los permisos por registro aplicables; null = sin restricción.</summary>
+    private static string? Grants(EntityDef e, Who who, bool write, ParamBag bag)
     {
         if (e.Security?.Records is not { } grants) return null;
-        var bag = new ParamBag();
         var parts = new List<string>();
         foreach (var g in grants)
         {
@@ -75,7 +89,7 @@ public static class RecordFilter
             if (scope is null && where is null) return null; // «todos» sin condición: no restringe
             parts.Add(scope is null ? where! : where is null ? scope : $"({scope} AND {where})");
         }
-        return parts.Count == 0 ? SqlPredicate.None : new SqlPredicate($"({string.Join(" OR ", parts)})", bag.Items);
+        return parts.Count == 0 ? SqlPredicate.None.Sql : $"({string.Join(" OR ", parts)})";
     }
 
     private static string OwnerColumn(EntityDef e) =>

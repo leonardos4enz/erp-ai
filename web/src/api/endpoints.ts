@@ -1,6 +1,6 @@
 import { api } from './client';
 import type {
-  AuditEntry, ChangePlan, ChangeSetSummary, DashboardResult, DashboardSummary, EntityDef, HistoryEntry, LayoutState, LookupItem, Me,
+  AuditEntry, ChangePlan, Company, ExchangeRate, ChangeSetSummary, DashboardResult, DashboardSummary, EntityDef, HistoryEntry, LayoutState, LookupItem, Me,
   ApiKey, EnvironmentInfo, ExportableCatalogs, ExportPreview, ExportRequest, ImportResult, ModuleInfo, PackageImport, ModulePreview, WebhookDelivery, WebhookSummary, Paged, PlanPreview, ReportResult, ReportSummary, Role, Row, RowList, SavedView, User, ViewFilter, ViewList,
 } from './types';
 
@@ -11,6 +11,8 @@ export const authApi = {
     api<Me>('/auth/login', { method: 'POST', body: { username, password }, skipAuthRedirect: true }),
   logout: () => api<void>('/auth/logout', { method: 'POST', skipAuthRedirect: true }),
   me: () => api<Me>('/auth/me', { skipAuthRedirect: true }),
+  /** Spec 010: cambia la empresa actual. */
+  switchCompany: (companyId: number) => api<Me>('/auth/company', { method: 'POST', body: { companyId } }),
 };
 
 export const modelApi = {
@@ -130,7 +132,23 @@ export interface UserInput {
   roleIds: number[];
   /** Spec 006: vacío la quita. */
   unit?: string | null;
+  /** Spec 010: empresas que puede elegir. */
+  companyIds?: number[];
 }
+
+export interface CompanyInput { code?: string; name: string; baseCurrency: string; isActive: boolean }
+export interface RateInput { from: string; to: string; date: string; rate: number }
+
+/** Spec 010: empresas y tipos de cambio (datos del entorno). */
+export const companiesApi = {
+  list: (signal?: AbortSignal) => api<Company[]>('/admin/companies', { signal }),
+  create: (c: CompanyInput) => api<Company>('/admin/companies', { method: 'POST', body: c }),
+  update: (id: number, c: CompanyInput) => api<Company>(`/admin/companies/${id}`, { method: 'PUT', body: c }),
+  rates: (q: { from?: string; to?: string }, signal?: AbortSignal) =>
+    api<ExchangeRate[]>('/admin/exchange-rates', { query: { from: q.from || undefined, to: q.to || undefined }, signal }),
+  saveRate: (r: RateInput) => api<ExchangeRate>('/admin/exchange-rates', { method: 'PUT', body: r }),
+  removeRate: (id: number) => api<void>(`/admin/exchange-rates/${id}`, { method: 'DELETE' }),
+};
 
 export interface RoleInput {
   name: string;
