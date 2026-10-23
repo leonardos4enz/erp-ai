@@ -1,0 +1,14 @@
+bin/
+obj/
+node_modules/
+web/dist/
+*.tsbuildinfo
+.claude/settings.local.json
+.vs/
+*.user
+.env
+.env.*
+appsettings.*.local.json
+web/e2e/.auth/
+web/e2e/.results/
+web/e2e/.report/

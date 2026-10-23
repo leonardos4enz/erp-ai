@@ -1,0 +1,54 @@
+import { defineConfig, devices } from '@playwright/test';
+import path from 'node:path';
+
+const PORT = 5090;
+const root = path.resolve(import.meta.dirname, '..');
+const db = process.env.E2E_DB ?? 'ErpAi_E2E';
+const server = process.env.E2E_SQL_SERVER ?? '(localdb)\\MSSQLLocalDB';
+
+if (!process.env.E2E_ADMIN_PASSWORD) {
+  throw new Error('Ejecuta la suite con "npm run e2e" (prepara la base y la contraseña de prueba).');
+}
+
+export default defineConfig({
+  testDir: './e2e',
+  outputDir: './e2e/.results',
+  snapshotPathTemplate: '{testDir}/__screenshots__/{testFilePath}/{arg}{ext}',
+  fullyParallel: false, // comparten una sola base: orden determinista
+  workers: 1,
+  retries: 0,
+  reporter: [['list'], ['html', { outputFolder: 'e2e/.report', open: 'never' }]],
+  expect: { toHaveScreenshot: { maxDiffPixelRatio: 0.01, animations: 'disabled' } },
+  use: {
+    baseURL: `http://localhost:${PORT}`,
+    locale: 'es-MX',
+    timezoneId: 'America/Mexico_City',
+    trace: 'retain-on-failure',
+    screenshot: 'only-on-failure',
+    video: 'retain-on-failure',
+  },
+  projects: [
+    { name: 'setup', testMatch: /auth\.setup\.ts/ },
+    {
+      name: 'chromium',
+      dependencies: ['setup'],
+      use: { ...devices['Desktop Chrome'], storageState: 'e2e/.auth/admin.json', viewport: { width: 1280, height: 800 } },
+    },
+  ],
+  webServer: {
+    command: `dotnet run --project "${path.join(root, 'src', 'Erp.Api')}" --no-launch-profile --urls http://localhost:${PORT}`,
+    url: `http://localhost:${PORT}/api/health`,
+    reuseExistingServer: false,
+    timeout: 180_000,
+    stdout: 'ignore',
+    stderr: 'pipe',
+    env: {
+      ASPNETCORE_ENVIRONMENT: 'Development',
+      ConnectionStrings__Erp: `Server=${server};Database=${db};Integrated Security=true;Encrypt=true;TrustServerCertificate=true`,
+      Database__AutoCreate: 'true',
+      Bootstrap__AdminPassword: process.env.E2E_ADMIN_PASSWORD,
+      Security__LoginAttemptsPerMinute: '1000',
+      Spa__Path: path.join(root, 'web', 'dist'),
+    },
+  },
+});

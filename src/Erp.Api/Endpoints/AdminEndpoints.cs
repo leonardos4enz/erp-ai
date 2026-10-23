@@ -1,0 +1,262 @@
+using System.Text.Json;
+using System.Text.RegularExpressions;
+using Dapper;
+using Erp.Api.Infrastructure;
+using Erp.Api.Metadata;
+using Erp.Api.Security;
+
+namespace Erp.Api.Endpoints;
+
+public static partial class AdminEndpoints
+{
+    [GeneratedRegex("^[A-Za-z0-9._-]{3,100}$", RegexOptions.CultureInvariant)]
+    private static partial Regex UsernamePattern();
+
+    public sealed record UserDto(int Id, string Username, string DisplayName, bool IsActive, DateTime? LastLoginAt,
+        DateTime? LockoutEnd, IReadOnlyList<int> RoleIds);
+    public sealed record CreateUserRequest(string? Username, string? DisplayName, string? Password, int[]? RoleIds);
+    public sealed record UpdateUserRequest(string? DisplayName, bool IsActive, int[]? RoleIds, string? Password);
+
+    public sealed record EntityPermissionDto(string Entity, bool CanRead, bool CanCreate, bool CanUpdate, bool CanDelete);
+    public sealed record RoleDto(int Id, string Name, string? Description, bool IsSystem, bool IsSuperuser,
+        bool CanManageModel, bool CanManageUsers, bool CanViewAudit, IReadOnlyList<EntityPermissionDto> Permissions);
+    public sealed record RoleRequest(string? Name, string? Description, bool CanManageModel, bool CanManageUsers,
+        bool CanViewAudit, EntityPermissionDto[]? Permissions);
+
+    public static void MapAdmin(this IEndpointRouteBuilder app)
+    {
+        var g = app.MapGroup("/api/admin").RequireAuthorization();
+
+        g.MapGet("/users", async (HttpContext http, Db db) =>
+        {
+            RequireUserAdmin(http);
+            await using var cn = await db.OpenAsync();
+            return await LoadUsersAsync(cn);
+        });
+        g.MapPost("/users", CreateUser);
+        g.MapPut("/users/{id:int}", UpdateUser);
+
+        // Los modeladores también leen los roles para configurar reglas "obligatorio para rol".
+        g.MapGet("/roles", async (HttpContext http, Db db) =>
+        {
+            var u = http.CurrentUser();
+            if (!u.CanManageUsers && !u.CanManageModel) throw new Forbidden();
+            await using var cn = await db.OpenAsync();
+            return await LoadRolesAsync(cn);
+        });
+        g.MapPost("/roles", (RoleRequest req, HttpContext http, Db db, MetadataStore store, CancellationToken ct) => SaveRole(null, req, http, db, store, ct));
+        g.MapPut("/roles/{id:int}", (int id, RoleRequest req, HttpContext http, Db db, MetadataStore store, CancellationToken ct) => SaveRole(id, req, http, db, store, ct));
+    }
+
+    private static void RequireUserAdmin(HttpContext http)
+    {
+        if (!http.CurrentUser().CanManageUsers) throw new Forbidden();
+    }
+
+    // ---------------- Usuarios ----------------
+
+    private static async Task<IResult> CreateUser(CreateUserRequest req, HttpContext http, Db db, PasswordService passwords)
+    {
+        RequireUserAdmin(http);
+        var errors = new Dictionary<string, string[]>();
+        var username = req.Username?.Trim() ?? "";
+        if (!UsernamePattern().IsMatch(username)) errors["username"] = ["Usa de 3 a 100 caracteres: letras, números, '.', '_' o '-'."];
+        var displayName = req.DisplayName?.Trim() ?? "";
+        if (displayName.Length is 0 or > 150) errors["displayName"] = ["El nombre es obligatorio (máx. 150)."];
+        if (!PasswordService.MeetsPolicy(req.Password, out var pwdError, username)) errors["password"] = [pwdError];
+        if (errors.Count > 0) throw new ValidationFailed(errors);
+
+        await using var cn = await db.OpenAsync();
+        await using var tx = await cn.BeginTransactionAsync();
+        if (await cn.ExecuteScalarAsync<int?>("SELECT 1 FROM meta.[User] WHERE Username = @username", new { username }, tx) is not null)
+            throw new ValidationFailed(new Dictionary<string, string[]> { ["username"] = ["Ese usuario ya existe."] });
+
+        var id = await cn.ExecuteScalarAsync<int>(
+            "INSERT meta.[User] (Username, DisplayName, PasswordHash) OUTPUT inserted.Id VALUES (@username, @displayName, @hash)",
+            new { username, displayName, hash = passwords.Hash(req.Password!) }, tx);
+        await SetRolesAsync(cn, tx, id, req.RoleIds ?? []);
+        await Audit.WriteAsync(cn, tx, http, AuditActions.UserChange, "Usuario", id.ToString(),
+            after: new { username, displayName, roleIds = req.RoleIds });
+        await tx.CommitAsync();
+        return Results.Created($"/api/admin/users/{id}", (await LoadUsersAsync(cn)).First(u => u.Id == id));
+    }
+
+    private static async Task<UserDto> UpdateUser(int id, UpdateUserRequest req, HttpContext http, Db db, PasswordService passwords)
+    {
+        RequireUserAdmin(http);
+        var me = http.CurrentUser();
+        var errors = new Dictionary<string, string[]>();
+        var displayName = req.DisplayName?.Trim() ?? "";
+        if (displayName.Length is 0 or > 150) errors["displayName"] = ["El nombre es obligatorio (máx. 150)."];
+        if (id == me.Id && !req.IsActive) errors["isActive"] = ["No puedes desactivar tu propia cuenta."];
+
+        await using var cn = await db.OpenAsync();
+        var before = (await LoadUsersAsync(cn)).FirstOrDefault(u => u.Id == id) ?? throw new NotFound("El usuario no existe.");
+        if (!string.IsNullOrEmpty(req.Password) && !PasswordService.MeetsPolicy(req.Password, out var pwdError, before.Username))
+            errors["password"] = [pwdError];
+        if (errors.Count > 0) throw new ValidationFailed(errors);
+
+        await using var tx = await cn.BeginTransactionAsync();
+        var roleIds = req.RoleIds ?? [];
+        var rolesChanged = !before.RoleIds.Order().SequenceEqual(roleIds.Distinct().Order());
+        // Cambiar contraseña, roles o desactivar invalida las sesiones abiertas (nuevo SecurityStamp).
+        var revoke = !string.IsNullOrEmpty(req.Password) || rolesChanged || (before.IsActive && !req.IsActive);
+        await cn.ExecuteAsync("""
+            UPDATE meta.[User] SET DisplayName = @displayName, IsActive = @IsActive,
+                PasswordHash = COALESCE(@hash, PasswordHash),
+                FailedAttempts = CASE WHEN @hash IS NULL THEN FailedAttempts ELSE 0 END,
+                LockoutEnd = CASE WHEN @hash IS NULL THEN LockoutEnd ELSE NULL END,
+                SecurityStamp = CASE WHEN @revoke = 1 THEN NEWID() ELSE SecurityStamp END
+             WHERE Id = @id
+            """, new
+        {
+            id, displayName, req.IsActive, revoke,
+            hash = string.IsNullOrEmpty(req.Password) ? null : passwords.Hash(req.Password),
+        }, tx);
+        await SetRolesAsync(cn, tx, id, roleIds);
+        await EnsureSuperuserRemainsAsync(cn, tx);
+        await Audit.WriteAsync(cn, tx, http, AuditActions.UserChange, "Usuario", id.ToString(),
+            before: new { before.DisplayName, before.IsActive, before.RoleIds },
+            after: new { DisplayName = displayName, req.IsActive, RoleIds = roleIds, PasswordChanged = !string.IsNullOrEmpty(req.Password) });
+        await tx.CommitAsync();
+        return (await LoadUsersAsync(cn)).First(u => u.Id == id);
+    }
+
+    private static async Task SetRolesAsync(System.Data.Common.DbConnection cn, System.Data.Common.DbTransaction tx, int userId, int[] roleIds)
+    {
+        var ids = roleIds.Distinct().ToArray();
+        var existing = (await cn.QueryAsync<int>("SELECT Id FROM meta.Role WHERE Id IN @ids", new { ids }, tx)).Count();
+        if (existing != ids.Length) throw new ValidationFailed(new Dictionary<string, string[]> { ["roleIds"] = ["Hay roles que no existen."] });
+        await cn.ExecuteAsync("DELETE meta.UserRole WHERE UserId = @userId", new { userId }, tx);
+        foreach (var roleId in ids)
+            await cn.ExecuteAsync("INSERT meta.UserRole (UserId, RoleId) VALUES (@userId, @roleId)", new { userId, roleId }, tx);
+    }
+
+    private static async Task EnsureSuperuserRemainsAsync(System.Data.Common.DbConnection cn, System.Data.Common.DbTransaction tx)
+    {
+        var count = await cn.ExecuteScalarAsync<int>("""
+            SELECT COUNT(DISTINCT u.Id) FROM meta.[User] u JOIN meta.UserRole ur ON ur.UserId = u.Id
+              JOIN meta.Role r ON r.Id = ur.RoleId WHERE u.IsActive = 1 AND r.IsSuperuser = 1
+            """, transaction: tx);
+        if (count == 0) throw new Conflict("Debe quedar al menos un administrador activo.");
+    }
+
+    private static async Task<IReadOnlyList<UserDto>> LoadUsersAsync(System.Data.Common.DbConnection cn)
+    {
+        var users = await cn.QueryAsync<UserRow>("SELECT Id, Username, DisplayName, IsActive, LastLoginAt, LockoutEnd FROM meta.[User] ORDER BY Username");
+        var roles = (await cn.QueryAsync<(int UserId, int RoleId)>("SELECT UserId, RoleId FROM meta.UserRole")).ToLookup(x => x.UserId, x => x.RoleId);
+        return users.Select(u => new UserDto(u.Id, u.Username, u.DisplayName, u.IsActive, u.LastLoginAt,
+            u.LockoutEnd > DateTime.UtcNow ? u.LockoutEnd : null, roles[u.Id].ToList())).ToList();
+    }
+
+    // ---------------- Roles ----------------
+
+    private static async Task<RoleDto> SaveRole(int? id, RoleRequest req, HttpContext http, Db db, MetadataStore store, CancellationToken ct)
+    {
+        RequireUserAdmin(http);
+        var name = req.Name?.Trim() ?? "";
+        var errors = new Dictionary<string, string[]>();
+        if (name.Length is 0 or > 100) errors["name"] = ["El nombre es obligatorio (máx. 100)."];
+        if (req.Description?.Length > 300) errors["description"] = ["Máximo 300 caracteres."];
+        var model = await store.GetAsync(ct);
+        var perms = req.Permissions ?? [];
+        if (perms.Any(p => !model.ContainsKey(p.Entity))) errors["permissions"] = ["Hay catálogos que no existen."];
+        if (errors.Count > 0) throw new ValidationFailed(errors);
+
+        await using var cn = await db.OpenAsync(ct);
+        await using var tx = await cn.BeginTransactionAsync(ct);
+        RoleDto? before = null;
+        if (id is not null)
+        {
+            before = (await LoadRolesAsync(cn, tx)).FirstOrDefault(r => r.Id == id) ?? throw new NotFound("El rol no existe.");
+            if (before.IsSystem && !string.Equals(before.Name, name, StringComparison.Ordinal))
+                throw new ValidationFailed(new Dictionary<string, string[]> { ["name"] = ["Los roles del sistema no se pueden renombrar."] });
+        }
+        if (await cn.ExecuteScalarAsync<int?>("SELECT 1 FROM meta.Role WHERE Name = @name AND Id <> ISNULL(@id, 0)", new { name, id }, tx) is not null)
+            throw new ValidationFailed(new Dictionary<string, string[]> { ["name"] = ["Ya existe un rol con ese nombre."] });
+
+        // El rol superusuario no se puede degradar desde la aplicación.
+        var p = new { id, name, description = req.Description?.Trim(), req.CanManageModel, req.CanManageUsers, req.CanViewAudit };
+        var roleId = id ?? await cn.ExecuteScalarAsync<int>("""
+            INSERT meta.Role (Name, Description, CanManageModel, CanManageUsers, CanViewAudit)
+            OUTPUT inserted.Id VALUES (@name, @description, @CanManageModel, @CanManageUsers, @CanViewAudit)
+            """, p, tx);
+        if (id is not null)
+            await cn.ExecuteAsync("""
+                UPDATE meta.Role SET Name = @name, Description = @description,
+                    CanManageModel = CASE WHEN IsSuperuser = 1 THEN 1 ELSE @CanManageModel END,
+                    CanManageUsers = CASE WHEN IsSuperuser = 1 THEN 1 ELSE @CanManageUsers END,
+                    CanViewAudit = CASE WHEN IsSuperuser = 1 THEN 1 ELSE @CanViewAudit END
+                 WHERE Id = @id
+                """, p, tx);
+
+        await cn.ExecuteAsync("DELETE meta.EntityPermission WHERE RoleId = @roleId", new { roleId }, tx);
+        foreach (var perm in perms.DistinctBy(x => x.Entity, StringComparer.OrdinalIgnoreCase)
+                     .Where(x => x.CanRead || x.CanCreate || x.CanUpdate || x.CanDelete))
+            await cn.ExecuteAsync("""
+                INSERT meta.EntityPermission (RoleId, EntityName, CanRead, CanCreate, CanUpdate, CanDelete)
+                VALUES (@roleId, @Entity, @CanRead, @CanCreate, @CanUpdate, @CanDelete)
+                """, new { roleId, Entity = model[perm.Entity].Name, perm.CanRead, perm.CanCreate, perm.CanUpdate, perm.CanDelete }, tx);
+
+        var after = (await LoadRolesAsync(cn, tx)).First(r => r.Id == roleId);
+        await Audit.WriteAsync(cn, tx, http, AuditActions.RoleChange, "Rol", roleId.ToString(), before, after);
+        await tx.CommitAsync(ct);
+        return after;
+    }
+
+    private static async Task<IReadOnlyList<RoleDto>> LoadRolesAsync(System.Data.Common.DbConnection cn, System.Data.Common.DbTransaction? tx = null)
+    {
+        var roles = await cn.QueryAsync<RoleRow>(
+            "SELECT Id, Name, Description, IsSystem, IsSuperuser, CanManageModel, CanManageUsers, CanViewAudit FROM meta.Role ORDER BY Name",
+            transaction: tx);
+        var perms = (await cn.QueryAsync<PermRow>(
+            "SELECT RoleId, EntityName, CanRead, CanCreate, CanUpdate, CanDelete FROM meta.EntityPermission", transaction: tx))
+            .ToLookup(x => x.RoleId);
+        return roles.Select(r => new RoleDto(r.Id, r.Name, r.Description, r.IsSystem, r.IsSuperuser, r.CanManageModel,
+            r.CanManageUsers, r.CanViewAudit,
+            perms[r.Id].Select(x => new EntityPermissionDto(x.EntityName, x.CanRead, x.CanCreate, x.CanUpdate, x.CanDelete)).ToList())).ToList();
+    }
+
+    private sealed record UserRow(int Id, string Username, string DisplayName, bool IsActive, DateTime? LastLoginAt, DateTime? LockoutEnd);
+    private sealed record RoleRow(int Id, string Name, string? Description, bool IsSystem, bool IsSuperuser,
+        bool CanManageModel, bool CanManageUsers, bool CanViewAudit);
+    private sealed record PermRow(int RoleId, string EntityName, bool CanRead, bool CanCreate, bool CanUpdate, bool CanDelete);
+}
+
+public static class AuditEndpoints
+{
+    public sealed record AuditItem(long Id, DateTime At, string? User, string Action, string? EntityName, string? RecordId,
+        JsonElement? Before, JsonElement? After, string? IpAddress);
+
+    public static void MapAudit(this IEndpointRouteBuilder app)
+    {
+        app.MapGet("/api/audit", async (string? entity, string? action, int? page, int? pageSize, HttpContext http, Db db) =>
+        {
+            if (!http.CurrentUser().CanViewAudit) throw new Forbidden();
+            var size = Math.Clamp(pageSize ?? 50, 1, 200);
+            var skip = (Math.Max(1, page ?? 1) - 1) * size;
+            await using var cn = await db.OpenAsync();
+            const string where = "WHERE (@entity IS NULL OR EntityName = @entity) AND (@action IS NULL OR Action = @action)";
+            var args = new { entity = Empty(entity), action = Empty(action), skip, size };
+            var total = await cn.ExecuteScalarAsync<int>($"SELECT COUNT(*) FROM meta.AuditLog {where}", args);
+            var rows = await cn.QueryAsync<Row>($"""
+                SELECT Id, At, Username, Action, EntityName, RecordId, BeforeJson, AfterJson, IpAddress
+                  FROM meta.AuditLog {where} ORDER BY Id DESC OFFSET @skip ROWS FETCH NEXT @size ROWS ONLY
+                """, args);
+            return new
+            {
+                items = rows.Select(r => new AuditItem(r.Id, DateTime.SpecifyKind(r.At, DateTimeKind.Utc), r.Username, r.Action,
+                    r.EntityName, r.RecordId, Parse(r.BeforeJson), Parse(r.AfterJson), r.IpAddress)),
+                total,
+            };
+        }).RequireAuthorization();
+    }
+
+    private static string? Empty(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+
+    private static JsonElement? Parse(string? json) =>
+        json is null ? null : JsonDocument.Parse(json).RootElement.Clone();
+
+    private sealed record Row(long Id, DateTime At, string? Username, string Action, string? EntityName, string? RecordId,
+        string? BeforeJson, string? AfterJson, string? IpAddress);
+}

@@ -1,0 +1,409 @@
+import { useEffect, useMemo, useState } from 'react';
+import {
+  Archive, ArchiveRestore, ArrowDown, ArrowUp, ChevronDown, ChevronUp, Eye, Plus, Search, Trash2,
+} from 'lucide-react';
+import { ApiError } from '../../api/client';
+import { adminApi } from '../../api/endpoints';
+import type { ChangePlan, EntityDef, FieldDef, FieldType, Operation } from '../../api/types';
+import { Dialog } from '../../components/Dialog';
+import { CURATED_ICONS, DynamicIcon } from '../../components/DynamicIcon';
+import { TagInput } from '../../components/TagInput';
+import { Alert, Button, Field, Input, Select, Switch, Textarea } from '../../components/ui';
+import { FIELD_TYPE_LABELS } from '../../lib/entity';
+import { IDENTIFIER_RE, pluralize, toIdentifier } from '../../lib/format';
+
+interface DraftField extends FieldDef {
+  _key: string;
+  _isNew: boolean;
+  _nameTouched: boolean;
+  _original?: FieldDef;
+}
+
+interface Draft {
+  name: string;
+  label: string;
+  labelPlural: string;
+  icon: string;
+  description: string;
+  displayField: string;
+  fields: DraftField[];
+}
+
+let keySeq = 0;
+const newKey = () => `k${++keySeq}`;
+
+function blankField(order: number): DraftField {
+  return {
+    _key: newKey(), _isNew: true, _nameTouched: false,
+    name: '', label: '', type: 'text', required: false, unique: false, showInList: true,
+    maxLength: 200, options: [], requiredForRoles: [], displayOrder: order,
+  };
+}
+
+function draftFrom(def?: EntityDef): Draft {
+  if (!def) {
+    const f = blankField(0);
+    f.label = 'Nombre'; f.name = 'Nombre'; f.required = true; f.maxLength = 150;
+    return { name: '', label: '', labelPlural: '', icon: 'package', description: '', displayField: '', fields: [f] };
+  }
+  const fields = def.fields
+    .slice()
+    .sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0))
+    .map((f): DraftField => ({ ...f, options: f.options ?? [], requiredForRoles: f.requiredForRoles ?? [], _key: newKey(), _isNew: false, _nameTouched: true, _original: f }));
+  return {
+    name: def.name, label: def.label, labelPlural: def.labelPlural, icon: def.icon || 'database',
+    description: def.description ?? '', displayField: def.displayField ?? '', fields,
+  };
+}
+
+function sameList(a?: string[], b?: string[]) {
+  const x = a ?? []; const y = b ?? [];
+  return x.length === y.length && x.every((v, i) => v === y[i]);
+}
+
+function cleanField(f: DraftField, order: number): FieldDef {
+  const out: FieldDef = {
+    name: f.name.trim(), label: f.label.trim(), type: f.type,
+    required: !!f.required, unique: !!f.unique, showInList: !!f.showInList, displayOrder: order,
+  };
+  if (f.requiredForRoles?.length) out.requiredForRoles = f.requiredForRoles;
+  if (f.type === 'text' && f.maxLength) out.maxLength = f.maxLength;
+  if (f.type === 'decimal') { out.precision = f.precision ?? 18; out.scale = f.scale ?? 2; }
+  if (f.type === 'choice') out.options = f.options ?? [];
+  if (f.type === 'reference') out.referenceEntity = f.referenceEntity;
+  return out;
+}
+
+export function buildOperations(original: EntityDef | undefined, d: Draft): Operation[] {
+  const active = d.fields.filter((f) => !(f._isNew && f.isArchived));
+  if (!original) {
+    return [{
+      op: 'createEntity', name: d.name.trim(), label: d.label.trim(), labelPlural: d.labelPlural.trim(),
+      icon: d.icon || undefined, description: d.description.trim() || undefined,
+      displayField: d.displayField || undefined,
+      fields: active.filter((f) => !f.isArchived).map((f, i) => cleanField(f, i)),
+    }];
+  }
+  const ops: Operation[] = [];
+  const meta: Extract<Operation, { op: 'updateEntity' }> = { op: 'updateEntity', entity: original.name };
+  let metaChanged = false;
+  if (d.label.trim() !== original.label) { meta.label = d.label.trim(); metaChanged = true; }
+  if (d.labelPlural.trim() !== original.labelPlural) { meta.labelPlural = d.labelPlural.trim(); metaChanged = true; }
+  if (d.icon !== (original.icon || 'database')) { meta.icon = d.icon; metaChanged = true; }
+  if (d.description.trim() !== (original.description ?? '')) { meta.description = d.description.trim(); metaChanged = true; }
+  if (d.displayField !== (original.displayField ?? '')) { meta.displayField = d.displayField; metaChanged = true; }
+  if (metaChanged) ops.push(meta);
+
+  d.fields.forEach((f, i) => {
+    if (f._isNew) {
+      if (!f.isArchived) ops.push({ op: 'addField', entity: original.name, field: cleanField(f, i) });
+      return;
+    }
+    const o = f._original!;
+    if (f.isArchived && !o.isArchived) { ops.push({ op: 'archiveField', entity: original.name, field: o.name }); return; }
+    if (f.isArchived) return;
+    const u: Extract<Operation, { op: 'updateField' }> = { op: 'updateField', entity: original.name, field: o.name };
+    let changed = false;
+    if (f.label.trim() !== o.label) { u.label = f.label.trim(); changed = true; }
+    if (!!f.required !== !!o.required) { u.required = !!f.required; changed = true; }
+    if (!!f.showInList !== !!o.showInList) { u.showInList = !!f.showInList; changed = true; }
+    if (f.type === 'choice' && !sameList(f.options, o.options)) { u.options = f.options ?? []; changed = true; }
+    if (!sameList(f.requiredForRoles, o.requiredForRoles)) { u.requiredForRoles = f.requiredForRoles ?? []; changed = true; }
+    if (i !== (o.displayOrder ?? i)) { u.displayOrder = i; changed = true; }
+    if (changed) ops.push(u);
+  });
+  return ops;
+}
+
+function validate(d: Draft, isNew: boolean, existingNames: string[]): Record<string, string> {
+  const e: Record<string, string> = {};
+  if (!d.label.trim()) e.label = 'Escribe un nombre visible';
+  if (!d.labelPlural.trim()) e.labelPlural = 'Escribe el nombre en plural';
+  if (isNew) {
+    if (!IDENTIFIER_RE.test(d.name)) e.name = 'Solo letras, números y guion bajo; inicia con letra (2 a 50 caracteres)';
+    else if (existingNames.some((n) => n.toLowerCase() === d.name.toLowerCase())) e.name = 'Ya existe un catálogo con ese identificador';
+  }
+  const seen = new Set<string>();
+  d.fields.forEach((f) => {
+    if (f.isArchived && f._isNew) return;
+    if (!f.label.trim()) e[`${f._key}.label`] = 'Requerido';
+    if (!IDENTIFIER_RE.test(f.name)) e[`${f._key}.name`] = 'Identificador inválido';
+    else if (seen.has(f.name.toLowerCase())) e[`${f._key}.name`] = 'Repetido';
+    seen.add(f.name.toLowerCase());
+    if (f.type === 'choice' && !(f.options?.length)) e[`${f._key}.options`] = 'Agrega al menos una opción';
+    if (f.type === 'reference' && !f.referenceEntity) e[`${f._key}.referenceEntity`] = 'Selecciona el catálogo';
+  });
+  if (d.fields.filter((f) => !f.isArchived).length === 0) e.fields = 'Agrega al menos un campo';
+  return e;
+}
+
+/* ------------------------------------------------------------------------- */
+
+function IconPicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const list = CURATED_ICONS.filter((i) => i.includes(q.trim().toLowerCase()));
+  return (
+    <>
+      <Field label="Icono">
+        <Button onClick={() => setOpen(true)} aria-label={`Icono: ${value}. Cambiar`} className="icon-btn-preview">
+          <DynamicIcon name={value} size={16} /> <span className="muted">{value}</span>
+        </Button>
+      </Field>
+      <Dialog open={open} onClose={() => setOpen(false)} title="Elegir icono" size="lg">
+        <div className="stack">
+          <Input icon={Search} placeholder="Buscar icono…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Buscar icono" data-autofocus />
+          <div className="icon-grid" role="group" aria-label="Iconos">
+            {list.map((name) => (
+              <button
+                key={name}
+                type="button"
+                className="icon-cell"
+                title={name}
+                aria-label={name}
+                aria-pressed={value === name}
+                onClick={() => { onChange(name); setOpen(false); }}
+              >
+                <DynamicIcon name={name} size={18} />
+              </button>
+            ))}
+          </div>
+          {list.length === 0 && <p className="muted">Sin coincidencias.</p>}
+        </div>
+      </Dialog>
+    </>
+  );
+}
+
+interface FieldRowProps {
+  f: DraftField;
+  index: number;
+  count: number;
+  errors: Record<string, string>;
+  entities: EntityDef[];
+  roleNames: string[] | null;
+  onChange: (patch: Partial<DraftField>) => void;
+  onMove: (dir: -1 | 1) => void;
+  onRemove: () => void;
+}
+
+function FieldRow({ f, index, count, errors, entities, roleNames, onChange, onMove, onRemove }: FieldRowProps) {
+  const [expanded, setExpanded] = useState(f._isNew);
+  const locked = !f._isNew;
+  const err = (k: string) => errors[`${f._key}.${k}`];
+  return (
+    <div className={`field-row${f.isArchived ? ' archived' : ''}`}>
+      <div className="field-row-head">
+        <div className="field-row-tools">
+          <Button variant="ghost" size="sm" iconOnly icon={ArrowUp} aria-label="Subir campo" disabled={index === 0} onClick={() => onMove(-1)} />
+          <Button variant="ghost" size="sm" iconOnly icon={ArrowDown} aria-label="Bajar campo" disabled={index === count - 1} onClick={() => onMove(1)} />
+        </div>
+        <Input
+          inputSize="sm"
+          aria-label="Etiqueta del campo"
+          placeholder="Etiqueta (p. ej. Nombre)"
+          value={f.label}
+          error={err('label')}
+          disabled={f.isArchived}
+          onChange={(e) => {
+            const label = e.target.value;
+            onChange(f._isNew && !f._nameTouched ? { label, name: toIdentifier(label) } : { label });
+          }}
+        />
+        <Input
+          inputSize="sm"
+          wrapClassName="hide-sm"
+          className="mono"
+          aria-label="Identificador del campo"
+          placeholder="Identificador"
+          value={f.name}
+          error={err('name')}
+          disabled={locked || f.isArchived}
+          title={locked ? 'El identificador no se puede cambiar una vez creado' : undefined}
+          onChange={(e) => onChange({ name: e.target.value.replace(/[^A-Za-z0-9_]/g, ''), _nameTouched: true })}
+        />
+        <Select
+          selectSize="sm"
+          wrapClassName="hide-sm"
+          aria-label="Tipo de campo"
+          value={f.type}
+          disabled={locked || f.isArchived}
+          onChange={(e) => onChange({ type: e.target.value as FieldType })}
+        >
+          {(Object.keys(FIELD_TYPE_LABELS) as FieldType[]).map((t) => <option key={t} value={t}>{FIELD_TYPE_LABELS[t]}</option>)}
+        </Select>
+        <div className="field-row-tools">
+          {!f.isArchived && (
+            <Button variant="ghost" size="sm" iconOnly icon={expanded ? ChevronUp : ChevronDown} aria-label={expanded ? 'Ocultar opciones' : 'Mostrar opciones'} aria-expanded={expanded} onClick={() => setExpanded((x) => !x)} />
+          )}
+          {f._isNew ? (
+            <Button variant="ghost" size="sm" iconOnly icon={Trash2} aria-label="Quitar campo" onClick={onRemove} />
+          ) : f.isArchived ? (
+            <Button
+              variant="ghost" size="sm" iconOnly icon={ArchiveRestore}
+              aria-label="Deshacer archivado"
+              title={f._original?.isArchived ? 'Restaurar campos archivados no está disponible' : 'Deshacer archivado'}
+              disabled={!!f._original?.isArchived}
+              onClick={() => onChange({ isArchived: false })}
+            />
+          ) : (
+            <Button variant="ghost" size="sm" iconOnly icon={Archive} aria-label="Archivar campo" title="Archivar (los datos se conservan)" onClick={() => onChange({ isArchived: true })} />
+          )}
+        </div>
+      </div>
+      {expanded && !f.isArchived && (
+        <div className="field-row-body">
+          <Switch checked={!!f.required} onChange={(v) => onChange({ required: v })} label="Obligatorio" />
+          <Switch checked={!!f.showInList} onChange={(v) => onChange({ showInList: v })} label="Mostrar en listado" />
+          <Switch checked={!!f.unique} disabled={locked || f.type === 'boolean' || f.type === 'longtext'} onChange={(v) => onChange({ unique: v })} label="Valor único" />
+          {f.type === 'text' && (
+            <Input inputSize="sm" type="number" min={1} max={4000} label="Longitud máxima" disabled={locked} value={f.maxLength ?? ''} onChange={(e) => onChange({ maxLength: e.target.value ? Number(e.target.value) : undefined })} />
+          )}
+          {f.type === 'decimal' && (
+            <>
+              <Input inputSize="sm" type="number" min={1} max={38} label="Precisión" disabled={locked} value={f.precision ?? 18} onChange={(e) => onChange({ precision: Number(e.target.value) })} />
+              <Input inputSize="sm" type="number" min={0} max={18} label="Decimales" disabled={locked} value={f.scale ?? 2} onChange={(e) => onChange({ scale: Number(e.target.value) })} />
+            </>
+          )}
+          {f.type === 'reference' && (
+            <Select selectSize="sm" label="Catálogo referenciado" disabled={locked} error={err('referenceEntity')} value={f.referenceEntity ?? ''} onChange={(e) => onChange({ referenceEntity: e.target.value || undefined })}>
+              <option value="">Selecciona…</option>
+              {entities.filter((x) => !x.isArchived).map((x) => <option key={x.name} value={x.name}>{x.labelPlural}</option>)}
+            </Select>
+          )}
+          {f.type === 'choice' && (
+            <Field label="Opciones" error={err('options')} className="span-all">
+              <TagInput value={f.options ?? []} onChange={(v) => onChange({ options: v })} aria-label="Opciones de la lista" invalid={!!err('options')} />
+            </Field>
+          )}
+          <Field label="Obligatorio solo para roles" hint={roleNames ? 'El campo será obligatorio cuando lo capture alguien con estos roles' : 'Escribe el nombre exacto del rol'} className="span-all">
+            <TagInput value={f.requiredForRoles ?? []} onChange={(v) => onChange({ requiredForRoles: v })} suggestions={roleNames ?? undefined} placeholder="Agregar rol…" aria-label="Roles para los que es obligatorio" />
+          </Field>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------------- */
+
+export interface EntityEditorProps {
+  original?: EntityDef;
+  entities: EntityDef[];
+  onCancel: () => void;
+  onReview: (plan: ChangePlan) => void;
+}
+
+export function EntityEditor({ original, entities, onCancel, onReview }: EntityEditorProps) {
+  const isNew = !original;
+  const [d, setD] = useState<Draft>(() => draftFrom(original));
+  const [nameTouched, setNameTouched] = useState(!isNew);
+  const [pluralTouched, setPluralTouched] = useState(!isNew);
+  const [showErrors, setShowErrors] = useState(false);
+  const [roleNames, setRoleNames] = useState<string[] | null>(null);
+
+  useEffect(() => {
+    adminApi.roles().then((r) => setRoleNames(r.map((x) => x.name))).catch((e) => { if (e instanceof ApiError) setRoleNames(null); });
+  }, []);
+
+  const errors = useMemo(() => validate(d, isNew, entities.map((e) => e.name)), [d, isNew, entities]);
+  const visibleErrors = showErrors ? errors : {};
+  const ops = useMemo(() => buildOperations(original, d), [original, d]);
+  const textFields = d.fields.filter((f) => !f.isArchived && (f.type === 'text') && IDENTIFIER_RE.test(f.name));
+
+  function patchField(key: string, patch: Partial<DraftField>) {
+    setD((s) => ({ ...s, fields: s.fields.map((f) => (f._key === key ? { ...f, ...patch } : f)) }));
+  }
+  function move(i: number, dir: -1 | 1) {
+    setD((s) => {
+      const fields = s.fields.slice();
+      const j = i + dir;
+      if (j < 0 || j >= fields.length) return s;
+      [fields[i], fields[j]] = [fields[j], fields[i]];
+      return { ...s, fields };
+    });
+  }
+
+  function review() {
+    setShowErrors(true);
+    if (Object.keys(errors).length) return;
+    const description = isNew ? `Crear catálogo ${d.labelPlural.trim()}` : `Modificar catálogo ${original!.labelPlural}`;
+    onReview({ description, operations: ops });
+  }
+
+  return (
+    <div className="stack" style={{ gap: 'var(--space-6)' }}>
+      <section className="card card-pad stack">
+        <h2 style={{ fontSize: 'var(--text-md)', fontWeight: 600 }}>General</h2>
+        <div className="form-grid">
+          <Input
+            label="Nombre (singular)"
+            required
+            placeholder="Empaque"
+            value={d.label}
+            error={visibleErrors.label}
+            onChange={(e) => {
+              const label = e.target.value;
+              setD((s) => ({
+                ...s,
+                label,
+                name: isNew && !nameTouched ? toIdentifier(label) : s.name,
+                labelPlural: !pluralTouched ? pluralize(label) : s.labelPlural,
+              }));
+            }}
+          />
+          <Input label="Nombre (plural)" required placeholder="Empaques" value={d.labelPlural} error={visibleErrors.labelPlural} onChange={(e) => { setPluralTouched(true); setD((s) => ({ ...s, labelPlural: e.target.value })); }} />
+          <Input
+            label="Identificador"
+            required
+            className="mono"
+            placeholder="Empaque"
+            value={d.name}
+            disabled={!isNew}
+            error={visibleErrors.name}
+            hint={isNew ? 'Nombre técnico de la tabla. No se puede cambiar después.' : 'No se puede cambiar.'}
+            onChange={(e) => { setNameTouched(true); setD((s) => ({ ...s, name: e.target.value.replace(/[^A-Za-z0-9_]/g, '') })); }}
+          />
+          <IconPicker value={d.icon} onChange={(icon) => setD((s) => ({ ...s, icon }))} />
+          <Textarea wrapClassName="span-2" label="Descripción" placeholder="Para qué sirve este catálogo" rows={2} style={{ minHeight: 64 }} value={d.description} onChange={(e) => setD((s) => ({ ...s, description: e.target.value }))} maxLength={500} />
+          <Select label="Campo para mostrar en referencias" hint="Se usa cuando otro catálogo apunta a este" value={d.displayField} onChange={(e) => setD((s) => ({ ...s, displayField: e.target.value }))}>
+            <option value="">Automático</option>
+            {textFields.map((f) => <option key={f._key} value={f.name}>{f.label || f.name}</option>)}
+          </Select>
+        </div>
+      </section>
+
+      <section className="card card-pad stack">
+        <div className="row">
+          <h2 style={{ fontSize: 'var(--text-md)', fontWeight: 600 }} className="grow">Campos</h2>
+          <Button size="sm" icon={Plus} onClick={() => setD((s) => ({ ...s, fields: [...s.fields, blankField(s.fields.length)] }))}>Agregar campo</Button>
+        </div>
+        {visibleErrors.fields && <Alert tone="danger" title={visibleErrors.fields} />}
+        <div className="fields-editor">
+          {d.fields.map((f, i) => (
+            <FieldRow
+              key={f._key}
+              f={f}
+              index={i}
+              count={d.fields.length}
+              errors={visibleErrors}
+              entities={entities.filter((x) => x.name !== original?.name)}
+              roleNames={roleNames}
+              onChange={(p) => patchField(f._key, p)}
+              onMove={(dir) => move(i, dir)}
+              onRemove={() => setD((s) => ({ ...s, fields: s.fields.filter((x) => x._key !== f._key) }))}
+            />
+          ))}
+        </div>
+      </section>
+
+      <div className="row" style={{ justifyContent: 'flex-end' }}>
+        {showErrors && Object.keys(errors).length > 0 && <span className="field-error" style={{ marginRight: 'auto' }}>Corrige los campos marcados antes de continuar.</span>}
+        <Button onClick={onCancel}>Cancelar</Button>
+        <Button variant="primary" icon={Eye} disabled={!isNew && ops.length === 0} onClick={review}>
+          {!isNew && ops.length === 0 ? 'Sin cambios' : 'Revisar cambios'}
+        </Button>
+      </div>
+    </div>
+  );
+}
