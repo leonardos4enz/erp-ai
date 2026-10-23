@@ -438,3 +438,73 @@ export interface AuditEntry {
   before: unknown;
   after: unknown;
 }
+
+/* ---------------- Spec 009: entornos ---------------- */
+
+export interface EnvironmentInfo {
+  name: string;
+  requireApproval: boolean;
+  signing: boolean;
+  packages: { id: string; version: string; installedAt: string }[];
+}
+
+export interface ExportableCatalogs {
+  entities: { name: string; label: string; labelPlural: string; group?: string | null; children: string[] }[];
+  dashboards: { name: string; label: string }[];
+  exports: { packageId: string; name: string; version: string; hash: string; exportedAt: string; exportedBy: string }[];
+}
+
+export interface ExportRequest {
+  id: string;
+  name: string;
+  version: string;
+  description?: string;
+  entities: string[];
+  dashboards: string[];
+}
+
+export interface PackageRole {
+  name: string;
+  isNew: boolean;
+  canViewAudit: boolean;
+  permissions: { entity: string; label: string; canRead: boolean; canCreate: boolean; canUpdate: boolean; canDelete: boolean }[];
+}
+
+export interface ExportPreview extends PlanPreview {
+  operations: number;
+  entities: string[];
+  roles: PackageRole[];
+  dependencies: string[];
+  warnings: string[];
+  hash: string;
+  signed: boolean;
+}
+
+export type PackageStatus = 'pending' | 'approved' | 'rejected' | 'applied';
+
+export interface PackageImport {
+  id: number;
+  packageId: string;
+  name: string;
+  version: string;
+  previousVersion?: string | null;
+  status: PackageStatus;
+  hash: string;
+  signed: boolean;
+  sourceEnvironment?: string | null;
+  exportedAt?: string | null;
+  uploadedBy: string;
+  uploadedAt: string;
+  reviewedBy?: string | null;
+  reviewedAt?: string | null;
+  reviewComment?: string | null;
+  appliedBy?: string | null;
+  appliedAt?: string | null;
+  changeSetId?: number | null;
+  description?: string | null;
+  installedVersion?: string | null;
+  diff?: (PlanPreview & { conflicts: string[]; warnings: string[]; roles: PackageRole[]; diffHash: string; empty: boolean }) | null;
+  canApprove: boolean;
+  canApply: boolean;
+  blockedReason?: string | null;
+}

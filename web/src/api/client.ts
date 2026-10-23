@@ -47,6 +47,8 @@ interface RequestOptions {
   body?: unknown;
   /** Spec 008: archivo tal cual (importación); no se serializa como JSON. */
   rawBody?: Blob;
+  /** Spec 009: la respuesta es un archivo para descargar. */
+  asBlob?: boolean;
   query?: Record<string, string | number | boolean | undefined | null>;
   signal?: AbortSignal;
   /** Do not trigger the global 401 redirect (used by login / me). */
@@ -100,6 +102,7 @@ export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T
   }
 
   if (res.status === 204) return undefined as T;
+  if (opts.asBlob) return (await res.blob()) as T;
   const text = await res.text();
   return (text ? JSON.parse(text) : undefined) as T;
 }

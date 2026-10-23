@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
-  BarChart3, Blocks, ChevronRight, Gauge, History, LayoutDashboard, LogOut, Moon, PanelLeftClose, PanelLeftOpen,
+  BarChart3, Blocks, ChevronRight, Gauge, GitCompareArrows, History, LayoutDashboard, LogOut, Moon, PanelLeftClose, PanelLeftOpen,
   ShieldCheck, Sun, Webhook, Workflow,
 } from 'lucide-react';
 import { dashboardsApi, reportsApi } from '../api/endpoints';
@@ -57,7 +57,7 @@ function useBreadcrumb(): { label: string; to?: string }[] {
     if (parts[1]) crumbs.push({ label: reports ? 'Reporte' : decodeURIComponent(parts[1]) });
   } else if (parts[0] === 'admin') {
     crumbs.push({ label: 'Configuración' });
-    const map: Record<string, string> = { model: 'Modelador', security: 'Usuarios y roles', audit: 'Auditoría', modules: 'Módulos', integrations: 'Integraciones' };
+    const map: Record<string, string> = { model: 'Modelador', security: 'Usuarios y roles', audit: 'Auditoría', modules: 'Módulos', integrations: 'Integraciones', environments: 'Entornos' };
     if (parts[1]) crumbs.push({ label: map[parts[1]] ?? parts[1] });
   }
   return crumbs;
@@ -216,6 +216,11 @@ export function Layout() {
               {me?.isSuperuser && (
                 <NavLink to="/admin/integrations" className="nav-link" title="Integraciones">
                   <Webhook size={17} aria-hidden /><span>Integraciones</span>
+                </NavLink>
+              )}
+              {me?.isSuperuser && (
+                <NavLink to="/admin/environments" className="nav-link" title="Entornos">
+                  <GitCompareArrows size={17} aria-hidden /><span>Entornos</span>
                 </NavLink>
               )}
             </div>

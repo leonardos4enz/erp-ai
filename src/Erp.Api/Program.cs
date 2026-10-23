@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Threading.RateLimiting;
 using Erp.Api.Data;
 using Erp.Api.Endpoints;
+using Erp.Api.Environments;
 using Erp.Api.Infrastructure;
 using Erp.Api.Integrations;
 using Erp.Api.Metadata;
@@ -56,6 +57,9 @@ builder.Services.AddSingleton<WebhookSender>();
 builder.Services.AddScoped<WebhookService>();
 builder.Services.AddScoped<ApiKeyService>();
 builder.Services.AddHostedService<WebhookDispatcher>();
+// Spec 009: entornos. Nombre, aprobación obligatoria y clave de firma son configuración del servidor, no de la aplicación.
+builder.Services.AddSingleton(EnvironmentOptions.From(builder.Configuration));
+builder.Services.AddScoped<EnvironmentService>();
 
 // ---------- Autenticación: cookie (ADR-0002) ----------
 // Spec 008: con «Authorization: Bearer» se usa la clave de API (y nunca la cookie); si no, la cookie.
@@ -145,6 +149,7 @@ app.MapAdmin();
 app.MapAudit();
 app.MapAnalytics();
 app.MapIntegrations();
+app.MapEnvironments();
 app.MapGet("/api/health", () => Results.Ok(new { status = "ok" })).AllowAnonymous();
 app.MapFallback("/api/{**path}", () => Results.Problem(title: "Ruta no encontrada.", statusCode: 404));
 

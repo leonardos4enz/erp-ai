@@ -52,4 +52,5 @@ y cada sesión queda como registro de una sola entrega. Al cerrar la spec:
 | 006 | [Seguridad por campo y por registro](specs/006-seguridad-campos-registros/spec.md) | Implementado |
 | 007 | [Metadatos de interfaz: layouts, vistas, reportes y tableros](specs/007-metadatos-interfaz/spec.md) | Implementado |
 | 008 | [Integraciones: webhooks, claves de API, importación y exportación](specs/008-integraciones/spec.md) | Implementado |
-| 009–011 | Entornos, multi-empresa, IA | [Roadmap](roadmap.md) |
+| 009 | [Entornos: ciclo de vida de metadatos (sandbox → pruebas → producción)](specs/009-entornos/spec.md) | Implementado |
+| 010–011 | Multi-empresa, IA | [Roadmap](roadmap.md) |

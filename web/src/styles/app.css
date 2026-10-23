@@ -542,3 +542,23 @@ input[type="file"].input { min-width: 0; max-width: 100%; }
 .import-errors { margin: var(--space-2) 0 0; padding-left: 1.1em; display: grid; gap: 2px; }
 .secret-box { display: flex; gap: var(--space-2); align-items: center; }
 .secret-box code { flex: 1; min-width: 0; overflow-wrap: anywhere; padding: var(--space-2) var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-sm, 6px); background: var(--surface-2, var(--surface)); font-size: var(--text-sm); }
+
+/* Spec 009: entornos */
+.env-card { padding: var(--space-4) var(--space-5); }
+.env-current { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; margin-bottom: var(--space-4); }
+/* Regresión (verificación 009, F-04): en móvil las insignias aplastaban «Este entorno» en dos renglones. */
+.env-current > .grow { min-width: 10rem; }
+.env-name { font-size: var(--text-lg); font-weight: 600; }
+.env-toolbar { flex-wrap: wrap; }
+.env-file { position: relative; } /* el input .sr-only (absoluto) no escapa de su contenedor */
+.env-hash { overflow-wrap: anywhere; font-size: var(--text-xs); }
+.env-pick { border: 0; padding: 0; margin: 0; min-width: 0; }
+.env-pick-group { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--space-2) var(--space-4); margin-top: var(--space-2); }
+.env-pick-title { grid-column: 1 / -1; font-size: var(--text-xs); text-transform: uppercase; letter-spacing: .04em; }
+.env-pick-hint { margin-left: 26px; }
+.env-trail { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; font-size: var(--text-sm); }
+.env-roles { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
+.env-roles li { display: flex; gap: var(--space-3); align-items: flex-start; padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-md); }
+.env-roles li > svg { margin-top: 3px; color: var(--accent); flex-shrink: 0; }
+.env-roles .subtle { font-size: var(--text-sm); overflow-wrap: anywhere; }
+@media (max-width: 640px) { .env-card { padding: var(--space-3); } }

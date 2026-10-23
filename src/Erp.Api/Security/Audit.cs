@@ -23,6 +23,13 @@ public static class AuditActions
     public const string ApiKeyChange = "integration.apikey";
     public const string Import = "data.import";
     public const string Export = "data.export";
+    /// <summary>Spec 009: paquetes de metadatos entre entornos (exportar, subir, rechazo al subir, aprobar, rechazar, aplicar).</summary>
+    public const string EnvironmentExport = "environment.export";
+    public const string EnvironmentUpload = "environment.upload";
+    public const string EnvironmentRejected = "environment.rejected";
+    public const string EnvironmentApprove = "environment.approve";
+    public const string EnvironmentReject = "environment.reject";
+    public const string EnvironmentApply = "environment.apply";
 }
 
 public static class Audit

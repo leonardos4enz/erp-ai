@@ -316,6 +316,47 @@ public static class Bootstrap
             InstalledBy int NOT NULL REFERENCES meta.[User](Id)
         );
 
+        -- Spec 009: paquetes de metadatos recibidos (con su revisión) y exportados.
+        IF OBJECT_ID('meta.PackageImport') IS NULL
+        CREATE TABLE meta.PackageImport (
+            Id int IDENTITY PRIMARY KEY,
+            PackageId nvarchar(50) NOT NULL,
+            Name nvarchar(100) NOT NULL,
+            Version nvarchar(20) NOT NULL,
+            Description nvarchar(500) NULL,
+            SourceEnvironment nvarchar(100) NULL,
+            ExportedAt datetime2(3) NULL,
+            ContentJson nvarchar(max) NOT NULL,
+            ContentHash char(64) NOT NULL,
+            Signed bit NOT NULL,
+            Status nvarchar(12) NOT NULL,
+            PreviousVersion nvarchar(20) NULL,
+            UploadedBy int NOT NULL REFERENCES meta.[User](Id),
+            UploadedAt datetime2(3) NOT NULL DEFAULT SYSUTCDATETIME(),
+            ReviewedBy int NULL REFERENCES meta.[User](Id),
+            ReviewedAt datetime2(3) NULL,
+            ReviewComment nvarchar(500) NULL,
+            ApprovedDiffHash char(64) NULL,
+            AppliedBy int NULL REFERENCES meta.[User](Id),
+            AppliedAt datetime2(3) NULL,
+            ChangeSetId int NULL
+        );
+        IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_PackageImport_Hash')
+            CREATE INDEX IX_PackageImport_Hash ON meta.PackageImport (ContentHash, Status);
+
+        IF OBJECT_ID('meta.PackageExport') IS NULL
+        CREATE TABLE meta.PackageExport (
+            Id int IDENTITY PRIMARY KEY,
+            PackageId nvarchar(50) NOT NULL,
+            Name nvarchar(100) NOT NULL,
+            Version nvarchar(20) NOT NULL,
+            ContentHash char(64) NOT NULL,
+            Signed bit NOT NULL,
+            EntitiesJson nvarchar(max) NOT NULL,
+            ExportedBy int NOT NULL REFERENCES meta.[User](Id),
+            ExportedAt datetime2(3) NOT NULL DEFAULT SYSUTCDATETIME()
+        );
+
         -- Constitución II.4: la auditoría es de solo inserción, incluso para la propia aplicación.
         IF OBJECT_ID('meta.TR_AuditLog_Immutable') IS NULL
             EXEC('CREATE TRIGGER meta.TR_AuditLog_Immutable ON meta.AuditLog INSTEAD OF UPDATE, DELETE AS

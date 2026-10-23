@@ -25,6 +25,8 @@ const env = {
   E2E_DB: db,
   E2E_SQL_SERVER: server,
   E2E_ADMIN_PASSWORD: process.env.E2E_ADMIN_PASSWORD ?? `E2e-${randomBytes(12).toString('base64url')}`,
+  // Spec 009: clave de firma de paquetes, también nueva por corrida.
+  E2E_SIGNING_KEY: process.env.E2E_SIGNING_KEY ?? randomBytes(32).toString('base64url'),
 };
 const result = spawnSync('npx', ['playwright', 'test', ...process.argv.slice(2)], { stdio: 'inherit', shell: true, env });
 process.exit(result.status ?? 1);

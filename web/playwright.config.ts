@@ -6,7 +6,7 @@ const root = path.resolve(import.meta.dirname, '..');
 const db = process.env.E2E_DB ?? 'ErpAi_E2E';
 const server = process.env.E2E_SQL_SERVER ?? '(localdb)\\MSSQLLocalDB';
 
-if (!process.env.E2E_ADMIN_PASSWORD) {
+if (!process.env.E2E_ADMIN_PASSWORD || !process.env.E2E_SIGNING_KEY) {
   throw new Error('Ejecuta la suite con "npm run e2e" (prepara la base y la contraseña de prueba).');
 }
 
@@ -53,6 +53,10 @@ export default defineConfig({
       Webhooks__AllowedInternalAddresses: '127.0.0.1',
       Webhooks__PollSeconds: '1',
       Webhooks__RetryDelaysSeconds: '1,1',
+      // Spec 009: la suite se comporta como producción (aprobación de otro administrador y paquetes firmados).
+      Environments__Name: 'Producción E2E',
+      Environments__RequireApproval: 'true',
+      Environments__SigningKey: process.env.E2E_SIGNING_KEY ?? '',
       Spa__Path: path.join(root, 'web', 'dist'),
     },
   },

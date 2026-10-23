@@ -1,7 +1,7 @@
 import { api } from './client';
 import type {
   AuditEntry, ChangePlan, ChangeSetSummary, DashboardResult, DashboardSummary, EntityDef, HistoryEntry, LayoutState, LookupItem, Me,
-  ApiKey, ImportResult, ModuleInfo, ModulePreview, WebhookDelivery, WebhookSummary, Paged, PlanPreview, ReportResult, ReportSummary, Role, Row, RowList, SavedView, User, ViewFilter, ViewList,
+  ApiKey, EnvironmentInfo, ExportableCatalogs, ExportPreview, ExportRequest, ImportResult, ModuleInfo, PackageImport, ModulePreview, WebhookDelivery, WebhookSummary, Paged, PlanPreview, ReportResult, ReportSummary, Role, Row, RowList, SavedView, User, ViewFilter, ViewList,
 } from './types';
 
 const enc = encodeURIComponent;
@@ -179,4 +179,21 @@ export const integrationsApi = {
 export const auditApi = {
   list: (q: { entity?: string; page: number; pageSize: number }) =>
     api<Paged<AuditEntry>>('/audit', { query: q }),
+};
+
+/** Spec 009: paquetes de metadatos entre entornos (solo superusuario). */
+export const environmentsApi = {
+  info: (signal?: AbortSignal) => api<EnvironmentInfo>('/admin/environments', { signal }),
+  exportable: (signal?: AbortSignal) => api<ExportableCatalogs>('/admin/environments/exportable', { signal }),
+  previewExport: (input: ExportRequest) => api<ExportPreview>('/admin/environments/export/preview', { method: 'POST', body: input }),
+  /** El archivo tal cual lo firmó el servidor (no se vuelve a serializar en el navegador). */
+  exportFile: (input: ExportRequest) => api<Blob>('/admin/environments/export', { method: 'POST', body: input, asBlob: true }),
+  imports: (signal?: AbortSignal) => api<PackageImport[]>('/admin/environments/imports', { signal }),
+  upload: (file: Blob) => api<PackageImport>('/admin/environments/imports', { method: 'POST', rawBody: file }),
+  detail: (id: number, signal?: AbortSignal) => api<PackageImport>(`/admin/environments/imports/${id}`, { signal }),
+  approve: (id: number, diffHash: string, comment?: string) =>
+    api<PackageImport>(`/admin/environments/imports/${id}/approve`, { method: 'POST', body: { diffHash, comment } }),
+  reject: (id: number, comment: string) => api<PackageImport>(`/admin/environments/imports/${id}/reject`, { method: 'POST', body: { comment } }),
+  apply: (id: number, diffHash: string) =>
+    api<{ changeSetId: number | null; import: PackageImport }>(`/admin/environments/imports/${id}/apply`, { method: 'POST', body: { diffHash } }),
 };

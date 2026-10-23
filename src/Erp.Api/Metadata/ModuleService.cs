@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using Dapper;
 using Erp.Api.Data;
@@ -18,11 +19,16 @@ public sealed record ModuleSeed(string Entity, string Key, IReadOnlyList<JsonObj
 /// <summary>Spec 008: <c>Roles</c> son roles nuevos (con sus permisos) que la versión agrega, p. ej. un rol de servicio.</summary>
 public sealed record ModuleUpgrade(string Version, string Description, ChangePlan Plan, IReadOnlyList<ModuleRole>? Roles = null);
 
+/// <summary>Spec 009: entorno de origen de un paquete exportado (informativo; la confianza viene de la firma).</summary>
+public sealed record PackageSource(string Environment, DateTime ExportedAt);
+
+/// <summary>Spec 009: <c>Source</c> y <c>Signature</c> solo los llevan los paquetes exportados desde Entornos.</summary>
 public sealed record ModulePackage(string Id, string Name, string Version, string Icon, string Description,
     ChangePlan Plan, IReadOnlyList<ModuleRole> Roles, IReadOnlyList<ModuleSeed> Seed, IReadOnlyList<ModuleUpgrade>? Upgrades = null,
-    IReadOnlyList<string>? Requires = null)
+    IReadOnlyList<string>? Requires = null, PackageSource? Source = null, string? Signature = null)
 {
     /// <summary>Plan base seguido de todas las actualizaciones: lo que recibe una instalación nueva.</summary>
+    [JsonIgnore]
     public IReadOnlyList<(string Label, ChangePlan Plan)> FullChain =>
         [("base", Plan), .. (Upgrades ?? []).Select(u => ($"v{u.Version}", u.Plan))];
 
@@ -30,6 +36,7 @@ public sealed record ModulePackage(string Id, string Name, string Version, strin
         (Upgrades ?? []).Where(u => System.Version.Parse(u.Version) > System.Version.Parse(installed)).ToList();
 
     /// <summary>Roles de la base y de todas las actualizaciones (instalación nueva).</summary>
+    [JsonIgnore]
     public IReadOnlyList<ModuleRole> AllRoles => [.. Roles, .. (Upgrades ?? []).SelectMany(u => u.Roles ?? [])];
 }
 
@@ -193,7 +200,7 @@ public sealed partial class ModuleService(Db db, MetadataStore store, PlanServic
     }
 
     /// <summary>Crea los roles que falten (los existentes se conservan tal cual) y devuelve el id de cada uno.</summary>
-    private static async Task<Dictionary<string, int>> EnsureRolesAsync(SqlConnection cn, SqlTransaction tx, IEnumerable<ModuleRole> roles)
+    internal static async Task<Dictionary<string, int>> EnsureRolesAsync(SqlConnection cn, SqlTransaction tx, IEnumerable<ModuleRole> roles)
     {
         var roleIds = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         foreach (var r in roles)
@@ -207,7 +214,7 @@ public sealed partial class ModuleService(Db db, MetadataStore store, PlanServic
         return roleIds;
     }
 
-    private static async Task GrantAsync(SqlConnection cn, SqlTransaction tx, IEnumerable<ModuleRole> roles, Dictionary<string, int> roleIds,
+    internal static async Task GrantAsync(SqlConnection cn, SqlTransaction tx, IEnumerable<ModuleRole> roles, Dictionary<string, int> roleIds,
         IReadOnlyDictionary<string, EntityDef> model)
     {
         foreach (var r in roles)

@@ -14,8 +14,8 @@ en orden, no en paralelo: casi todas tocan el núcleo del motor (`PlanCompiler`,
 | 006 Seguridad por campo/registro | Implementado ([spec](specs/006-seguridad-campos-registros/spec.md)) |
 | 007 Vistas, layouts, reportes | Implementado ([spec](specs/007-metadatos-interfaz/spec.md)) |
 | 008 Integraciones | Implementado ([spec](specs/008-integraciones/spec.md)) |
-| 009 Entornos | **Siguiente** |
-| 010 Multi-empresa / multi-moneda | Pendiente |
+| 009 Entornos | Implementado ([spec](specs/009-entornos/spec.md)) |
+| 010 Multi-empresa / multi-moneda | **Siguiente** |
 | 011 Asistente IA | Pendiente |
 
 ## Diagnóstico
@@ -25,7 +25,7 @@ en orden, no en paralelo: casi todas tocan el núcleo del motor (`PlanCompiler`,
 | Seguridad por campo y por registro | ~~Solo permisos por entidad~~ Resuelto en la 006: campos ocultos/solo lectura por rol y por estado, alcance por registro (propios, unidad, todos, reglas `where`) en el servidor | **006** |
 | Metadatos de interfaz | ~~El formulario se deriva del orden de los campos~~ Resuelto en la 007: layouts con secciones, pestañas y visibilidad condicional; vistas compartidas y personales; reportes exportables; tableros; todo con la seguridad de la 006 en el servidor | **007** |
 | Integraciones y webhooks | ~~No existen~~ Resuelto en la 008: webhooks firmados con bandeja transaccional y reintentos, claves de API por rol con rotación, importación masiva por el motor y exportación de listados, todo con la seguridad de la 006 | **008** |
-| Entornos (sandbox → producción) | Los módulos se instalan y actualizan, pero no se exporta lo hecho en el modelador | **009** |
+| Entornos (sandbox → producción) | ~~No se exporta lo hecho en el modelador~~ Resuelto en la 009: paquetes exportados con el formato de los módulos, firmados, con diff contra el destino (plan mínimo por el Plan de Cambios), aplicación versionada y aprobación de otro administrador en producción | **009** |
 | Multi-empresa y multi-moneda real | Una sola empresa; el tipo de cambio se captura a mano | **010** |
 | Extensión con código | Prohibida por la constitución (I.1), a propósito | Decisión abajo |
 
@@ -76,6 +76,9 @@ en orden, no en paralelo: casi todas tocan el núcleo del motor (`PlanCompiler`,
 - Exportar lo hecho en el modelador como **paquete** (mismo formato que los módulos), con *diff*
   contra el entorno destino y aplicación como actualización versionada.
 - Flujo sandbox → pruebas → producción con aprobación.
+- Implementado. Para la 010: la empresa será configuración del entorno o dato, no metadato del paquete; si se agrega
+  metadato nuevo (p. ej. catálogos «por empresa»), `ModelDiff` debe compararlo (la prueba de ida y vuelta lo detecta).
+  Pendiente: archivar catálogos completos por paquete y un indicador del entorno en la barra superior.
 
 ### 010 — Multi-empresa y multi-moneda
 - Empresa como dimensión de seguridad por registro (requiere 006), con catálogos compartidos o por empresa.
