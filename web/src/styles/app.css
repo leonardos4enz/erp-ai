@@ -592,3 +592,38 @@ code, pre, .mono { font-family: var(--font-mono); font-size: 0.8125rem; }
 .env-roles li > svg { margin-top: 3px; color: var(--accent); flex-shrink: 0; }
 .env-roles .subtle { font-size: var(--text-sm); overflow-wrap: anywhere; }
 @media (max-width: 640px) { .env-card { padding: var(--space-3); } }
+
+/* ---------- Spec 011: asistente IA ---------- */
+.inline-code { font-family: var(--font-mono, ui-monospace, monospace); font-size: 0.92em; background: var(--surface-2); border-radius: var(--radius-sm, 4px); padding: 1px 5px; margin: 0 3px; overflow-wrap: anywhere; }
+.assistant-setup { display: flex; flex-direction: column; gap: var(--space-3); max-width: 640px; }
+.assistant-key-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-3); align-items: start; }
+.assistant-key-form > .btn { margin-top: 1.6rem; }
+.assistant-layout { display: grid; grid-template-columns: minmax(200px, 260px) minmax(0, 1fr); gap: var(--space-4); align-items: start; }
+.assistant-history { padding: var(--space-3); position: sticky; top: 0; max-height: calc(100vh - 140px); overflow-y: auto; }
+.assistant-history ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.assistant-history-item { width: 100%; text-align: left; display: grid; gap: 2px; padding: var(--space-2) var(--space-3); border: 0; border-radius: var(--radius-md); background: none; color: var(--text); cursor: pointer; font: inherit; }
+.assistant-history-item:hover { background: var(--surface-2); }
+.assistant-history-item[aria-current="true"] { background: var(--accent-soft); color: var(--accent-text); }
+.assistant-history-item .subtle { font-size: var(--text-xs); }
+.assistant-history-title { overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+.assistant-main { display: flex; flex-direction: column; gap: var(--space-4); min-width: 0; }
+.assistant-thread { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-5); }
+.assistant-thread:empty { display: none; }
+.assistant-turn { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; }
+.assistant-prompt { align-self: flex-end; max-width: min(85%, 640px); background: var(--accent-soft); color: var(--text); padding: var(--space-3) var(--space-4); border-radius: var(--radius-lg); white-space: pre-wrap; overflow-wrap: anywhere; }
+.assistant-response { min-width: 0; }
+.assistant-explanation { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.55; }
+.assistant-json summary { cursor: pointer; display: inline-flex; align-items: center; gap: var(--space-2); color: var(--text-muted); }
+.assistant-json .code-block { margin-top: var(--space-2); max-height: 360px; border-radius: var(--radius-md); }
+.assistant-composer { display: flex; flex-direction: column; gap: var(--space-3); position: sticky; bottom: 0; z-index: 1; }
+.assistant-examples { display: grid; gap: var(--space-2); margin-top: var(--space-3); max-width: 560px; width: 100%; }
+.assistant-example { text-align: left; padding: var(--space-2) var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); color: var(--text); cursor: pointer; font: inherit; }
+.assistant-example:hover { border-color: var(--accent); }
+@media (max-width: 560px) { .assistant-key-form { grid-template-columns: minmax(0, 1fr); } .assistant-key-form > .btn { margin-top: 0; } }
+/* Regresión F-04 (011): fijo, el redactor tapaba casi media pantalla en móvil o en ventanas bajas. */
+@media (max-width: 900px), (max-height: 720px) { .assistant-composer { position: static; } }
+@media (max-width: 900px) {
+  .assistant-layout { grid-template-columns: minmax(0, 1fr); }
+  .assistant-history { position: static; max-height: 240px; order: 2; }
+  .assistant-prompt { max-width: 100%; }
+}

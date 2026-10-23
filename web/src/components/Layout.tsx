@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
   BarChart3, Blocks, Building2, Check, ChevronDown, ChevronRight, Gauge, GitCompareArrows, History, LayoutDashboard, LogOut, Moon, PanelLeftClose, PanelLeftOpen,
-  ShieldCheck, Sun, Webhook, Workflow,
+  ShieldCheck, Sparkles, Sun, Webhook, Workflow,
 } from 'lucide-react';
 import { dashboardsApi, reportsApi } from '../api/endpoints';
 import type { EntityDef } from '../api/types';
@@ -57,7 +57,7 @@ function useBreadcrumb(): { label: string; to?: string }[] {
     if (parts[1]) crumbs.push({ label: reports ? 'Reporte' : decodeURIComponent(parts[1]) });
   } else if (parts[0] === 'admin') {
     crumbs.push({ label: 'Configuración' });
-    const map: Record<string, string> = { model: 'Modelador', security: 'Usuarios y roles', audit: 'Auditoría', modules: 'Módulos', integrations: 'Integraciones', environments: 'Entornos', companies: 'Empresas' };
+    const map: Record<string, string> = { model: 'Modelador', security: 'Usuarios y roles', audit: 'Auditoría', modules: 'Módulos', integrations: 'Integraciones', environments: 'Entornos', companies: 'Empresas', assistant: 'Asistente IA' };
     if (parts[1]) crumbs.push({ label: map[parts[1]] ?? parts[1] });
   }
   return crumbs;
@@ -316,6 +316,12 @@ export function Layout() {
               {me?.isSuperuser && (
                 <NavLink to="/admin/companies" className="nav-link" title="Empresas">
                   <Building2 size={17} aria-hidden /><span>Empresas</span>
+                </NavLink>
+              )}
+              {/* Spec 011: al final de «Configuración», para no mover lo que capturan las referencias visuales. */}
+              {canModel && (
+                <NavLink to="/admin/assistant" className="nav-link" title="Asistente IA">
+                  <Sparkles size={17} aria-hidden /><span>Asistente IA</span>
                 </NavLink>
               )}
             </div>

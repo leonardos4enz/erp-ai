@@ -39,6 +39,6 @@
 ## Pendiente (siguientes specs)
 - [x] Spec 002: motor de procesos (estados, aprobaciones), fórmulas, reglas, módulos
 - [x] Spec 003: módulo de Compras
-- [ ] Spec 004: asistente IA (MiniMax) que genera `ChangePlan` → vista previa → confirmación humana
+- [x] Spec 011: asistente IA (Claude, [ADR-0003](../../../adr/0003-asistente-ia-anthropic.md)) que genera `ChangePlan` → vista previa → confirmación humana
 - [ ] Prueba automática de zona horaria para campos fecha-hora (F-02)
 - [ ] 2FA (TOTP) para roles con permisos de modelo/usuarios

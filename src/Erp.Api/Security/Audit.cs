@@ -34,6 +34,12 @@ public static class AuditActions
     public const string CompanyChange = "company.change";
     public const string RateChange = "rate.change";
     public const string CompanySwitch = "user.company";
+    /// <summary>Spec 011: solicitud al asistente IA (con su resultado), propuesta aplicada y propuesta descartada.</summary>
+    public const string AssistantPropose = "assistant.propose";
+    public const string AssistantApply = "assistant.apply";
+    public const string AssistantDiscard = "assistant.discard";
+    /// <summary>Spec 011: un administrador guardó o quitó la clave de Anthropic desde la app (nunca la clave).</summary>
+    public const string AssistantKey = "assistant.key";
 }
 
 public static class Audit

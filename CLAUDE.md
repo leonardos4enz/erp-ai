@@ -39,7 +39,7 @@ Servidor de desarrollo: `.claude/launch.json` → `erp-api` (http://localhost:50
 - En expresiones, comparar contra nulo da *desconocido*: una regla sobre un campo vacío no se viola.
 
 ## Antes de cada push (repositorio público)
-- `git diff --cached` sin secretos: contraseñas reales, API keys (MiniMax va en user-secrets), tokens.
+- `git diff --cached` sin secretos: contraseñas reales, API keys (la de Anthropic se captura en la app, cifrada; nunca en archivos), tokens.
 - Sin artefactos: `bin/`, `obj/`, `node_modules/`, `web/dist/`, `web/e2e/.auth|.results|.report`, `*.tsbuildinfo`.
 - Credenciales de desarrollo: el usuario `admin` es del dueño; no cambiarla ni escribirla en archivos.
 

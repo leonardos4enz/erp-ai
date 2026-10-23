@@ -54,4 +54,4 @@ y cada sesión queda como registro de una sola entrega. Al cerrar la spec:
 | 008 | [Integraciones: webhooks, claves de API, importación y exportación](specs/008-integraciones/spec.md) | Implementado |
 | 009 | [Entornos: ciclo de vida de metadatos (sandbox → pruebas → producción)](specs/009-entornos/spec.md) | Implementado |
 | 010 | [Multi-empresa y multi-moneda](specs/010-multi-empresa-moneda/spec.md) | Implementado |
-| 011 | Asistente IA | [Roadmap](roadmap.md) |
+| 011 | [Asistente IA (Claude)](specs/011-asistente-ia/spec.md) | Implementado |

@@ -16,7 +16,7 @@ en orden, no en paralelo: casi todas tocan el núcleo del motor (`PlanCompiler`,
 | 008 Integraciones | Implementado ([spec](specs/008-integraciones/spec.md)) |
 | 009 Entornos | Implementado ([spec](specs/009-entornos/spec.md)) |
 | 010 Multi-empresa / multi-moneda | Implementado ([spec](specs/010-multi-empresa-moneda/spec.md)) |
-| 011 Asistente IA | **Siguiente** |
+| 011 Asistente IA (Claude) | Implementado ([spec](specs/011-asistente-ia/spec.md)) |
 
 ## Diagnóstico
 | Brecha señalada | Situación actual | Spec |
@@ -88,9 +88,13 @@ en orden, no en paralelo: casi todas tocan el núcleo del motor (`PlanCompiler`,
   como cualquier metadato; no debe proponer datos del entorno (empresas, tipos de cambio). Pendiente: series de folios
   por empresa, consolidación entre empresas, rol de finanzas para capturar tipos de cambio y carga automática.
 
-### 011 — Asistente IA (MiniMax)
+### 011 — Asistente IA
 Va al final a propósito: la IA solo propone planes de cambios, y cuanto más completo sea el lenguaje
 de metadatos, más puede construir.
+- Implementado con **Claude (Anthropic)** en lugar de MiniMax, a pedido del dueño ([ADR-0003](../adr/0003-asistente-ia-anthropic.md)).
+  El asistente recibe solo metadatos, devuelve un Plan de Cambios que pasa por el mismo compilador y vista previa, se
+  corrige con los errores del compilador y lo aplica la persona que lo pidió. Pendiente: respuestas en flujo y editar el
+  plan propuesto en el modelador antes de aplicarlo.
 
 ## Decisión: ¿extensión con código?
 La auditoría tiene razón en el costo: cada necesidad nueva exige una capacidad del motor. Se mantiene

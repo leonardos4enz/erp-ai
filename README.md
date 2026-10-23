@@ -1,9 +1,9 @@
 # ERP AI
 
 ERP **dirigido por metadatos**: los catálogos, campos y reglas se definen como datos, no como código.
-El motor genera las tablas en SQL Server, la API y las pantallas. Más adelante, un asistente de IA
-podrá proponer cambios en lenguaje natural ("haz un catálogo de empaques") usando la misma vía
-segura que la interfaz: **Planes de Cambios** validados, con vista previa y confirmación humana.
+El motor genera las tablas en SQL Server, la API y las pantallas. Un asistente de IA (Claude) propone
+cambios en lenguaje natural ("haz un catálogo de empaques") usando la misma vía segura que la interfaz:
+**Planes de Cambios** validados, con vista previa y confirmación humana.
 
 ## Requisitos
 - .NET 10 SDK
@@ -25,6 +25,8 @@ su contraseña aleatoria **aparece una sola vez en la consola**. Para fijarla t�
 ```bash
 dotnet user-secrets --project src/Erp.Api set "Bootstrap:AdminPassword" "una-frase-larga-y-segura"
 ```
+Para activar el *Asistente IA* (opcional; sin clave, el resto funciona igual), entra como administrador a
+*Configuración › Asistente IA* y pega tu clave de Anthropic (se prueba y se guarda cifrada).
 Para desarrollo del frontend con recarga en caliente, además ejecuta `npm --prefix web run dev`
 y abre http://localhost:5173 (proxy a la API).
 
@@ -60,6 +62,7 @@ Cómo se cierra una spec (incluye la revisión exploratoria con agente): [docs/s
 | `src/Erp.Api/Metadata` | Modelo, validación de identificadores, generador DDL, Planes de Cambios |
 | `src/Erp.Api/Data` | Motor CRUD genérico |
 | `src/Erp.Api/Security` | Contraseñas, permisos, auditoría |
+| `src/Erp.Api/Assistant` | Asistente IA: contexto (solo metadatos), proveedor, interpretación de propuestas |
 | `src/Erp.Api/Endpoints` | API REST |
 | `web/` | SPA React + TypeScript (Lucide, modo claro/oscuro) |
 
@@ -75,4 +78,4 @@ Ver [constitución](docs/sdd/constitution.md) y [análisis STRIDE](docs/sdd/spec
 ## Producción (pendiente de configurar)
 - Cadena de conexión por variable de entorno `ConnectionStrings__Erp`, con un login de mínimo privilegio (ver ADR-0001).
 - `AllowedHosts`, HTTPS/HSTS y persistencia de llaves de Data Protection (ver ADR-0002).
-- La API key de MiniMax irá en user-secrets / vault, nunca en el repositorio.
+- La API key de Anthropic se captura en la app (cifrada con Data Protection: persistir y proteger sus llaves) o va en la variable de entorno `Assistant__AnthropicApiKey`; nunca en el repositorio ([ADR-0003](docs/adr/0003-asistente-ia-anthropic.md)).

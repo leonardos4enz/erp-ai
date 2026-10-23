@@ -111,12 +111,16 @@ export interface TextareaProps extends TextareaHTMLAttributes<HTMLTextAreaElemen
   wrapClassName?: string;
 }
 
-export function Textarea({ label, hint, error, wrapClassName, className, id, required, ...rest }: TextareaProps) {
+export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(function Textarea(
+  { label, hint, error, wrapClassName, className, id, required, ...rest },
+  ref,
+) {
   const autoId = useId();
   const tid = id ?? autoId;
   return (
     <Field label={label} required={required} hint={hint} error={error} htmlFor={tid} className={wrapClassName}>
       <textarea
+        ref={ref}
         id={tid}
         className={['textarea', className].filter(Boolean).join(' ')}
         aria-invalid={error ? true : undefined}
@@ -126,7 +130,7 @@ export function Textarea({ label, hint, error, wrapClassName, className, id, req
       />
     </Field>
   );
-}
+});
 
 export interface SelectProps extends SelectHTMLAttributes<HTMLSelectElement> {
   label?: ReactNode;

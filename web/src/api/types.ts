@@ -520,3 +520,31 @@ export interface PackageImport {
   canApply: boolean;
   blockedReason?: string | null;
 }
+
+// ---------- Spec 011: asistente IA ----------
+export interface AssistantStatus {
+  configured: boolean; model: string | null; maxPromptChars: number; requestsPerHour: number; remaining: number;
+  /** server: user-secrets o variable de entorno; app: guardada por un administrador desde esta pantalla. */
+  keySource: 'server' | 'app' | null; keyUpdatedAt?: string; keyUpdatedBy?: string; canConfigure: boolean;
+}
+export type ProposalStatus = 'proposed' | 'invalid' | 'answer' | 'failed' | 'applied' | 'discarded' | 'superseded';
+export interface Proposal {
+  id: number;
+  conversationId: number;
+  prompt: string;
+  status: ProposalStatus;
+  explanation?: string;
+  plan?: ChangePlan;
+  preview?: PlanPreview;
+  warnings: string[];
+  errors: string[];
+  attempts: number;
+  model: string;
+  createdAt: string;
+  appliedAt?: string;
+  changeSetId?: number;
+  error?: string;
+  canApply: boolean;
+}
+export interface ConversationSummary { id: number; title: string; turns: number; updatedAt: string; lastStatus: ProposalStatus }
+export interface Conversation { id: number; turns: Proposal[] }

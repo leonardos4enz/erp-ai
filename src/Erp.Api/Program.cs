@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using System.Text.Json;
 using System.Threading.RateLimiting;
+using Erp.Api.Assistant;
 using Erp.Api.Data;
 using Erp.Api.Endpoints;
 using Erp.Api.Environments;
@@ -60,6 +61,12 @@ builder.Services.AddHostedService<WebhookDispatcher>();
 // Spec 009: entornos. Nombre, aprobación obligatoria y clave de firma son configuración del servidor, no de la aplicación.
 builder.Services.AddSingleton(EnvironmentOptions.From(builder.Configuration));
 builder.Services.AddScoped<EnvironmentService>();
+// Spec 011: asistente IA. La clave de Anthropic la guarda un administrador desde la app (cifrada con Data Protection);
+// si el servidor la trae por configuración (user-secrets o variable de entorno), esa manda.
+builder.Services.AddSingleton(AssistantOptions.From(builder.Configuration));
+builder.Services.AddSingleton<IAssistantModel, AnthropicAssistantModel>();
+builder.Services.AddSingleton<AssistantKeys>();
+builder.Services.AddScoped<AssistantService>();
 
 // ---------- Autenticación: cookie (ADR-0002) ----------
 // Spec 008: con «Authorization: Bearer» se usa la clave de API (y nunca la cookie); si no, la cookie.
@@ -110,7 +117,12 @@ builder.Services.AddRateLimiter(o =>
         }));
     o.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(http => RateLimitPartition.GetFixedWindowLimiter(
         http.User.Identity?.Name ?? http.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-        _ => new FixedWindowRateLimiterOptions { PermitLimit = 600, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+        // Configurable solo para la suite E2E, que hace como administrador más de 600 peticiones por minuto.
+        _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = builder.Configuration.GetValue("Security:RequestsPerMinute", 600),
+            Window = TimeSpan.FromMinutes(1), QueueLimit = 0,
+        }));
 });
 
 var app = builder.Build();
@@ -151,6 +163,7 @@ app.MapAnalytics();
 app.MapIntegrations();
 app.MapEnvironments();
 app.MapCompanies();
+app.MapAssistant();
 app.MapGet("/api/health", () => Results.Ok(new { status = "ok" })).AllowAnonymous();
 app.MapFallback("/api/{**path}", () => Results.Problem(title: "Ruta no encontrada.", statusCode: 404));
 

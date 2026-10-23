@@ -12,6 +12,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Anthropic" Version="13.2.1" />
     <PackageReference Include="Dapper" Version="2.1.89" />
     <PackageReference Include="Microsoft.Data.SqlClient" Version="7.1.1" />
     <!-- Fijado: la versión transitiva 9.0.18 tiene vulnerabilidades conocidas (GHSA-846f-f764-76mx). -->

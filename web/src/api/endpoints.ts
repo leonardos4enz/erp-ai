@@ -1,7 +1,7 @@
 import { api } from './client';
 import type {
   AuditEntry, ChangePlan, Company, ExchangeRate, ChangeSetSummary, DashboardResult, DashboardSummary, EntityDef, HistoryEntry, LayoutState, LookupItem, Me,
-  ApiKey, EnvironmentInfo, ExportableCatalogs, ExportPreview, ExportRequest, ImportResult, ModuleInfo, PackageImport, ModulePreview, WebhookDelivery, WebhookSummary, Paged, PlanPreview, ReportResult, ReportSummary, Role, Row, RowList, SavedView, User, ViewFilter, ViewList,
+  ApiKey, AssistantStatus, Conversation, ConversationSummary, Proposal, EnvironmentInfo, ExportableCatalogs, ExportPreview, ExportRequest, ImportResult, ModuleInfo, PackageImport, ModulePreview, WebhookDelivery, WebhookSummary, Paged, PlanPreview, ReportResult, ReportSummary, Role, Row, RowList, SavedView, User, ViewFilter, ViewList,
 } from './types';
 
 const enc = encodeURIComponent;
@@ -214,4 +214,18 @@ export const environmentsApi = {
   reject: (id: number, comment: string) => api<PackageImport>(`/admin/environments/imports/${id}/reject`, { method: 'POST', body: { comment } }),
   apply: (id: number, diffHash: string) =>
     api<{ changeSetId: number | null; import: PackageImport }>(`/admin/environments/imports/${id}/apply`, { method: 'POST', body: { diffHash } }),
+};
+
+/** Spec 011: el asistente propone planes; aplicar usa el plan guardado en el servidor. */
+export const assistantApi = {
+  status: (signal?: AbortSignal) => api<AssistantStatus>('/assistant', { signal }),
+  /** El servidor la prueba con Anthropic antes de guardarla; nunca la devuelve. */
+  setKey: (apiKey: string) => api<AssistantStatus>('/assistant/key', { method: 'PUT', body: { apiKey } }),
+  clearKey: () => api<AssistantStatus>('/assistant/key', { method: 'DELETE' }),
+  conversations: (signal?: AbortSignal) => api<ConversationSummary[]>('/assistant/conversations', { signal }),
+  conversation: (id: number, signal?: AbortSignal) => api<Conversation>(`/assistant/conversations/${id}`, { signal }),
+  request: (prompt: string, conversationId?: number) =>
+    api<Proposal>('/assistant/requests', { method: 'POST', body: { prompt, conversationId } }),
+  apply: (id: number) => api<{ changeSetId: number; proposal: Proposal }>(`/assistant/requests/${id}/apply`, { method: 'POST' }),
+  discard: (id: number) => api<Proposal>(`/assistant/requests/${id}/discard`, { method: 'POST' }),
 };

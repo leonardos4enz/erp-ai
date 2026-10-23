@@ -412,6 +412,41 @@ public static class Bootstrap
             CONSTRAINT UX_ExchangeRate_Pair UNIQUE (FromCurrency, ToCurrency, RateDate)
         );
 
+        -- Spec 011: solicitudes al asistente IA con su propuesta (el texto pedido, el plan y la huella del contexto enviado).
+        IF OBJECT_ID('meta.AssistantRequest') IS NULL
+        CREATE TABLE meta.AssistantRequest (
+            Id int IDENTITY PRIMARY KEY,
+            ConversationId int NOT NULL,
+            UserId int NOT NULL REFERENCES meta.[User](Id),
+            Prompt nvarchar(max) NOT NULL,
+            Status nvarchar(12) NOT NULL,
+            Explanation nvarchar(max) NULL,
+            PlanJson nvarchar(max) NULL,
+            ErrorsJson nvarchar(max) NULL,
+            ResponseJson nvarchar(max) NULL,
+            ErrorCode nvarchar(30) NULL,
+            Model nvarchar(100) NOT NULL,
+            Attempts int NOT NULL,
+            InputTokens int NOT NULL,
+            OutputTokens int NOT NULL,
+            ContextHash char(64) NOT NULL,
+            CreatedAt datetime2(3) NOT NULL DEFAULT SYSUTCDATETIME(),
+            AppliedAt datetime2(3) NULL,
+            ChangeSetId int NULL
+        );
+        -- Spec 011: clave de Anthropic guardada desde la app, cifrada con Data Protection (una sola fila).
+        IF OBJECT_ID('meta.AssistantKey') IS NULL
+        CREATE TABLE meta.AssistantKey (
+            Id int NOT NULL PRIMARY KEY CONSTRAINT CK_AssistantKey_One CHECK (Id = 1),
+            KeyProtected nvarchar(max) NOT NULL,
+            UpdatedBy int NOT NULL REFERENCES meta.[User](Id),
+            UpdatedAt datetime2(3) NOT NULL DEFAULT SYSUTCDATETIME()
+        );
+        IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_AssistantRequest_User')
+            CREATE INDEX IX_AssistantRequest_User ON meta.AssistantRequest (UserId, CreatedAt);
+        IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_AssistantRequest_Conversation')
+            CREATE INDEX IX_AssistantRequest_Conversation ON meta.AssistantRequest (ConversationId);
+
         -- Constitución II.4: la auditoría es de solo inserción, incluso para la propia aplicación.
         IF OBJECT_ID('meta.TR_AuditLog_Immutable') IS NULL
             EXEC('CREATE TRIGGER meta.TR_AuditLog_Immutable ON meta.AuditLog INSTEAD OF UPDATE, DELETE AS

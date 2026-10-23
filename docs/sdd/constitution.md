@@ -25,8 +25,8 @@
 5. **Cabeceras seguras.** CSP estricta, `X-Content-Type-Options`, `Referrer-Policy`,
    `frame-ancestors 'none'`, HSTS en producción.
 6. **Errores sin fugas.** Al cliente: ProblemDetails genérico con `traceId`. Detalle solo en logs.
-7. **Secretos fuera del código.** Cadenas de conexión y API keys (p. ej. MiniMax) vía
-   variables de entorno / user-secrets / vault. Nunca en el repositorio.
+7. **Secretos fuera del código.** Cadenas de conexión y API keys (p. ej. Anthropic, [ADR-0003](../adr/0003-asistente-ia-anthropic.md)) vía
+   variables de entorno / user-secrets / vault, o cifradas en la base con Data Protection. Nunca en el repositorio.
 8. **IA sin acceso directo.** El LLM nunca ejecuta SQL ni llama endpoints de datos con
    privilegios propios. Solo propone Planes de Cambios que un humano autorizado confirma.
    El contenido generado por el LLM se trata como entrada no confiable.
