@@ -44,6 +44,8 @@ function csvCell(s: string) {
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
+const formatSize = (bytes: number) => (bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`);
+
 const statusTone = { ok: 'success', ignored: 'neutral', error: 'danger' } as const;
 const statusLabel = { ok: 'Se importa', ignored: 'Se ignora', error: 'Error' } as const;
 
@@ -60,6 +62,7 @@ export function ImportDialog({ open, def, onClose, onImported }: { open: boolean
   const [checking, setChecking] = useState(false);
   const [importing, setImporting] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
+  const [dragging, setDragging] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -116,7 +119,7 @@ export function ImportDialog({ open, def, onClose, onImported }: { open: boolean
       onClose={onClose}
       size="lg"
       title={`Importar ${def.labelPlural.toLowerCase()}`}
-      description="Archivo CSV o Excel (.xlsx) de máximo 2 MB y 1000 filas. La primera fila son los encabezados: el nombre o la etiqueta de cada campo."
+      description="La primera fila son los encabezados: el nombre o la etiqueta de cada campo (máximo 1000 filas). Antes de guardar verás una vista previa."
       footer={
         <>
           <Button icon={Download} onClick={template} style={{ marginRight: 'auto' }}>Descargar plantilla</Button>
@@ -128,17 +131,32 @@ export function ImportDialog({ open, def, onClose, onImported }: { open: boolean
       }
     >
       <div className="stack">
-        <div className="field">
-          <label className="field-label" htmlFor={inputId}>Archivo</label>
+        {/* Zona para elegir o soltar el archivo: el input nativo queda oculto pero accesible (etiqueta «Archivo»). */}
+        <div className="file-picker">
           <input
             ref={fileRef}
             id={inputId}
-            className="input"
+            className="sr-only"
             type="file"
+            aria-label="Archivo"
             accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             onChange={(e) => { const f = e.target.files?.[0]; if (f) void check(f); }}
             data-autofocus
           />
+          <label
+            htmlFor={inputId}
+            className={`file-drop${dragging ? ' dragging' : ''}${file ? ' has-file' : ''}`}
+            onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={(e) => { e.preventDefault(); setDragging(false); const f = e.dataTransfer.files?.[0]; if (f) void check(f); }}
+          >
+            <span className="file-drop-icon" aria-hidden>{file ? <FileSpreadsheet size={20} /> : <Upload size={20} />}</span>
+            <span className="file-drop-text">
+              <strong>{file ? file.name : 'Elige un archivo o suéltalo aquí'}</strong>
+              <span className="subtle">{file ? `${formatSize(file.size)} · elige otro para reemplazarlo` : 'CSV o Excel (.xlsx), máximo 2 MB'}</span>
+            </span>
+            <span className="btn btn-secondary btn-sm file-drop-btn" aria-hidden>{file ? 'Cambiar' : 'Elegir archivo'}</span>
+          </label>
         </div>
 
         {checking && <div className="row" style={{ gap: 'var(--space-2)' }}><Spinner size={16} label="Revisando" /> <span className="muted">Revisando el archivo…</span></div>}

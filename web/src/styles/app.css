@@ -538,10 +538,24 @@ code, pre, .mono { font-family: var(--font-mono); font-size: 0.8125rem; }
 
 /* Spec 008: importación, integraciones */
 .section-title { font-size: var(--text-sm); font-weight: 600; margin: 0 0 var(--space-2); }
-input[type="file"].input { min-width: 0; max-width: 100%; }
 .import-errors { margin: var(--space-2) 0 0; padding-left: 1.1em; display: grid; gap: 2px; }
 .secret-box { display: flex; gap: var(--space-2); align-items: center; }
 .secret-box code { flex: 1; min-width: 0; overflow-wrap: anywhere; padding: var(--space-2) var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-sm, 6px); background: var(--surface-2, var(--surface)); font-size: var(--text-sm); }
+.file-picker { position: relative; } /* el input .sr-only (absoluto) no escapa del diálogo con scroll */
+.file-drop {
+  display: flex; align-items: center; gap: var(--space-3); padding: var(--space-4);
+  border: 1.5px dashed var(--border-strong); border-radius: var(--radius-lg); background: var(--surface-2);
+  cursor: pointer; transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+.file-drop:hover, .file-drop.dragging { border-color: var(--accent); background: var(--accent-soft, var(--surface-2)); }
+.file-picker:focus-within .file-drop { outline: 2px solid var(--accent); outline-offset: 2px; }
+.file-drop.has-file { border-style: solid; }
+.file-drop-icon { display: grid; place-items: center; width: 40px; height: 40px; flex: none; border-radius: var(--radius-sm); background: var(--surface); color: var(--accent); border: 1px solid var(--border); }
+.file-drop-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.file-drop-text strong { font-weight: 500; overflow-wrap: anywhere; }
+.file-drop-text .subtle { font-size: var(--text-sm); }
+.file-drop-btn { flex: none; pointer-events: none; }
+@media (max-width: 480px) { .file-drop-btn { display: none; } }
 
 /* Spec 009: entornos */
 .env-card { padding: var(--space-4) var(--space-5); }
