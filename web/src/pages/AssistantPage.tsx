@@ -113,10 +113,10 @@ export function AssistantPage() {
   }
 
   if (status.loading && !st) return <LoadingBlock />;
-  if (status.error) return <Alert tone="danger" title="No se pudo cargar el asistente">{status.error instanceof ApiError ? status.error.title : "Recarga la página e intenta de nuevo."}</Alert>;
+  if (status.error) return <div className="page"><Alert tone="danger" title="No se pudo cargar el asistente">{status.error instanceof ApiError ? status.error.title : "Recarga la página e intenta de nuevo."}</Alert></div>;
 
   return (
-    <div>
+    <div className="page">
       <PageHeader
         icon={Sparkles}
         title="Asistente IA"

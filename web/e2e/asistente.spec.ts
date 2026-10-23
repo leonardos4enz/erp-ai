@@ -473,6 +473,29 @@ test('Asistente sin desbordes ni elementos tapados de 320 a 760 px', async ({ pa
   await page.setViewportSize({ width: 1280, height: 800 });
 });
 
+// Regresión (reporte del usuario tras cerrar la 011, F-05): la página no usaba el contenedor «page» y quedaba pegada al
+// menú y a la barra superior, sin los márgenes del resto de la configuración.
+test('El asistente tiene los mismos márgenes que las demás páginas de configuración', async ({ page }) => {
+  const offset = async (path: string, title: string) => {
+    await page.goto(path);
+    const heading = page.getByRole('heading', { level: 1, name: title });
+    await expect(heading).toBeVisible();
+    return heading.evaluate((h) => {
+      const main = document.querySelector('.content')!.getBoundingClientRect();
+      const r = h.getBoundingClientRect();
+      return { left: Math.round(r.left - main.left), top: Math.round(r.top - main.top) };
+    });
+  };
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 800 });
+    const reference = await offset('/admin/environments', 'Entornos');
+    const assistant = await offset('/admin/assistant', 'Asistente IA');
+    expect(reference.left, `margen de referencia a ${width}px`).toBeGreaterThanOrEqual(16);
+    expect(assistant, `márgenes del asistente a ${width}px`).toEqual(reference);
+  }
+  await page.setViewportSize({ width: 1280, height: 800 });
+});
+
 // Regresión (revisión exploratoria 011, F-04): en móvil el redactor quedaba fijo abajo y tapaba casi media pantalla
 // mientras se leía la propuesta. Ahora sigue a la conversación y solo aparece al llegar al final.
 test('En móvil el redactor no tapa la conversación mientras se lee', async ({ page }) => {
