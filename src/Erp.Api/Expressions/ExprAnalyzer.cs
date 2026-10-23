@@ -14,7 +14,7 @@ public static class ExprAnalyzer
         ["ROUND"] = (1, 2), ["ABS"] = (1, 1), ["MIN"] = (2, 2), ["MAX"] = (2, 2),
         ["LEN"] = (1, 1), ["UPPER"] = (1, 1), ["ISEMAIL"] = (1, 1),
         ["TODAY"] = (0, 0), ["NOW"] = (0, 0), ["ADDDAYS"] = (2, 2), ["DAYS"] = (2, 2),
-        ["CURRENTUSER"] = (0, 0), ["HASROLE"] = (1, 1), ["ISCREATOR"] = (0, 0),
+        ["CURRENTUSER"] = (0, 0), ["CURRENTUNIT"] = (0, 0), ["HASROLE"] = (1, 1), ["ISCREATOR"] = (0, 0),
         ["SUM"] = (1, 1), ["COUNT"] = (1, 1),
     };
 

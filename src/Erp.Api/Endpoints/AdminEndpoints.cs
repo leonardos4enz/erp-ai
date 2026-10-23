@@ -13,9 +13,11 @@ public static partial class AdminEndpoints
     private static partial Regex UsernamePattern();
 
     public sealed record UserDto(int Id, string Username, string DisplayName, bool IsActive, DateTime? LastLoginAt,
-        DateTime? LockoutEnd, IReadOnlyList<int> RoleIds);
-    public sealed record CreateUserRequest(string? Username, string? DisplayName, string? Password, int[]? RoleIds);
-    public sealed record UpdateUserRequest(string? DisplayName, bool IsActive, int[]? RoleIds, string? Password);
+        DateTime? LockoutEnd, IReadOnlyList<int> RoleIds, string? Unit);
+    public sealed record CreateUserRequest(string? Username, string? DisplayName, string? Password, int[]? RoleIds, string? Unit = null);
+    public sealed record UpdateUserRequest(string? DisplayName, bool IsActive, int[]? RoleIds, string? Password, string? Unit = null);
+
+    public const int MaxUnit = 100;
 
     public sealed record EntityPermissionDto(string Entity, bool CanRead, bool CanCreate, bool CanUpdate, bool CanDelete);
     public sealed record RoleDto(int Id, string Name, string? Description, bool IsSystem, bool IsSuperuser,
@@ -35,6 +37,13 @@ public static partial class AdminEndpoints
         });
         g.MapPost("/users", CreateUser);
         g.MapPut("/users/{id:int}", UpdateUser);
+        // Spec 006: unidades en uso, como sugerencias al asignar la unidad de un usuario.
+        g.MapGet("/units", async (HttpContext http, Db db) =>
+        {
+            RequireUserAdmin(http);
+            await using var cn = await db.OpenAsync();
+            return await cn.QueryAsync<string>("SELECT DISTINCT Unit FROM meta.[User] WHERE Unit IS NOT NULL ORDER BY Unit");
+        });
 
         // Los modeladores también leen los roles para configurar reglas "obligatorio para rol".
         g.MapGet("/roles", async (HttpContext http, Db db) =>
@@ -85,6 +94,7 @@ public static partial class AdminEndpoints
         var displayName = req.DisplayName?.Trim() ?? "";
         if (displayName.Length is 0 or > 150) errors["displayName"] = ["El nombre es obligatorio (máx. 150)."];
         if (!PasswordService.MeetsPolicy(req.Password, out var pwdError, username)) errors["password"] = [pwdError];
+        var unit = NormalizeUnit(req.Unit, errors);
         if (errors.Count > 0) throw new ValidationFailed(errors);
 
         await using var cn = await db.OpenAsync();
@@ -93,11 +103,11 @@ public static partial class AdminEndpoints
             throw new ValidationFailed(new Dictionary<string, string[]> { ["username"] = ["Ese usuario ya existe."] });
 
         var id = await cn.ExecuteScalarAsync<int>(
-            "INSERT meta.[User] (Username, DisplayName, PasswordHash) OUTPUT inserted.Id VALUES (@username, @displayName, @hash)",
-            new { username, displayName, hash = passwords.Hash(req.Password!) }, tx);
+            "INSERT meta.[User] (Username, DisplayName, PasswordHash, Unit) OUTPUT inserted.Id VALUES (@username, @displayName, @hash, @unit)",
+            new { username, displayName, hash = passwords.Hash(req.Password!), unit }, tx);
         await SetRolesAsync(cn, tx, id, req.RoleIds ?? []);
         await Audit.WriteAsync(cn, tx, http, AuditActions.UserChange, "Usuario", id.ToString(),
-            after: new { username, displayName, roleIds = req.RoleIds });
+            after: new { username, displayName, roleIds = req.RoleIds, unit });
         await tx.CommitAsync();
         return Results.Created($"/api/admin/users/{id}", (await LoadUsersAsync(cn)).First(u => u.Id == id));
     }
@@ -110,6 +120,7 @@ public static partial class AdminEndpoints
         var displayName = req.DisplayName?.Trim() ?? "";
         if (displayName.Length is 0 or > 150) errors["displayName"] = ["El nombre es obligatorio (máx. 150)."];
         if (id == me.Id && !req.IsActive) errors["isActive"] = ["No puedes desactivar tu propia cuenta."];
+        var unit = NormalizeUnit(req.Unit, errors);
 
         await using var cn = await db.OpenAsync();
         var before = (await LoadUsersAsync(cn)).FirstOrDefault(u => u.Id == id) ?? throw new NotFound("El usuario no existe.");
@@ -120,10 +131,11 @@ public static partial class AdminEndpoints
         await using var tx = await cn.BeginTransactionAsync();
         var roleIds = req.RoleIds ?? [];
         var rolesChanged = !before.RoleIds.Order().SequenceEqual(roleIds.Distinct().Order());
-        // Cambiar contraseña, roles o desactivar invalida las sesiones abiertas (nuevo SecurityStamp).
-        var revoke = !string.IsNullOrEmpty(req.Password) || rolesChanged || (before.IsActive && !req.IsActive);
+        // Cambiar contraseña, roles, unidad o desactivar invalida las sesiones abiertas (nuevo SecurityStamp):
+        // la unidad decide qué registros ve (spec 006).
+        var revoke = !string.IsNullOrEmpty(req.Password) || rolesChanged || (before.IsActive && !req.IsActive) || before.Unit != unit;
         await cn.ExecuteAsync("""
-            UPDATE meta.[User] SET DisplayName = @displayName, IsActive = @IsActive,
+            UPDATE meta.[User] SET DisplayName = @displayName, IsActive = @IsActive, Unit = @unit,
                 PasswordHash = COALESCE(@hash, PasswordHash),
                 FailedAttempts = CASE WHEN @hash IS NULL THEN FailedAttempts ELSE 0 END,
                 LockoutEnd = CASE WHEN @hash IS NULL THEN LockoutEnd ELSE NULL END,
@@ -131,16 +143,23 @@ public static partial class AdminEndpoints
              WHERE Id = @id
             """, new
         {
-            id, displayName, req.IsActive, revoke,
+            id, displayName, req.IsActive, revoke, unit,
             hash = string.IsNullOrEmpty(req.Password) ? null : passwords.Hash(req.Password),
         }, tx);
         await SetRolesAsync(cn, tx, id, roleIds);
         await EnsureSuperuserRemainsAsync(cn, tx);
         await Audit.WriteAsync(cn, tx, http, AuditActions.UserChange, "Usuario", id.ToString(),
-            before: new { before.DisplayName, before.IsActive, before.RoleIds },
-            after: new { DisplayName = displayName, req.IsActive, RoleIds = roleIds, PasswordChanged = !string.IsNullOrEmpty(req.Password) });
+            before: new { before.DisplayName, before.IsActive, before.RoleIds, before.Unit },
+            after: new { DisplayName = displayName, req.IsActive, RoleIds = roleIds, Unit = unit, PasswordChanged = !string.IsNullOrEmpty(req.Password) });
         await tx.CommitAsync();
         return (await LoadUsersAsync(cn)).First(u => u.Id == id);
+    }
+
+    private static string? NormalizeUnit(string? unit, Dictionary<string, string[]> errors)
+    {
+        var u = unit?.Trim();
+        if (u?.Length > MaxUnit) errors["unit"] = [$"La unidad admite máximo {MaxUnit} caracteres."];
+        return string.IsNullOrEmpty(u) ? null : u;
     }
 
     private static async Task SetRolesAsync(System.Data.Common.DbConnection cn, System.Data.Common.DbTransaction tx, int userId, int[] roleIds)
@@ -164,10 +183,10 @@ public static partial class AdminEndpoints
 
     private static async Task<IReadOnlyList<UserDto>> LoadUsersAsync(System.Data.Common.DbConnection cn)
     {
-        var users = await cn.QueryAsync<UserRow>("SELECT Id, Username, DisplayName, IsActive, LastLoginAt, LockoutEnd FROM meta.[User] ORDER BY Username");
+        var users = await cn.QueryAsync<UserRow>("SELECT Id, Username, DisplayName, IsActive, LastLoginAt, LockoutEnd, Unit FROM meta.[User] ORDER BY Username");
         var roles = (await cn.QueryAsync<(int UserId, int RoleId)>("SELECT UserId, RoleId FROM meta.UserRole")).ToLookup(x => x.UserId, x => x.RoleId);
         return users.Select(u => new UserDto(u.Id, u.Username, u.DisplayName, u.IsActive, u.LastLoginAt,
-            u.LockoutEnd > DateTime.UtcNow ? u.LockoutEnd : null, roles[u.Id].ToList())).ToList();
+            u.LockoutEnd > DateTime.UtcNow ? u.LockoutEnd : null, roles[u.Id].ToList(), u.Unit)).ToList();
     }
 
     // ---------------- Roles ----------------
@@ -238,7 +257,7 @@ public static partial class AdminEndpoints
             perms[r.Id].Select(x => new EntityPermissionDto(x.EntityName, x.CanRead, x.CanCreate, x.CanUpdate, x.CanDelete)).ToList())).ToList();
     }
 
-    private sealed record UserRow(int Id, string Username, string DisplayName, bool IsActive, DateTime? LastLoginAt, DateTime? LockoutEnd);
+    private sealed record UserRow(int Id, string Username, string DisplayName, bool IsActive, DateTime? LastLoginAt, DateTime? LockoutEnd, string? Unit);
     private sealed record RoleRow(int Id, string Name, string? Description, bool IsSystem, bool IsSuperuser,
         bool CanManageModel, bool CanManageUsers, bool CanViewAudit);
     private sealed record PermRow(int RoleId, string EntityName, bool CanRead, bool CanCreate, bool CanUpdate, bool CanDelete);

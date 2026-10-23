@@ -42,7 +42,7 @@ public sealed class MetadataStore(Db db)
     internal static async Task<IReadOnlyDictionary<string, EntityDef>> LoadAsync(DbConnection cn, DbTransaction? tx)
     {
         var entities = await cn.QueryAsync<EntityRow>(
-            "SELECT Id, Name, Label, LabelPlural, Icon, Description, DisplayField, IsArchived, WorkflowJson, RulesJson, GroupName, AutomationsJson FROM meta.Entity",
+            "SELECT Id, Name, Label, LabelPlural, Icon, Description, DisplayField, IsArchived, WorkflowJson, RulesJson, GroupName, AutomationsJson, SecurityJson FROM meta.Entity",
             transaction: tx);
         var fields = (await cn.QueryAsync<FieldRow>("""
             SELECT EntityId, Name, Label, Type, IsRequired, IsUnique, MaxLength, [Precision], Scale, OptionsJson,
@@ -58,6 +58,7 @@ public sealed class MetadataStore(Db db)
             Workflow = e.WorkflowJson is null ? null : JsonSerializer.Deserialize<Workflow>(e.WorkflowJson, Json),
             Rules = e.RulesJson is null ? null : JsonSerializer.Deserialize<List<BusinessRule>>(e.RulesJson, Json),
             Automations = e.AutomationsJson is null ? null : JsonSerializer.Deserialize<List<Automation>>(e.AutomationsJson, Json),
+            Security = e.SecurityJson is null ? null : JsonSerializer.Deserialize<SecurityPolicy>(e.SecurityJson, Json),
             Fields = fields[e.Id].OrderBy(f => f.DisplayOrder).Select(f => new FieldDef
             {
                 Name = f.Name, Label = f.Label, Type = f.Type, Required = f.IsRequired, Unique = f.IsUnique,
@@ -79,7 +80,7 @@ public sealed class MetadataStore(Db db)
         string.IsNullOrEmpty(json) ? null : JsonSerializer.Deserialize<List<string>>(json);
 
     private sealed record EntityRow(int Id, string Name, string Label, string LabelPlural, string Icon,
-        string? Description, string? DisplayField, bool IsArchived, string? WorkflowJson, string? RulesJson, string? GroupName, string? AutomationsJson);
+        string? Description, string? DisplayField, bool IsArchived, string? WorkflowJson, string? RulesJson, string? GroupName, string? AutomationsJson, string? SecurityJson);
 
     private sealed record FieldRow(int EntityId, string Name, string Label, string Type, bool IsRequired, bool IsUnique,
         int? MaxLength, int? Precision, int? Scale, string? OptionsJson, string? ReferenceEntity, int DisplayOrder,

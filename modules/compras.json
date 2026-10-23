@@ -1,7 +1,7 @@
 {
   "id": "compras",
   "name": "Compras",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "icon": "shopping-cart",
   "description": "Requisiciones, órdenes de compra con autorización por montos y recepción de mercancía con cantidades recibidas y pendientes. Incluye proveedores, productos y catálogos base.",
   "plan": {
@@ -339,6 +339,38 @@
                 { "type": "transition", "target": "OrdenCompra", "transition": "recibirParcial", "when": "OrdenCompra.PendientePorRecibir > 0" }
               ] }
           ] }
+      ] } },
+    { "version": "1.3.0",
+      "description": "Seguridad por campo y por registro: los motivos de rechazo y cancelación se capturan solo en su acción; cada solicitante ve solo sus requisiciones; el almacenista no ve precios ni importes de la orden de compra.",
+      "plan": { "description": "Compras 1.3.0", "operations": [
+        { "op": "setSecurity", "entity": "Requisicion", "security": {
+            "owner": "Solicitante",
+            "fields": [ { "field": "MotivoRechazo", "editableIn": [] } ],
+            "records": [
+              { "roles": ["Solicitante"], "scope": "own" },
+              { "roles": ["Comprador", "Gerente de compras", "Director"], "scope": "all" }
+            ] } },
+        { "op": "setSecurity", "entity": "OrdenCompra", "security": {
+            "fields": [
+              { "field": "MotivoRechazo", "editableIn": [] },
+              { "field": "MotivoCancelacion", "editableIn": [] },
+              { "field": "Subtotal", "read": ["Comprador", "Gerente de compras", "Director"] },
+              { "field": "Descuento", "read": ["Comprador", "Gerente de compras", "Director"] },
+              { "field": "IVA", "read": ["Comprador", "Gerente de compras", "Director"] },
+              { "field": "Total", "read": ["Comprador", "Gerente de compras", "Director"] },
+              { "field": "TotalMXN", "read": ["Comprador", "Gerente de compras", "Director"] }
+            ] } },
+        { "op": "setSecurity", "entity": "OrdenCompraPartida", "security": {
+            "fields": [
+              { "field": "PrecioUnitario", "read": ["Comprador", "Gerente de compras", "Director"] },
+              { "field": "DescuentoPct", "read": ["Comprador", "Gerente de compras", "Director"] },
+              { "field": "IvaPct", "read": ["Comprador", "Gerente de compras", "Director"] },
+              { "field": "Importe", "read": ["Comprador", "Gerente de compras", "Director"] },
+              { "field": "DescuentoImporte", "read": ["Comprador", "Gerente de compras", "Director"] },
+              { "field": "IvaImporte", "read": ["Comprador", "Gerente de compras", "Director"] },
+              { "field": "Total", "read": ["Comprador", "Gerente de compras", "Director"] },
+              { "field": "CostoMXN", "read": ["Comprador", "Gerente de compras", "Director"] }
+            ] } }
       ] } }
   ],
   "roles": [    { "name": "Solicitante", "description": "Crea y envía requisiciones de compra.", "canManageModel": false, "canManageUsers": false, "canViewAudit": false,

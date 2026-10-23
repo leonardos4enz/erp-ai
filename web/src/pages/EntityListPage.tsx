@@ -80,7 +80,9 @@ export function EntityListPage() {
     else update({ sort: undefined, dir: undefined, page: undefined });
   }
 
-  const newBtn = p.create && (
+  // Spec 006: un catálogo que administra el sistema no ofrece altas a mano, ni al administrador.
+  const canCreate = p.create && !def?.systemManaged;
+  const newBtn = canCreate && (
     <Button variant="primary" icon={Plus} onClick={() => navigate(`/c/${encodeURIComponent(def.name)}/new`)}>Nuevo</Button>
   );
 
@@ -124,7 +126,7 @@ export function EntityListPage() {
             searching ? (
               <EmptyState icon={SearchX} title="Sin coincidencias" description="Prueba con otros términos de búsqueda." action={<Button onClick={() => setSearch('')}>Limpiar búsqueda</Button>} />
             ) : (
-              <EmptyState icon={Inbox} title={`No hay ${def.labelPlural.toLowerCase()}`} description={p.create ? 'Crea el primer registro para empezar.' : 'Todavía no hay registros capturados.'} action={newBtn || undefined} />
+              <EmptyState icon={Inbox} title={`No hay ${def.labelPlural.toLowerCase()}`} description={canCreate ? 'Crea el primer registro para empezar.' : def.systemManaged ? 'Los registra el sistema automáticamente.' : 'Todavía no hay registros capturados.'} action={newBtn || undefined} />
             )
           ) : (
             <>

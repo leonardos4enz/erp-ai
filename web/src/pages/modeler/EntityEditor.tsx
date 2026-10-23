@@ -4,7 +4,7 @@ import {
 } from 'lucide-react';
 import { ApiError } from '../../api/client';
 import { adminApi } from '../../api/endpoints';
-import type { Automation, ChangePlan, EntityDef, FieldDef, FieldType, FormulaResultType, Operation, Rule, Workflow } from '../../api/types';
+import type { Automation, ChangePlan, EntityDef, FieldDef, FieldType, FormulaResultType, Operation, Rule, SecurityPolicy, Workflow } from '../../api/types';
 import { Dialog } from '../../components/Dialog';
 import { CURATED_ICONS, DynamicIcon } from '../../components/DynamicIcon';
 import { TagInput } from '../../components/TagInput';
@@ -63,6 +63,7 @@ interface Draft {
   rulesJson: string;
   workflowJson: string;
   automationsJson: string;
+  securityJson: string;
 }
 
 let keySeq = 0;
@@ -80,7 +81,7 @@ function draftFrom(def?: EntityDef): Draft {
   if (!def) {
     const f = blankField(0);
     f.label = 'Nombre'; f.name = 'Nombre'; f.required = true; f.maxLength = 150;
-    return { name: '', label: '', labelPlural: '', icon: 'package', description: '', displayField: '', group: '', fields: [f], rulesJson: '', workflowJson: '', automationsJson: '' };
+    return { name: '', label: '', labelPlural: '', icon: 'package', description: '', displayField: '', group: '', fields: [f], rulesJson: '', workflowJson: '', automationsJson: '', securityJson: '' };
   }
   const fields = def.fields
     .slice()
@@ -92,6 +93,7 @@ function draftFrom(def?: EntityDef): Draft {
     rulesJson: def.rules?.length ? pretty(def.rules) : '',
     workflowJson: def.workflow ? pretty(def.workflow) : '',
     automationsJson: def.automations?.length ? pretty(def.automations) : '',
+    securityJson: def.security ? pretty(def.security) : '',
   };
 }
 
@@ -134,6 +136,11 @@ function behaviourOperations(entity: string, original: EntityDef | undefined, d:
   const automations = parseJson<Automation[]>(d.automationsJson, 'array');
   if (automations.ok && canonical(automations.value ?? []) !== canonical(original?.automations ?? [])) {
     ops.push({ op: 'setAutomations', entity, automations: automations.value ?? [] });
+  }
+  // Spec 006: vacío quita la política.
+  const security = parseJson<SecurityPolicy>(d.securityJson, 'object');
+  if (security.ok && canonical(security.value) !== canonical(original?.security ?? null)) {
+    ops.push({ op: 'setSecurity', entity, security: security.value });
   }
   return ops;
 }
@@ -211,6 +218,8 @@ function validate(d: Draft, isNew: boolean, existingNames: string[]): Record<str
   if (!workflow.ok) e.workflowJson = workflow.error;
   const automations = parseJson<Automation[]>(d.automationsJson, 'array');
   if (!automations.ok) e.automationsJson = automations.error;
+  const security = parseJson<SecurityPolicy>(d.securityJson, 'object');
+  if (!security.ok) e.securityJson = security.error;
   return e;
 }
 
@@ -534,10 +543,10 @@ export function EntityEditor({ original, entities, onCancel, onReview }: EntityE
         </div>
       </section>
 
-      <details className="card card-pad advanced-section" open={!!(original?.rules?.length || original?.workflow || original?.automations?.length) || undefined}>
+      <details className="card card-pad advanced-section" open={!!(original?.rules?.length || original?.workflow || original?.automations?.length || original?.security) || undefined}>
         <summary className="advanced-summary">
-          <span className="section-title">Reglas, proceso y automatizaciones</span>
-          <span className="subtle">Avanzado · validaciones de negocio, estados del documento y efectos en otros registros</span>
+          <span className="section-title">Reglas, proceso, automatizaciones y seguridad</span>
+          <span className="subtle">Avanzado · validaciones de negocio, estados del documento, efectos en otros registros y quién ve o edita qué</span>
         </summary>
         <div className="stack" style={{ marginTop: 'var(--space-4)' }}>
           <Textarea
@@ -572,6 +581,17 @@ export function EntityEditor({ original, entities, onCancel, onReview }: EntityE
             error={visibleErrors.automationsJson ?? (d.automationsJson ? parseJsonError(d.automationsJson, 'array') : undefined)}
             value={d.automationsJson}
             onChange={(e) => setD((s) => ({ ...s, automationsJson: e.target.value }))}
+          />
+          <Textarea
+            className="mono json-editor"
+            label="Seguridad (JSON)"
+            rows={12}
+            spellCheck={false}
+            placeholder={'{\n  "fields": [{ "field": "Costo", "read": ["Gerente"] }, { "field": "Motivo", "editableIn": [] }],\n  "owner": "Solicitante",\n  "records": [{ "roles": ["Solicitante"], "scope": "own" }, { "roles": ["Gerente"], "scope": "all" }]\n}'}
+            hint="Por campo: read y edit (roles que lo ven o capturan) y editableIn (estados en que se captura). Por registro: owner y records con roles, scope (all, unit, own), where y access (read o write). systemManaged: solo el sistema lo escribe. Se aplica en el servidor."
+            error={visibleErrors.securityJson ?? (d.securityJson ? parseJsonError(d.securityJson, 'object') : undefined)}
+            value={d.securityJson}
+            onChange={(e) => setD((s) => ({ ...s, securityJson: e.target.value }))}
           />
         </div>
       </details>

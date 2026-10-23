@@ -71,7 +71,16 @@ public static class ModelEndpoints
         return a.Read || a.Create;
     }
 
-    /// <summary>Oculta los campos archivados a quien no modela.</summary>
-    private static EntityDef ForUser(EntityDef e, UserContext u) =>
-        u.CanManageModel ? e : e with { Fields = e.ActiveFields.ToList() };
+    /// <summary>
+    /// Oculta los campos archivados a quien no modela. Spec 006: cada campo lleva el acceso del usuario por rol
+    /// (<c>access</c>) y los estados en que se captura; quien no modela no recibe los campos ocultos ni la política.
+    /// </summary>
+    private static EntityDef ForUser(EntityDef e, UserContext u)
+    {
+        var fields = (u.CanManageModel ? e.Fields : e.ActiveFields)
+            .Select(f => f with { Access = FieldAccess.ByRole(e, f, u), EditableIn = e.Security?.For(f.Name)?.EditableIn })
+            .Where(f => u.CanManageModel || f.Access != FieldAccessLevels.Hidden)
+            .ToList();
+        return e with { Fields = fields, Security = u.CanManageModel ? e.Security : null };
+    }
 }

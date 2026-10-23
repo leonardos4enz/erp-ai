@@ -11,8 +11,8 @@ en orden, no en paralelo: casi todas tocan el núcleo del motor (`PlanCompiler`,
 | Spec | Estado |
 |---|---|
 | 005 Automatizaciones + inventario | Implementado ([spec](specs/005-automatizaciones-inventario/spec.md)) |
-| 006 Seguridad por campo/registro | **Siguiente** |
-| 007 Vistas, layouts, reportes | Pendiente |
+| 006 Seguridad por campo/registro | Implementado ([spec](specs/006-seguridad-campos-registros/spec.md)) |
+| 007 Vistas, layouts, reportes | **Siguiente** |
 | 008 Integraciones | Pendiente |
 | 009 Entornos | Pendiente |
 | 010 Multi-empresa / multi-moneda | Pendiente |
@@ -22,7 +22,7 @@ en orden, no en paralelo: casi todas tocan el núcleo del motor (`PlanCompiler`,
 | Brecha señalada | Situación actual | Spec |
 |---|---|---|
 | Automatización entre registros | Una transición solo modifica su propio registro; la recepción no actualiza la OC; no hay cantidades recibidas/pendientes ni inventario | **005** |
-| Seguridad por campo y por registro | Solo permisos por entidad. La constitución (II.2) promete seguridad por campo y **no está implementada: es deuda** | **006** |
+| Seguridad por campo y por registro | ~~Solo permisos por entidad~~ Resuelto en la 006: campos ocultos/solo lectura por rol y por estado, alcance por registro (propios, unidad, todos, reglas `where`) en el servidor | **006** |
 | Metadatos de interfaz | El formulario se deriva del orden de los campos; no hay vistas, layouts, reportes ni dashboards | **007** |
 | Integraciones y webhooks | No existen | **008** |
 | Entornos (sandbox → producción) | Los módulos se instalan y actualizan, pero no se exporta lo hecho en el modelador | **009** |
@@ -61,6 +61,8 @@ en orden, no en paralelo: casi todas tocan el núcleo del motor (`PlanCompiler`,
 - **Vistas guardadas:** columnas, filtros, orden; personales o compartidas por rol.
 - **Reportes:** agrupaciones y totales sobre una entidad y sus relaciones, exportables a Excel/CSV.
 - **Dashboards:** tarjetas de indicadores y gráficas definidas como metadatos (respetando 006).
+- Reportes y vistas deben filtrar con `RecordFilter.For` y quitar campos con `FieldAccess.Strip` (los mismos de la 006).
+- Pendiente del modelador (hallazgo F-03 de la 006): «Revisar cambios» aparece sin cambios en catálogos con `displayOrder` no consecutivo.
 
 ### 008 — Integraciones
 - **Webhooks salientes** por evento, firmados con HMAC, con reintentos y bitácora de entregas.

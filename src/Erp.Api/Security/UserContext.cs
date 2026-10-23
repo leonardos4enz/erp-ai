@@ -15,6 +15,8 @@ public sealed class UserContext
     public required int Id { get; init; }
     public required string Username { get; init; }
     public required string DisplayName { get; init; }
+    /// <summary>Spec 006: unidad (área o sucursal) para el alcance «de mi unidad».</summary>
+    public string? Unit { get; init; }
     public required Guid SecurityStamp { get; init; }
     public required IReadOnlyList<string> Roles { get; init; }
     public bool IsSuperuser { get; init; }
@@ -38,7 +40,7 @@ public sealed class UserContextLoader(Db db)
     {
         await using var cn = await db.OpenAsync(ct);
         using var multi = await cn.QueryMultipleAsync("""
-            SELECT Id, Username, DisplayName, SecurityStamp FROM meta.[User] WHERE Id = @userId AND IsActive = 1;
+            SELECT Id, Username, DisplayName, SecurityStamp, Unit FROM meta.[User] WHERE Id = @userId AND IsActive = 1;
             SELECT r.Name, r.IsSuperuser, r.CanManageModel, r.CanManageUsers, r.CanViewAudit
               FROM meta.UserRole ur JOIN meta.Role r ON r.Id = ur.RoleId WHERE ur.UserId = @userId;
             SELECT p.EntityName,
@@ -58,6 +60,7 @@ public sealed class UserContextLoader(Db db)
             Id = user.Id,
             Username = user.Username,
             DisplayName = user.DisplayName,
+            Unit = user.Unit,
             SecurityStamp = user.SecurityStamp,
             Roles = roles.Select(r => r.Name).ToList(),
             IsSuperuser = roles.Any(r => r.IsSuperuser),
@@ -69,7 +72,7 @@ public sealed class UserContextLoader(Db db)
         };
     }
 
-    private sealed record UserRow(int Id, string Username, string DisplayName, Guid SecurityStamp);
+    private sealed record UserRow(int Id, string Username, string DisplayName, Guid SecurityStamp, string? Unit);
     private sealed record RoleRow(string Name, bool IsSuperuser, bool CanManageModel, bool CanManageUsers, bool CanViewAudit);
     private sealed record PermRow(string EntityName, bool CanRead, bool CanCreate, bool CanUpdate, bool CanDelete);
 }

@@ -22,6 +22,8 @@ function UserDialog({ user, roles, open, onClose, onSaved }: { user: User | null
   const [password, setPassword] = useState('');
   const [isActive, setIsActive] = useState(true);
   const [roleIds, setRoleIds] = useState<number[]>([]);
+  const [unit, setUnit] = useState('');
+  const [units, setUnits] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
   const [local, setLocal] = useState<Record<string, string>>({});
@@ -33,8 +35,11 @@ function UserDialog({ user, roles, open, onClose, onSaved }: { user: User | null
     setPassword('');
     setIsActive(user?.isActive ?? true);
     setRoleIds(user?.roleIds ?? []);
+    setUnit(user?.unit ?? '');
     setError(null);
     setLocal({});
+    // Sugerencias: las unidades que ya tienen otros usuarios (evita «Norte» y «norte »).
+    adminApi.units().then(setUnits, () => setUnits([]));
   }, [open, user]);
 
   async function save() {
@@ -48,8 +53,9 @@ function UserDialog({ user, roles, open, onClose, onSaved }: { user: User | null
     setSaving(true);
     setError(null);
     try {
-      if (isNew) await adminApi.createUser({ username, displayName: displayName.trim(), password, roleIds, isActive });
-      else await adminApi.updateUser(user!.id, { displayName: displayName.trim(), isActive, roleIds, password: password || undefined });
+      const u = unit.trim() || null;
+      if (isNew) await adminApi.createUser({ username, displayName: displayName.trim(), password, roleIds, isActive, unit: u });
+      else await adminApi.updateUser(user!.id, { displayName: displayName.trim(), isActive, roleIds, password: password || undefined, unit: u });
       toast.success(isNew ? 'Usuario creado' : 'Usuario actualizado');
       onSaved();
     } catch (err) {
@@ -85,6 +91,17 @@ function UserDialog({ user, roles, open, onClose, onSaved }: { user: User | null
           onChange={(e) => setPassword(e.target.value)}
           maxLength={256}
         />
+        <Input
+          label="Unidad"
+          value={unit}
+          list="user-units"
+          autoComplete="off"
+          error={fe('unit')}
+          hint="Área o sucursal. Define qué registros ve cuando su rol tiene alcance «de mi unidad»."
+          onChange={(e) => setUnit(e.target.value)}
+          maxLength={100}
+        />
+        <datalist id="user-units">{units.map((x) => <option key={x} value={x} />)}</datalist>
         <Field label="Roles">
           <div className="stack" style={{ gap: 'var(--space-2)' }}>
             {roles.map((r) => (
@@ -133,7 +150,7 @@ function UsersTab({ roles }: { roles: Role[] }) {
                           <span className="avatar">{initials(u.displayName || u.username)}</span>
                           <div>
                             <div style={{ fontWeight: 500 }}>{u.displayName}</div>
-                            <div className="subtle mono">{u.username}</div>
+                            <div className="subtle"><span className="mono">{u.username}</span>{u.unit && <> · {u.unit}</>}</div>
                           </div>
                         </div>
                       </td>

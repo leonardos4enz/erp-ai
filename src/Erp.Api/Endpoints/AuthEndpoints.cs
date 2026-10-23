@@ -18,7 +18,7 @@ public static class AuthEndpoints
 
     public sealed record MeResponse(int Id, string Username, string DisplayName, IReadOnlyList<string> Roles,
         bool IsSuperuser, bool CanManageModel, bool CanManageUsers, bool CanViewAudit,
-        IReadOnlyDictionary<string, EntityAccess> Entities);
+        IReadOnlyDictionary<string, EntityAccess> Entities, string? Unit);
 
     public static void MapAuth(this IEndpointRouteBuilder app)
     {
@@ -94,7 +94,7 @@ public static class AuthEndpoints
             .Where(x => x.Access.Read || x.Access.Create)
             .ToDictionary(x => x.Name, x => x.Access);
         return new MeResponse(u.Id, u.Username, u.DisplayName, u.Roles, u.IsSuperuser, u.CanManageModel,
-            u.CanManageUsers, u.CanViewAudit, entities);
+            u.CanManageUsers, u.CanViewAudit, entities, u.Unit);
     }
 
     private sealed record UserRow(int Id, string Username, string PasswordHash, Guid SecurityStamp, bool IsActive,

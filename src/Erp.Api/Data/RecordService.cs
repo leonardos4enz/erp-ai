@@ -51,9 +51,17 @@ public sealed partial class RecordService(Db db, MetadataStore store)
         await using var cn = await db.OpenAsync(ct);
         await using var cmd = cn.CreateCommand();
 
+        // Spec 006: solo los registros a su alcance (también en el total y en los conteos por estado).
+        if (RecordFilter.For(e, user, write: false) is { } scope)
+        {
+            scope.AddTo(cmd.Parameters);
+            where.Append(" AND ").Append(scope.Sql);
+        }
+
         if (!string.IsNullOrWhiteSpace(q.Search))
         {
-            var searchable = e.StoredFields.Where(f => FieldTypes.Searchable.Contains(f.Type)).ToList();
+            // Buscar por un campo oculto permitiría deducir su valor.
+            var searchable = e.StoredFields.Where(f => FieldTypes.Searchable.Contains(f.Type) && FieldAccess.CanSee(e, f, user)).ToList();
             if (searchable.Count > 0)
             {
                 var term = q.Search.Trim();
@@ -73,7 +81,7 @@ public sealed partial class RecordService(Db db, MetadataStore store)
             where.Append($" AND t.{Quote(Workflow.StateField)} = @state");
         }
 
-        var orderBy = ResolveSort(e, q.Sort, q.Dir);
+        var orderBy = ResolveSort(e, q.Sort, q.Dir, f => FieldAccess.CanSee(e, f, user));
         cmd.Parameters.Add(new SqlParameter("@skip", (page - 1) * size));
         cmd.Parameters.Add(new SqlParameter("@take", size));
         var counts = e.Workflow is null ? "" :
@@ -89,7 +97,12 @@ public sealed partial class RecordService(Db db, MetadataStore store)
         var total = reader.GetInt32(0);
         await reader.NextResultAsync(ct);
         var items = new List<Dictionary<string, object?>>();
-        while (await reader.ReadAsync(ct)) items.Add(Format(e, ReadRaw(reader)));
+        while (await reader.ReadAsync(ct))
+        {
+            var item = Format(e, ReadRaw(reader));
+            FieldAccess.Strip(e, item, user, model);
+            items.Add(item);
+        }
 
         List<StateCount>? stateCounts = null;
         if (e.Workflow is not null)
@@ -107,6 +120,7 @@ public sealed partial class RecordService(Db db, MetadataStore store)
         var (e, model) = await RootEntityAsync(entityName, ct);
         Require(user.Access(e.Name).Read);
         await using var cn = await db.OpenAsync(ct);
+        await EnsureAccessAsync(cn, null, e, id, user, write: false, ct);
         return await LoadOutputAsync(cn, null, e, model, id, user, ct) ?? throw new NotFound("El registro no existe.");
     }
 
@@ -129,6 +143,12 @@ public sealed partial class RecordService(Db db, MetadataStore store)
         await using var cn = await db.OpenAsync(ct);
         await using var cmd = cn.CreateCommand();
         var where = "t.[IsDeleted] = 0";
+        // Spec 006: el buscador solo ofrece registros a su alcance (una partida, los de su documento).
+        if (RecordFilter.ForRecordOrParent(e, model, user) is { } scope)
+        {
+            scope.AddTo(cmd.Parameters);
+            where += " AND " + scope.Sql;
+        }
         if (!string.IsNullOrWhiteSpace(search))
         {
             var term = search.Trim();
@@ -139,7 +159,8 @@ public sealed partial class RecordService(Db db, MetadataStore store)
         // Spec 005: buscador filtrado. El campo sale de los metadatos (lista blanca); el valor es parámetro.
         if (!string.IsNullOrEmpty(filterField))
         {
-            var ff = e.StoredFields.FirstOrDefault(f => string.Equals(f.Name, filterField, StringComparison.OrdinalIgnoreCase))
+            // Spec 006: filtrar por un campo oculto permitiría adivinar su valor.
+            var ff = e.StoredFields.FirstOrDefault(f => string.Equals(f.Name, filterField, StringComparison.OrdinalIgnoreCase) && FieldAccess.CanSee(e, f, user))
                      ?? throw new AppException(400, "El filtro del buscador no es válido.");
             object? fv;
             // Un campo padre se filtra como cualquier referencia (id del documento).
@@ -180,6 +201,7 @@ public sealed partial class RecordService(Db db, MetadataStore store)
         Require(user.Access(e.Name).Read);
         if (e.Workflow is null) return [];
         await using var cn = await db.OpenAsync(ct);
+        await EnsureAccessAsync(cn, null, e, id, user, write: false, ct);
         await using var cmd = new SqlCommand("""
             SELECT h.At, u.DisplayName, h.FromState, h.ToState, h.Transition, h.Comment
               FROM meta.WorkflowHistory h JOIN meta.[User] u ON u.Id = h.UserId
@@ -206,10 +228,14 @@ public sealed partial class RecordService(Db db, MetadataStore store)
         var user = http.CurrentUser();
         var (e, model) = await RootEntityAsync(entityName, ct);
         Require(user.Access(e.Name).Create);
+        RequireHumanWritable(e);
 
         await using var cn = await db.OpenAsync(ct);
         await using var tx = (SqlTransaction)await cn.BeginTransactionAsync(ct);
         var id = await CreateInTransactionAsync(cn, tx, e, model, body, user, http, ct);
+        // Spec 006: no se crea un registro fuera del propio alcance de escritura (sin commit, todo se revierte).
+        if (RecordFilter.For(e, user, write: true) is { } scope && !await MatchesAsync(cn, tx, e, id, scope, ct))
+            throw new Forbidden("No puedes crear este registro: quedaría fuera de los registros que tu rol puede modificar.");
         var row = (await LoadOutputAsync(cn, tx, e, model, id, user, ct))!;
         await tx.CommitAsync(ct);
         return row;
@@ -221,7 +247,7 @@ public sealed partial class RecordService(Db db, MetadataStore store)
     {
         var loader = new RelatedLoader(cn, tx, model);
         var draft = new DocDraft { CreatorId = user.Id };
-        await ParseIntoAsync(draft, e, model, body, loader, lenient: false, ct);
+        await ParseIntoAsync(draft, e, model, body, loader, lenient: false, ct, new Writer(user, e.Workflow?.Initial));
         return await InsertDraftAsync(new AutoCtx(cn, tx, model, user, http, 0, [], ct), e, draft, AuditActions.Create);
     }
 
@@ -253,18 +279,21 @@ public sealed partial class RecordService(Db db, MetadataStore store)
         var user = http.CurrentUser();
         var (e, model) = await RootEntityAsync(entityName, ct);
         Require(user.Access(e.Name).Update);
+        RequireHumanWritable(e);
         var rowVersion = ReadRowVersion(body.ValueKind == JsonValueKind.Object && body.TryGetProperty("_rowVersion", out var rv) && rv.ValueKind == JsonValueKind.String ? rv.GetString() : null);
 
         await using var cn = await db.OpenAsync(ct);
         await using var tx = (SqlTransaction)await cn.BeginTransactionAsync(ct);
+        await EnsureAccessAsync(cn, tx, e, id, user, write: true, ct);
         var loader = new RelatedLoader(cn, tx, model);
         var draft = await LoadDraftAsync(cn, tx, e, model, id, ct) ?? throw new NotFound("El registro no existe.");
         var before = Snapshot(draft);
 
-        if (e.Workflow?.FindState(draft.Header.GetValueOrDefault(Workflow.StateField) as string) is { Editable: false } st)
+        var stateName = draft.Header.GetValueOrDefault(Workflow.StateField) as string;
+        if (e.Workflow?.FindState(stateName) is { Editable: false } st)
             throw new AppException(StatusCodes.Status409Conflict, $"El documento está en estado «{st.Label}» y ya no se puede editar.");
 
-        await ParseIntoAsync(draft, e, model, body, loader, lenient: false, ct);
+        await ParseIntoAsync(draft, e, model, body, loader, lenient: false, ct, new Writer(user, stateName));
         var env = Env(user, draft);
         Compute(draft, e, model, loader, env);
         Validate(draft, e, model, loader, env, user);
@@ -274,6 +303,9 @@ public sealed partial class RecordService(Db db, MetadataStore store)
         await SaveLinesAsync(cn, tx, e, model, id, draft, existingLines, user.Id, ct);
         await Audit.WriteAsync(cn, tx, http, AuditActions.Update, e.Name, id.ToString(), before, Snapshot(draft));
         await FireAsync(new AutoCtx(cn, tx, model, user, http, 0, [], ct), e, id, AutomationEvents.Update, null);
+        // Spec 006: no se puede sacar un registro del propio alcance (p. ej. cambiarlo a otro departamento).
+        if (RecordFilter.For(e, user, write: true) is { } scope && !await MatchesAsync(cn, tx, e, id, scope, ct))
+            throw new Forbidden("No se guardó: el registro quedaría fuera de los que tu rol puede modificar.");
         var row = (await LoadOutputAsync(cn, tx, e, model, id, user, ct))!;
         await tx.CommitAsync(ct);
         return row;
@@ -285,12 +317,16 @@ public sealed partial class RecordService(Db db, MetadataStore store)
         var (e, model) = await RootEntityAsync(entityName, ct);
         Require(id is null ? user.Access(e.Name).Create : user.Access(e.Name).Update);
         await using var cn = await db.OpenAsync(ct);
+        if (id is not null) await EnsureAccessAsync(cn, null, e, id.Value, user, write: true, ct);
         var loader = new RelatedLoader(cn, null, model);
         var draft = id is null ? new DocDraft { CreatorId = user.Id } : await LoadDraftAsync(cn, null, e, model, id.Value, ct) ?? throw new NotFound("El registro no existe.");
         if (id is null && e.Workflow is not null) draft.Header[Workflow.StateField] = e.Workflow.Initial;
-        await ParseIntoAsync(draft, e, model, values, loader, lenient: true, ct);
+        await ParseIntoAsync(draft, e, model, values, loader, lenient: true, ct,
+            new Writer(user, draft.Header.GetValueOrDefault(Workflow.StateField) as string));
         Compute(draft, e, model, loader, Env(user, draft));
-        return await FormatDraftAsync(cn, e, model, draft, ct);
+        var row = await FormatDraftAsync(cn, e, model, draft, ct);
+        FieldAccess.Strip(e, row, user, model);
+        return row;
     }
 
     public async Task<Dictionary<string, object?>> TransitionAsync(string entityName, long id, TransitionRequest req, HttpContext http, CancellationToken ct)
@@ -305,6 +341,8 @@ public sealed partial class RecordService(Db db, MetadataStore store)
 
         await using var cn = await db.OpenAsync(ct);
         await using var tx = (SqlTransaction)await cn.BeginTransactionAsync(ct);
+        // Spec 006: basta con ver el registro; la transición exige además sus roles y condiciones.
+        await EnsureAccessAsync(cn, tx, e, id, user, write: false, ct);
         var loader = new RelatedLoader(cn, tx, model);
         var draft = await LoadDraftAsync(cn, tx, e, model, id, ct) ?? throw new NotFound("El registro no existe.");
         var before = Snapshot(draft);
@@ -323,8 +361,14 @@ public sealed partial class RecordService(Db db, MetadataStore store)
             foreach (var prop in vals.EnumerateObject())
             {
                 var f = t.RequiredFields?.FirstOrDefault(n => string.Equals(n, prop.Name, StringComparison.OrdinalIgnoreCase)) is { } n2 ? e.FindField(n2) : null;
-                if (f is null) { errors[prop.Name] = ["Este campo no se captura en esta acción."]; continue; }
-                try { draft.Header[f.Name] = await ParseValueAsync(f, prop.Value, loader, ct); }
+                // Spec 006: la transición captura el campo aunque no se edite en el formulario, pero no uno oculto.
+                if (f is null || !FieldAccess.CanSee(e, f, user)) { errors[prop.Name] = ["Este campo no se captura en esta acción."]; continue; }
+                try
+                {
+                    var value = await ParseValueAsync(f, prop.Value, loader, ct);
+                    CheckReferenceVisible(f, value, draft.Header.GetValueOrDefault(f.Name), loader, user);
+                    draft.Header[f.Name] = value;
+                }
                 catch (FieldError ex) { errors[f.Name] = [ex.Message]; }
             }
         foreach (var rf in t.RequiredFields ?? [])
@@ -368,9 +412,11 @@ public sealed partial class RecordService(Db db, MetadataStore store)
         var user = http.CurrentUser();
         var (e, model) = await RootEntityAsync(entityName, ct);
         Require(user.Access(e.Name).Delete);
+        RequireHumanWritable(e);
 
         await using var cn = await db.OpenAsync(ct);
         await using var tx = (SqlTransaction)await cn.BeginTransactionAsync(ct);
+        await EnsureAccessAsync(cn, tx, e, id, user, write: true, ct);
         var draft = await LoadDraftAsync(cn, tx, e, model, id, ct) ?? throw new NotFound("El registro no existe.");
         if (e.Workflow?.FindState(draft.Header.GetValueOrDefault(Workflow.StateField) as string) is { Editable: false } st)
             throw new AppException(StatusCodes.Status409Conflict, $"El documento está en estado «{st.Label}» y no se puede eliminar.");
@@ -406,7 +452,7 @@ public sealed partial class RecordService(Db db, MetadataStore store)
         return (e, await store.GetAsync(ct));
     }
 
-    private static ExprEnv Env(UserContext user, DocDraft draft) => new(user.Id, user.Roles, draft.CreatorId);
+    private static ExprEnv Env(UserContext user, DocDraft draft) => new(user.Id, user.Roles, draft.CreatorId, user.Unit);
 
     private static DocScope HeaderScope(DocDraft d, EntityDef e, IReadOnlyDictionary<string, EntityDef> model, RelatedLoader loader, Dictionary<string, List<DocScope>>? lineScopes = null)
     {
@@ -507,6 +553,9 @@ public sealed partial class RecordService(Db db, MetadataStore store)
         var roleOk = user.IsSuperuser || (t.Roles is { Count: > 0 } ? user.HasRole(t.Roles) : user.Access(e.Name).Update);
         if (!roleOk)
             return (false, t.Roles is { Count: > 0 } ? $"Requiere el rol {string.Join(" o ", t.Roles)}." : "Requiere permiso de edición.", true);
+        // Spec 006: no se puede pedir capturar un campo que el rol no ve.
+        if ((t.RequiredFields ?? []).Select(e.FindField).FirstOrDefault(f => f is not null && !FieldAccess.CanSee(e, f, user)) is { } hidden)
+            return (false, $"Requiere capturar «{hidden.Label}», que tu rol no puede ver.", true);
         if (t.When is not null && !ExprEvaluator.Test(t.When, HeaderScope(d, e, model, loader), env, whenNull: false))
             return (false, t.WhenMessage ?? "No se cumplen las condiciones para esta acción.", false);
         return (true, null, false);
@@ -517,12 +566,20 @@ public sealed partial class RecordService(Db db, MetadataStore store)
     /// <summary>Error de validación con mensaje pensado para el usuario (los de .NET no se exponen).</summary>
     private sealed class FieldError(string message) : Exception(message);
 
+    /// <summary>Quién captura y en qué estado está el documento (spec 006: seguridad por campo).</summary>
+    private sealed record Writer(UserContext User, string? State)
+    {
+        public bool CanEdit(EntityDef e, FieldDef f) => FieldAccess.CanEdit(e, f, User, State);
+    }
+
     /// <summary>
     /// Sobrepone los valores de la petición al borrador. Campos calculados se ignoran (los calcula el
     /// servidor); campos desconocidos son error. Un campo de partidas reemplaza el conjunto completo.
+    /// Spec 006: los campos que el usuario no puede capturar (por rol o por estado) también se ignoran y
+    /// conservan su valor; elegir una referencia exige poder ver el registro elegido.
     /// </summary>
     private static async Task ParseIntoAsync(DocDraft d, EntityDef e, IReadOnlyDictionary<string, EntityDef> model, JsonElement body,
-        RelatedLoader loader, bool lenient, CancellationToken ct)
+        RelatedLoader loader, bool lenient, CancellationToken ct, Writer writer)
     {
         if (body.ValueKind != JsonValueKind.Object) throw new AppException(400, "Se esperaba un objeto JSON.");
         var errors = new Dictionary<string, string[]>();
@@ -533,6 +590,7 @@ public sealed partial class RecordService(Db db, MetadataStore store)
             var f = e.FindField(prop.Name);
             if (f is null || f.IsArchived) { if (!lenient) errors[prop.Name] = ["Campo desconocido."]; continue; }
             if (f.ClientLocked) continue; // calculado o asignado por el sistema: el cliente no lo escribe
+            if (!writer.CanEdit(e, f)) continue; // spec 006: sin permiso de captura (rol o estado), conserva su valor
 
             if (f.Type == FieldTypes.Lines)
             {
@@ -554,8 +612,13 @@ public sealed partial class RecordService(Db db, MetadataStore store)
                         if (IgnoredKeys.Contains(lp.Name) || lp.Name.EndsWith("__label", StringComparison.Ordinal)) continue;
                         var lf = child.FindField(lp.Name);
                         if (lf is null || lf.IsArchived) { if (!lenient) errors[$"{f.Name}[{i}].{lp.Name}"] = ["Campo desconocido."]; continue; }
-                        if (lf.ClientLocked || lf.Type == FieldTypes.Lines) continue;
-                        try { line.Values[lf.Name] = await ParseValueAsync(lf, lp.Value, loader, ct); }
+                        if (lf.ClientLocked || lf.Type == FieldTypes.Lines || !writer.CanEdit(child, lf)) continue;
+                        try
+                        {
+                            var value = await ParseValueAsync(lf, lp.Value, loader, ct);
+                            CheckReferenceVisible(lf, value, line.Values.GetValueOrDefault(lf.Name), loader, writer.User);
+                            line.Values[lf.Name] = value;
+                        }
                         catch (FieldError ex) { if (!lenient) errors[$"{f.Name}[{i}].{lf.Name}"] = [ex.Message]; }
                     }
                     lines.Add(line);
@@ -565,10 +628,26 @@ public sealed partial class RecordService(Db db, MetadataStore store)
                 continue;
             }
 
-            try { d.Header[f.Name] = await ParseValueAsync(f, prop.Value, loader, ct); }
+            try
+            {
+                var value = await ParseValueAsync(f, prop.Value, loader, ct);
+                CheckReferenceVisible(f, value, d.Header.GetValueOrDefault(f.Name), loader, writer.User);
+                d.Header[f.Name] = value;
+            }
             catch (FieldError ex) { if (!lenient) errors[f.Name] = [ex.Message]; }
         }
         if (errors.Count > 0) throw new ValidationFailed(errors);
+    }
+
+    /// <summary>
+    /// Spec 006: elegir un registro que no se puede ver permitiría leerlo con fórmulas o valores por defecto
+    /// (<c>Ref.Campo</c>). Conservar la referencia que ya tenía el documento sí se permite.
+    /// </summary>
+    private static void CheckReferenceVisible(FieldDef f, object? value, object? current, RelatedLoader loader, UserContext user)
+    {
+        if (value is not long id || f.Type != FieldTypes.Reference) return;
+        if (current is not null && Convert.ToInt64(current, CultureInfo.InvariantCulture) == id) return;
+        if (!loader.Visible(f.ReferenceEntity!, id, user)) throw new FieldError("El registro seleccionado no existe.");
     }
 
     private static Task<object?> ParseValueAsync(FieldDef f, JsonElement v, RelatedLoader loader, CancellationToken ct)
@@ -928,6 +1007,7 @@ public sealed partial class RecordService(Db db, MetadataStore store)
                 }).ToList(),
             };
         }
+        FieldAccess.Strip(e, row, user, model);
         return row;
     }
 
@@ -1001,7 +1081,7 @@ public sealed partial class RecordService(Db db, MetadataStore store)
         return (string.Join(", ", cols), from.ToString());
     }
 
-    private static string ResolveSort(EntityDef e, string? sort, string? dir)
+    private static string ResolveSort(EntityDef e, string? sort, string? dir, Func<FieldDef, bool> visible)
     {
         var direction = string.Equals(dir, "asc", StringComparison.OrdinalIgnoreCase) ? "ASC" : "DESC";
         if (string.IsNullOrEmpty(sort)) return "t.[Id] DESC";
@@ -1010,8 +1090,9 @@ public sealed partial class RecordService(Db db, MetadataStore store)
             "id" => "[Id]",
             "createdat" => "[CreatedAt]",
             "updatedat" => "[UpdatedAt]",
+            // Ordenar por un campo oculto permitiría deducir su valor (spec 006): se ignora.
             _ => e.StoredFields.FirstOrDefault(f => f.Type != FieldTypes.LongText &&
-                     string.Equals(f.Name, sort, StringComparison.OrdinalIgnoreCase)) is { } f ? Quote(f.Name) : null,
+                     string.Equals(f.Name, sort, StringComparison.OrdinalIgnoreCase)) is { } f && visible(f) ? Quote(f.Name) : null,
         };
         return column is null ? "t.[Id] DESC" : $"t.{column} {direction}, t.[Id] {direction}";
     }
@@ -1055,6 +1136,32 @@ public sealed partial class RecordService(Db db, MetadataStore store)
     private static void Require(bool allowed)
     {
         if (!allowed) throw new Forbidden();
+    }
+
+    /// <summary>Spec 006 (H3): un catálogo que administra el sistema solo lo escribe el motor, ni el superusuario.</summary>
+    private static void RequireHumanWritable(EntityDef e)
+    {
+        if (e.SystemManaged) throw new Forbidden($"{e.LabelPlural} los administra el sistema: solo se consultan.");
+    }
+
+    /// <summary>
+    /// Spec 006: el registro debe estar al alcance del usuario. Fuera del alcance de lectura responde 404 (no revela
+    /// que existe); visible pero sin escritura, 403.
+    /// </summary>
+    private static async Task EnsureAccessAsync(SqlConnection cn, SqlTransaction? tx, EntityDef e, long id, UserContext user, bool write, CancellationToken ct)
+    {
+        if (RecordFilter.For(e, user, write: false) is { } read && !await MatchesAsync(cn, tx, e, id, read, ct))
+            throw new NotFound("El registro no existe.");
+        if (write && RecordFilter.For(e, user, write: true) is { } w && !await MatchesAsync(cn, tx, e, id, w, ct))
+            throw new Forbidden("Puedes consultar este registro, pero tu rol no puede modificarlo.");
+    }
+
+    private static async Task<bool> MatchesAsync(SqlConnection cn, SqlTransaction? tx, EntityDef e, long id, SqlPredicate p, CancellationToken ct)
+    {
+        await using var cmd = new SqlCommand($"SELECT 1 FROM {AppTable(e.Name)} t WHERE t.[Id] = @id AND t.[IsDeleted] = 0 AND {p.Sql}", cn, tx);
+        cmd.Parameters.Add(new SqlParameter("@id", id));
+        p.AddTo(cmd.Parameters);
+        return await cmd.ExecuteScalarAsync(ct) is not null;
     }
 
     private static string EscapeLike(string s) =>

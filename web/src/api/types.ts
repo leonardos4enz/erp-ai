@@ -36,6 +36,24 @@ export interface FieldDef {
   editable?: boolean;
   /** Spec 005: el buscador solo ofrece registros con `field` = valor de `source` (campo propio o `CampoPadre.Campo`). */
   lookupFilter?: { field: string; source: string } | null;
+  /** Spec 006, solo salida: acceso del usuario actual por rol. */
+  access?: FieldAccessLevel;
+  /** Spec 006, solo salida: estados en que se captura ([] = solo en las transiciones que lo piden). */
+  editableIn?: string[] | null;
+  /** Solo en la UI: bloqueado por el estado del registro (ver `withState`). */
+  lockedByState?: boolean;
+}
+
+export type FieldAccessLevel = 'hidden' | 'read' | 'edit';
+
+/** Spec 006: quién ve y captura cada campo, y qué registros ve o modifica cada rol. */
+export interface FieldSecurity { field: string; read?: string[]; edit?: string[]; editableIn?: string[] }
+export interface RecordGrant { roles?: string[]; scope?: 'all' | 'unit' | 'own'; where?: string; access?: 'read' | 'write' }
+export interface SecurityPolicy {
+  fields?: FieldSecurity[];
+  owner?: string;
+  records?: RecordGrant[];
+  systemManaged?: boolean;
 }
 
 export type StateColor = 'neutral' | 'accent' | 'success' | 'warning' | 'danger';
@@ -105,6 +123,10 @@ export interface EntityDef {
   workflow?: Workflow | null;
   rules?: Rule[] | null;
   automations?: Automation[] | null;
+  /** Spec 006: solo la reciben los modeladores. */
+  security?: SecurityPolicy | null;
+  /** Spec 006: las personas solo consultan; lo escribe el motor. */
+  systemManaged?: boolean;
   isChild?: boolean;
   parentEntity?: string;
 }
@@ -121,6 +143,7 @@ export interface Me {
   canManageUsers: boolean;
   canViewAudit: boolean;
   entities: Record<string, EntityPerms>;
+  unit?: string | null;
 }
 
 export type Operation =
@@ -132,7 +155,8 @@ export type Operation =
   | { op: 'archiveField'; entity: string; field: string }
   | { op: 'setWorkflow'; entity: string; workflow: Workflow }
   | { op: 'setRules'; entity: string; rules: Rule[] }
-  | { op: 'setAutomations'; entity: string; automations: Automation[]; merge?: boolean };
+  | { op: 'setAutomations'; entity: string; automations: Automation[]; merge?: boolean }
+  | { op: 'setSecurity'; entity: string; security: SecurityPolicy | null };
 
 export interface ChangePlan { description: string; operations: Operation[] }
 
@@ -245,6 +269,8 @@ export interface User {
   isActive: boolean;
   roleIds: number[];
   roles?: string[];
+  /** Spec 006: unidad (área o sucursal) para el alcance «de mi unidad». */
+  unit?: string | null;
   lockoutEnd?: string | null;
 }
 

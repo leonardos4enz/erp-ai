@@ -12,8 +12,8 @@ public interface IExprScope
     IReadOnlyList<IExprScope> Lines(string linesField);
 }
 
-/// <summary>Quién evalúa: necesario para HASROLE, ISCREATOR y CURRENTUSER.</summary>
-public sealed record ExprEnv(int UserId, IReadOnlyCollection<string> Roles, int? CreatorId)
+/// <summary>Quién evalúa: necesario para HASROLE, ISCREATOR, CURRENTUSER y CURRENTUNIT.</summary>
+public sealed record ExprEnv(int UserId, IReadOnlyCollection<string> Roles, int? CreatorId, string? Unit = null)
 {
     public static readonly ExprEnv System = new(0, [], null);
 }
@@ -129,6 +129,7 @@ public static partial class ExprEvaluator
             case "DAYS":
                 return Arg(0) is DateTime from && Arg(1) is DateTime to ? (decimal)(to.Date - from.Date).TotalDays : null;
             case "CURRENTUSER": return (decimal)env.UserId;
+            case "CURRENTUNIT": return env.Unit;
             case "HASROLE": return env.Roles.Contains(Text(Arg(0)), StringComparer.OrdinalIgnoreCase);
             case "ISCREATOR": return env.CreatorId is null || env.CreatorId == env.UserId;
             case "SUM":

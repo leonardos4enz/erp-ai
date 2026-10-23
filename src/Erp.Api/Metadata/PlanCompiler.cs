@@ -59,6 +59,7 @@ public static partial class PlanCompiler
                 SetWorkflowOp op => SetWorkflow(ctx, op),
                 SetRulesOp op => SetRules(ctx, op),
                 SetAutomationsOp op => SetAutomations(ctx, op),
+                SetSecurityOp op => SetSecurity(ctx, op),
                 _ => ctx.Fail("Operación desconocida."),
             };
             // Solo se registra el efecto si la operación fue válida; así las siguientes ven un modelo coherente.
@@ -87,6 +88,12 @@ public static partial class PlanCompiler
                     errors.Add(new(lastOp.GetValueOrDefault(e.Name, -1), message));
             if (AutomationRules.FindCycle(working) is { } cycle)
                 errors.Add(new(-1, $"Ciclo de automatizaciones: {string.Join(" → ", cycle)}. Una automatización no puede terminar disparándose a sí misma."));
+
+            // Spec 006: un campo archivado o un estado eliminado (también en el documento de una partida)
+            // no puede dejar una política de seguridad rota en silencio.
+            foreach (var e in working.Values.Where(e => !e.IsArchived && e.Security is not null))
+                foreach (var message in SecurityRules.Validate(e, e.Security!, working, knownRoles))
+                    errors.Add(new(lastOp.GetValueOrDefault(e.Name, -1), $"{e.Label} › seguridad: {message}"));
         }
 
         return new CompiledPlan(new PlanPreview(errors.Count == 0, errors, steps), working, sql, touched);
@@ -414,6 +421,22 @@ public static partial class PlanCompiler
     }
 
     /// <summary>Forma básica aquí; campos, destinos y expresiones en la pasada final (<see cref="AutomationRules"/>).</summary>
+    /// <summary>Spec 006. La política se valida completa en la pasada final (puede usar estados definidos después).</summary>
+    private static OpResult? SetSecurity(Ctx ctx, SetSecurityOp op)
+    {
+        var e = ctx.Active(op.Entity);
+        if (e is null) return null;
+        var s = op.Security;
+        if (s is not null && s.Fields is null && s.Records is null && s.Owner is null && !s.SystemManaged) s = null;
+        if (s is null)
+            return new(e with { Security = null }, $"Quitar la seguridad por campo y por registro de '{e.Label}'", []);
+        var parts = new List<string>();
+        if (s.Fields is { Count: > 0 } fs) parts.Add($"{fs.Count} regla(s) de campo");
+        if (s.Records is { Count: > 0 } rs) parts.Add($"{rs.Count} permiso(s) por registro");
+        if (s.SystemManaged) parts.Add("lo administra el sistema");
+        return new(e with { Security = s }, $"Definir la seguridad de '{e.Label}': {(parts.Count == 0 ? "dueño del registro" : string.Join(", ", parts))}", []);
+    }
+
     private static OpResult? SetAutomations(Ctx ctx, SetAutomationsOp op)
     {
         var e = ctx.Active(op.Entity);
@@ -461,6 +484,9 @@ public static partial class PlanCompiler
             ReferenceEntity = type is FieldTypes.Reference or FieldTypes.Parent ? f.ReferenceEntity : null,
             DisplayOrder = f.DisplayOrder != 0 ? f.DisplayOrder : order,
             IsArchived = false,
+            // Solo salida (spec 006): la seguridad por campo se declara con setSecurity.
+            Access = null,
+            EditableIn = null,
             // El motor calcula estos tipos: nunca son obligatorios ni únicos por captura.
             Required = !computed && f.Required,
             Unique = !computed && f.Unique,

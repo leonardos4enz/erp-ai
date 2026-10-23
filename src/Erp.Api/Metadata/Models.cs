@@ -72,6 +72,10 @@ public sealed record FieldDef
     public bool Editable { get; init; } = true;
     /// <summary>Spec 005: el buscador de esta referencia solo ofrece registros cuyo <c>Field</c> = valor de <c>Source</c>.</summary>
     public LookupFilter? LookupFilter { get; init; }
+    /// <summary>Spec 006, solo salida: acceso del usuario actual por rol (<c>hidden</c>, <c>read</c> o <c>edit</c>).</summary>
+    public string? Access { get; init; }
+    /// <summary>Spec 006, solo salida: estados en que se captura (de la política del catálogo).</summary>
+    public IReadOnlyList<string>? EditableIn { get; init; }
 
     public bool ReadOnly => FieldTypes.ReadOnly.Contains(Type);
 
@@ -181,6 +185,57 @@ public sealed record Automation
     public IReadOnlyList<AutomationAction> Actions { get; init; } = [];
 }
 
+// ---------- Spec 006: seguridad por campo y por registro ----------
+
+public static class FieldAccessLevels
+{
+    public const string Hidden = "hidden";
+    public const string Read = "read";
+    public const string Edit = "edit";
+}
+
+public static class RecordScopes
+{
+    public const string All = "all";
+    public const string Unit = "unit";
+    public const string Own = "own";
+    public static readonly IReadOnlySet<string> Valid = new HashSet<string> { All, Unit, Own };
+}
+
+/// <summary><c>Read</c>/<c>Edit</c>: roles que ven / capturan (omitido = todos). <c>EditableIn</c>: estados en que se captura.</summary>
+public sealed record FieldSecurity
+{
+    public required string Field { get; init; }
+    public IReadOnlyList<string>? Read { get; init; }
+    public IReadOnlyList<string>? Edit { get; init; }
+    public IReadOnlyList<string>? EditableIn { get; init; }
+}
+
+/// <summary>Qué registros ve (o modifica, con <c>Access = write</c>) un conjunto de roles.</summary>
+public sealed record RecordGrant
+{
+    public IReadOnlyList<string>? Roles { get; init; }
+    public string? Scope { get; init; }
+    public string? Where { get; init; }
+    public string? Access { get; init; }
+
+    public string EffectiveScope => Scope ?? RecordScopes.All;
+    public bool Writes => !string.Equals(Access, "read", StringComparison.OrdinalIgnoreCase);
+}
+
+public sealed record SecurityPolicy
+{
+    public IReadOnlyList<FieldSecurity>? Fields { get; init; }
+    /// <summary>Campo tipo usuario que identifica al dueño; omitido = quien lo creó.</summary>
+    public string? Owner { get; init; }
+    public IReadOnlyList<RecordGrant>? Records { get; init; }
+    /// <summary>Las personas solo consultan: altas, cambios y bajas solo por automatizaciones.</summary>
+    public bool SystemManaged { get; init; }
+
+    public FieldSecurity? For(string field) =>
+        Fields?.FirstOrDefault(f => string.Equals(f.Field, field, StringComparison.OrdinalIgnoreCase));
+}
+
 public sealed record EntityDef
 {
     public required string Name { get; init; }
@@ -196,6 +251,9 @@ public sealed record EntityDef
     public Workflow? Workflow { get; init; }
     public IReadOnlyList<BusinessRule>? Rules { get; init; }
     public IReadOnlyList<Automation>? Automations { get; init; }
+    public SecurityPolicy? Security { get; init; }
+
+    public bool SystemManaged => Security?.SystemManaged == true;
 
     public IEnumerable<FieldDef> ActiveFields => Fields.Where(f => !f.IsArchived).OrderBy(f => f.DisplayOrder);
 
@@ -232,7 +290,15 @@ public sealed record ChangePlan
 [JsonDerivedType(typeof(SetWorkflowOp), "setWorkflow")]
 [JsonDerivedType(typeof(SetRulesOp), "setRules")]
 [JsonDerivedType(typeof(SetAutomationsOp), "setAutomations")]
+[JsonDerivedType(typeof(SetSecurityOp), "setSecurity")]
 public abstract record Operation;
+
+/// <summary>Spec 006. Define la política completa del catálogo; <c>null</c> la elimina.</summary>
+public sealed record SetSecurityOp : Operation
+{
+    public required string Entity { get; init; }
+    public SecurityPolicy? Security { get; init; }
+}
 
 /// <summary>Spec 005. Sin <c>Merge</c> reemplaza la lista; con <c>Merge</c> agrega o reemplaza por nombre.</summary>
 public sealed record SetAutomationsOp : Operation

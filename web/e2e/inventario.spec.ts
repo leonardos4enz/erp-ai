@@ -144,10 +144,10 @@ test('H3 CA4: los movimientos no se editan ni se eliminan y las existencias no s
   expect((await (await as('admin')).delete(`/api/data/MovimientoInventario/${mov.id}`)).status()).toBe(409);
   expect((await (await as('supervisor')).delete(`/api/data/MovimientoInventario/${mov.id}`)).status()).toBe(403);
   expect((await a.post('/api/data/Existencia', { data: {} })).status()).toBe(403);
-  // Ni el administrador: los campos los asigna el sistema y la regla lo explica.
+  // Ni el administrador: desde Inventario 1.1.0 (spec 006) el catálogo lo administra el sistema.
   const forced = await (await as('admin')).post('/api/data/Existencia', { data: { Almacen: ids.almacen1, Producto: ids.rodamiento, Cantidad: 1000 } });
-  expect(forced.status()).toBe(400);
-  expect(JSON.stringify(await forced.json())).toMatch(/las crea el sistema/);
+  expect(forced.status()).toBe(403);
+  expect(JSON.stringify(await forced.json())).toMatch(/los administra el sistema/);
   expect(await stock(ids.almacen1, ids.rodamiento)).toBe(30);
 });
 

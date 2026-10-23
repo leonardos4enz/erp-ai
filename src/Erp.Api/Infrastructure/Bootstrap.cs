@@ -198,6 +198,9 @@ public static class Bootstrap
         -- Spec 005
         IF COL_LENGTH('meta.Entity', 'AutomationsJson') IS NULL ALTER TABLE meta.Entity ADD AutomationsJson nvarchar(max) NULL;
         IF COL_LENGTH('meta.Field', 'LookupFilterJson') IS NULL ALTER TABLE meta.Field ADD LookupFilterJson nvarchar(400) NULL;
+        -- Spec 006
+        IF COL_LENGTH('meta.Entity', 'SecurityJson') IS NULL ALTER TABLE meta.Entity ADD SecurityJson nvarchar(max) NULL;
+        IF COL_LENGTH('meta.[User]', 'Unit') IS NULL ALTER TABLE meta.[User] ADD Unit nvarchar(100) NULL;
 
         IF OBJECT_ID('meta.Sequence') IS NULL
         CREATE TABLE meta.Sequence (

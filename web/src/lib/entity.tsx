@@ -30,9 +30,39 @@ export const MODELER_FIELD_TYPES: FieldType[] = [
   'user', 'autonumber', 'formula', 'lines', 'parent',
 ];
 
-/** Campos cuyo valor calcula o asigna el servidor; nunca se envían al guardar. */
+/** Campos cuyo valor calcula o asigna el servidor, o que el usuario no puede capturar (spec 006); nunca se envían al guardar. */
 export function isComputedField(f: FieldDef): boolean {
-  return f.readOnly === true || f.editable === false || f.type === 'formula' || f.type === 'autonumber' || f.type === 'state' || f.type === 'parent';
+  return f.readOnly === true || f.editable === false || f.access === 'read' || f.access === 'hidden'
+    || f.type === 'formula' || f.type === 'autonumber' || f.type === 'state' || f.type === 'parent';
+}
+
+/**
+ * Spec 006: aplica al catálogo el estado del registro (o el inicial al crear). Un campo con `editableIn`
+ * que no incluye el estado queda de solo lectura; el servidor aplica la misma regla.
+ */
+export function withState(def: EntityDef, state: string | null | undefined): EntityDef {
+  if (!def.fields.some((f) => f.editableIn)) return def;
+  return {
+    ...def,
+    fields: def.fields.map((f) => (f.editableIn && f.access !== 'read' && f.access !== 'hidden' && !(state && f.editableIn.includes(state))
+      ? { ...f, access: 'read' as const, lockedByState: true }
+      : f)),
+  };
+}
+
+/**
+ * Por qué un campo no se puede capturar, para la pista del formulario. Regresión (revisión exploratoria 006,
+ * F-02): «se captura en su acción» no decía en cuál; se nombran las transiciones que lo piden.
+ */
+export function lockHint(f: FieldDef, def?: EntityDef): string | undefined {
+  if (f.editable === false) return 'Lo asigna el sistema';
+  if (f.lockedByState) {
+    if (f.editableIn?.length) return 'No se edita en este estado';
+    const actions = (def?.workflow?.transitions ?? []).filter((t) => !t.system && t.requiredFields?.includes(f.name)).map((t) => `«${t.label}»`);
+    return actions.length ? `Se captura al ejecutar ${actions.join(' o ')}` : 'Lo asigna el proceso';
+  }
+  if (f.access === 'read') return 'Solo lectura para tu rol';
+  return undefined;
 }
 
 /** Campos que la persona captura directamente en el formulario. */
@@ -47,7 +77,7 @@ export function supportsDefault(type: FieldType): boolean {
 
 export function activeFields(def: EntityDef): FieldDef[] {
   return def.fields
-    .filter((f) => !f.isArchived)
+    .filter((f) => !f.isArchived && f.access !== 'hidden')
     .slice()
     .sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
 }

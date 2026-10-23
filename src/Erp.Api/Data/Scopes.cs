@@ -59,6 +59,16 @@ public sealed class RelatedLoader(SqlConnection cn, SqlTransaction? tx, IReadOnl
         return _rows[(entity, id)] = row;
     }
 
+    /// <summary>Spec 006: ¿el registro está dentro del alcance de lectura del usuario?</summary>
+    public bool Visible(string entity, long id, Security.UserContext user)
+    {
+        if (!model.TryGetValue(entity, out var e) || Security.RecordFilter.ForRecordOrParent(e, model, user) is not { } p) return true;
+        using var cmd = new SqlCommand($"SELECT 1 FROM {AppTable(e.Name)} t WHERE t.[Id] = @id AND t.[IsDeleted] = 0 AND {p.Sql}", cn, tx);
+        cmd.Parameters.Add(new SqlParameter("@id", id));
+        p.AddTo(cmd.Parameters);
+        return cmd.ExecuteScalar() is not null;
+    }
+
     public Values? User(int id)
     {
         if (_users.TryGetValue(id, out var cached)) return cached;

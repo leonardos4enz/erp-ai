@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { AlertTriangle, X } from 'lucide-react';
 import { Button } from './ui';
@@ -50,6 +50,32 @@ function useFocusTrap(open: boolean, onClose: () => void) {
   return ref;
 }
 
+/**
+ * Cuerpo del diálogo. Regresión (revisión exploratoria 006, F-01): cuando el contenido no cabe y se desplaza,
+ * debe poder enfocarse para recorrerlo con el teclado (WCAG 2.1.1, regla axe scrollable-region-focusable).
+ */
+function DialogBody({ children, style, label }: { children: ReactNode; style?: CSSProperties; label: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [scrolls, setScrolls] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const check = () => setScrolls(el.scrollHeight > el.clientHeight + 1);
+    check();
+    const ro = new ResizeObserver(check);
+    ro.observe(el);
+    const mo = new MutationObserver(check);
+    mo.observe(el, { childList: true, subtree: true, characterData: true });
+    return () => { ro.disconnect(); mo.disconnect(); };
+  }, []);
+  return (
+    <div ref={ref} className="dialog-body" style={style}
+      tabIndex={scrolls ? 0 : undefined} role={scrolls ? 'region' : undefined} aria-label={scrolls ? label : undefined}>
+      {children}
+    </div>
+  );
+}
+
 export interface DialogProps {
   open: boolean;
   onClose: () => void;
@@ -85,7 +111,7 @@ export function Dialog({ open, onClose, title, description, size = 'md', footer,
           </div>
           {dismissable && <Button variant="ghost" size="sm" iconOnly icon={X} aria-label="Cerrar" onClick={onClose} />}
         </div>
-        {children && <div className="dialog-body">{children}</div>}
+        {children && <DialogBody label={typeof title === 'string' ? title : 'Contenido'}>{children}</DialogBody>}
         {footer && <div className="dialog-footer">{footer}</div>}
       </div>
     </div>,
@@ -116,7 +142,7 @@ export function Drawer({ open, onClose, title, description, footer, children }: 
           </div>
           <Button variant="ghost" size="sm" iconOnly icon={X} aria-label="Cerrar" onClick={onClose} />
         </div>
-        <div className="dialog-body" style={{ flex: 1, paddingTop: 'var(--space-5)' }}>{children}</div>
+        <DialogBody style={{ flex: 1, paddingTop: 'var(--space-5)' }} label={typeof title === 'string' ? title : 'Contenido'}>{children}</DialogBody>
         {footer && <div className="dialog-footer">{footer}</div>}
       </div>
     </div>,

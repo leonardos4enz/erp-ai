@@ -1,7 +1,7 @@
 {
   "id": "inventario",
   "name": "Inventario",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "icon": "boxes",
   "description": "Existencias por almacén y producto, y movimientos de entrada, salida, ajuste y traspaso. Las recepciones confirmadas de Compras generan sus entradas solas.",
   "requires": ["compras"],
@@ -119,6 +119,13 @@
         ] }
     ]
   },
+  "upgrades": [
+    { "version": "1.1.0",
+      "description": "Las existencias las administra el sistema: no se ofrecen ni se aceptan altas, cambios o bajas a mano, ni siquiera del administrador.",
+      "plan": { "description": "Inventario 1.1.0", "operations": [
+        { "op": "setSecurity", "entity": "Existencia", "security": { "systemManaged": true } }
+      ] } }
+  ],
   "roles": [
     { "name": "Supervisor de inventario", "description": "Consulta existencias, registra ajustes y administra traspasos.", "canManageModel": false, "canManageUsers": false, "canViewAudit": true,
       "permissions": [

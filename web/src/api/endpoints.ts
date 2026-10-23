@@ -75,6 +75,8 @@ export interface UserInput {
   password?: string;
   isActive?: boolean;
   roleIds: number[];
+  /** Spec 006: vacío la quita. */
+  unit?: string | null;
 }
 
 export interface RoleInput {
@@ -88,6 +90,7 @@ export interface RoleInput {
 
 export const adminApi = {
   users: () => api<User[]>('/admin/users'),
+  units: () => api<string[]>('/admin/units'),
   createUser: (u: UserInput) => api<User>('/admin/users', { method: 'POST', body: u }),
   updateUser: (id: number, u: UserInput) => api<User>(`/admin/users/${id}`, { method: 'PUT', body: u }),
   roles: () => api<Role[]>('/admin/roles'),

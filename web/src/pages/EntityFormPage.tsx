@@ -15,7 +15,7 @@ import { Alert, Button, LoadingBlock, PageHeader } from '../components/ui';
 import {
   blankLine, buildPayload, draftFromRow, isEmptyValue, lineErrorKey, lineFields, lookupFilterFor, mergeComputed, type Draft,
 } from '../lib/draft';
-import { activeFields, formatFormula, isEditableField, isRequiredFor, StateBadge, useChildDefs, useEntityDef } from '../lib/entity';
+import { activeFields, formatFormula, isEditableField, isRequiredFor, lockHint, StateBadge, useChildDefs, useEntityDef, withState } from '../lib/entity';
 import { formatDateTime } from '../lib/format';
 import { ForbiddenPage, NotFoundPage } from './StatusPages';
 
@@ -47,13 +47,20 @@ export function EntityFormPage() {
   const navigate = useNavigate();
   const toast = useToast();
   const { me, perms } = useAuth();
-  const { def, loading: defLoading } = useEntityDef(entity);
-  const { children, loading: childrenLoading } = useChildDefs(def);
-  const fields = useMemo(() => (def ? activeFields(def) : []), [def]);
+  const { def: baseDef, loading: defLoading } = useEntityDef(entity);
+  const { children: baseChildren, loading: childrenLoading } = useChildDefs(baseDef);
   const p = perms(entity);
   const roles = me?.roles ?? [];
 
   const [row, setRow] = useState<Row | undefined>();
+  // Spec 006: campos editables solo en ciertos estados (encabezado y partidas usan el estado del documento).
+  const docState = isNew ? baseDef?.workflow?.initial : (row?.Estado as string | undefined);
+  const def = useMemo(() => (baseDef ? withState(baseDef, docState) : undefined), [baseDef, docState]);
+  const children = useMemo(
+    () => Object.fromEntries(Object.entries(baseChildren).map(([k, c]) => [k, withState(c, docState)])),
+    [baseChildren, docState],
+  );
+  const fields = useMemo(() => (def ? activeFields(def) : []), [def]);
   const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
   const [loadError, setLoadError] = useState<ApiError | null>(null);
   const [loading, setLoading] = useState(!isNew);
@@ -136,7 +143,7 @@ export function EntityFormPage() {
 
   if (defLoading || (def && childrenLoading)) return <LoadingBlock />;
   if (!def) return <NotFoundPage />;
-  if (!p.read || (isNew && !p.create)) return <ForbiddenPage />;
+  if (!p.read || (isNew && (!p.create || def.systemManaged))) return <ForbiddenPage />;
   if (loading) return <LoadingBlock />;
   if (loadError) return loadError.status === 404 ? <NotFoundPage /> : loadError.status === 403 ? <ForbiddenPage /> : (
     <div className="page page-narrow"><Alert tone="danger" title={loadError.title}>{loadError.detail}</Alert></div>
@@ -144,7 +151,7 @@ export function EntityFormPage() {
 
   const wf = (!isNew ? (row?._workflow as RecordWorkflow | undefined) : undefined) ?? undefined;
   const lockedByState = !!wf && wf.editable === false;
-  const readOnly = !isNew && (!p.update || lockedByState);
+  const readOnly = !isNew && (!p.update || lockedByState || !!def.systemManaged);
   const listPath = `/c/${encodeURIComponent(def.name)}`;
   const Icon = resolveIcon(def.icon);
   const linesFields = fields.filter((f) => f.type === 'lines');
@@ -268,8 +275,7 @@ export function EntityFormPage() {
   function renderField(f: FieldDef) {
     const fid = `f-${f.name}`;
     const required = isRequiredFor(f, roles);
-    const roleHint = f.editable === false ? 'Lo asigna el sistema'
-      : !f.required && required && isEditableField(f) ? 'Obligatorio para tu rol' : undefined;
+    const roleHint = lockHint(f, def) ?? (!f.required && required && isEditableField(f) ? 'Obligatorio para tu rol' : undefined);
     return (
       <FieldInput
         key={f.name}
@@ -293,7 +299,7 @@ export function EntityFormPage() {
   const subtitle = !isNew && row
     ? `Creado ${formatDateTime(row.createdAt)}${row.createdBy ? ` por ${row.createdBy}` : ''}${row.updatedAt ? ` · Actualizado ${formatDateTime(row.updatedAt)}${row.updatedBy ? ` por ${row.updatedBy}` : ''}` : ''}`
     : def.description;
-  const canDelete = !isNew && p.delete && !lockedByState;
+  const canDelete = !isNew && p.delete && !lockedByState && !def.systemManaged;
 
   const alerts: ReactNode = (
     <>
@@ -315,7 +321,9 @@ export function EntityFormPage() {
           Este documento está en estado {wf.stateLabel} y ya no se puede editar.
         </Alert>
       )}
-      {!lockedByState && readOnly && <Alert tone="info" title="Solo lectura">Tu rol no tiene permiso para editar este catálogo.</Alert>}
+      {!lockedByState && readOnly && (def.systemManaged
+        ? <Alert tone="info" title="Lo administra el sistema">Estos registros los crea y actualiza el sistema; solo se consultan.</Alert>
+        : <Alert tone="info" title="Solo lectura">Tu rol no tiene permiso para editar este catálogo.</Alert>)}
     </>
   );
 
@@ -417,7 +425,7 @@ export function EntityFormPage() {
               child={child}
               lines={draft.lines[lf.name] ?? []}
               roles={roles}
-              readOnly={readOnly || saving}
+              readOnly={readOnly || saving || lf.access === 'read' || !!lf.lockedByState}
               parent={{ def, values: draft.values }}
               serverError={error}
               clientErrors={clientErrors}
