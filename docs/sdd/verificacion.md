@@ -39,6 +39,11 @@ npm --prefix web run e2e
   Si no se puede seleccionar algo por su rol o etiqueta, probablemente tampoco es accesible.
 - Los datos de apoyo se preparan por API (`applyPlan`, `apiAs`); lo que se está probando,
   por la UI.
+- **Playwright es más hábil que una persona:** desplaza contenedores y hace clic en elementos
+  recortados. Antes de interactuar con algo que aparece al vuelo (listas, menús, popovers), verifica
+  que sea visible para una persona: `elementFromPoint` en su centro debe devolver el propio elemento
+  (ver `pick()` en `compras.spec.ts`, hallazgo F-20).
+- Una regresión nueva se valida **corriéndola contra el código anterior**: debe fallar.
 
 ## 3. Revisión exploratoria con agente
 

@@ -31,10 +31,23 @@ async function pageAs(browser: Browser, w: Who): Promise<Page> {
   return page;
 }
 
-/** Elige una opción en un combobox de referencia (busca y hace clic en la coincidencia). */
+/**
+ * Elige una opción en un combobox de referencia como lo haría una persona.
+ * Regresión (F-20): Playwright puede hacer clic en opciones recortadas por un contenedor con scroll
+ * (las desplaza solo), pero una persona no las ve. Por eso primero se exige que la opción sea el
+ * elemento visible en su propio centro: ni recortada ni tapada.
+ */
 async function pick(page: Page, label: string | RegExp, search: string, option: RegExp) {
   await page.getByLabel(label).fill(search);
-  await page.getByRole('option', { name: option }).first().click();
+  const opt = page.getByRole('option', { name: option }).first();
+  await expect(opt).toBeVisible();
+  const visibleToHuman = await opt.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    return r.bottom <= window.innerHeight && (hit === el || el.contains(hit));
+  });
+  expect(visibleToHuman, `la opción ${option} debe verse completa sin desplazar contenedores`).toBe(true);
+  await opt.click();
 }
 
 async function newOrder(w: Who, lines: { producto: number; cantidad: number }[], extra: Record<string, unknown> = {}) {
@@ -102,7 +115,12 @@ test('CA2 · R1 · R3 · R9: el comprador captura una orden con totales en vivo 
 
   await page.getByRole('button', { name: 'Agregar partida' }).click();
   await pick(page, 'Producto, partida 1', 'CAJ', /Caja corrugada/);
+  await expect(page.getByLabel('Producto, partida 1')).toHaveValue(/Caja corrugada/);
   await expect(page.getByLabel('Precio unitario, partida 1')).toHaveValue('18.5'); // costo último del producto
+  // Al reabrir el buscador, el producto actual sigue visible como guía.
+  await page.getByLabel('Producto, partida 1').click();
+  await expect(page.getByLabel('Producto, partida 1')).toHaveAttribute('placeholder', /Caja corrugada/);
+  await page.keyboard.press('Escape');
   await page.getByLabel('Cantidad, partida 1').fill('100');
   await expect(page.getByText('2,146.00').first()).toBeVisible(); // 100 × 18.50 + 16 % IVA, calculado en vivo
 

@@ -1,4 +1,5 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
+import { createPortal } from 'react-dom';
 import { Search, X } from 'lucide-react';
 import { dataApi } from '../api/endpoints';
 import type { LookupItem } from '../api/types';
@@ -22,6 +23,28 @@ export interface ReferenceSelectProps {
   lookup?: (search: string, signal: AbortSignal) => Promise<LookupItem[]>;
 }
 
+const LIST_MAX_HEIGHT = 240;
+const LIST_MIN_WIDTH = 280;
+
+/**
+ * Posición de la lista en coordenadas de la ventana. La lista se dibuja en un portal (fuera del
+ * formulario) para que ningún contenedor con scroll la recorte, p. ej. la tabla de partidas
+ * (hallazgo F-20). Se abre hacia arriba si no cabe abajo.
+ */
+function listPosition(anchor: HTMLElement): CSSProperties {
+  const r = anchor.getBoundingClientRect();
+  const width = Math.max(r.width, LIST_MIN_WIDTH);
+  const left = Math.max(8, Math.min(r.left, window.innerWidth - width - 8));
+  const below = window.innerHeight - r.bottom - 8;
+  const above = r.top - 8;
+  const up = below < Math.min(LIST_MAX_HEIGHT, 160) && above > below;
+  return {
+    position: 'fixed', left, width,
+    maxHeight: Math.min(LIST_MAX_HEIGHT, Math.max(up ? above : below, 120)),
+    ...(up ? { bottom: window.innerHeight - r.top + 4 } : { top: r.bottom + 4 }),
+  };
+}
+
 /** Accessible async combobox backed by GET /data/{entity}/lookup. */
 export function ReferenceSelect({ entity, value, label, onChange, id, invalid, disabled, describedBy, ariaLabel, compact, lookup }: ReferenceSelectProps) {
   const [open, setOpen] = useState(false);
@@ -29,9 +52,11 @@ export function ReferenceSelect({ entity, value, label, onChange, id, invalid, d
   const [items, setItems] = useState<LookupItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [active, setActive] = useState(0);
+  const [pos, setPos] = useState<CSSProperties>({});
   const debounced = useDebounced(query, 250);
   const listId = useId();
   const wrapRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -45,10 +70,21 @@ export function ReferenceSelect({ entity, value, label, onChange, id, invalid, d
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entity, debounced, open]);
 
+  // Sigue al campo si la página, la tabla de partidas o la ventana se desplazan o cambian de tamaño.
+  useLayoutEffect(() => {
+    if (!open || !wrapRef.current) return;
+    const update = () => wrapRef.current && setPos(listPosition(wrapRef.current));
+    update();
+    window.addEventListener('scroll', update, true);
+    window.addEventListener('resize', update);
+    return () => { window.removeEventListener('scroll', update, true); window.removeEventListener('resize', update); };
+  }, [open]);
+
   useEffect(() => {
     if (!open) return;
     function onDoc(e: MouseEvent) {
-      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      if (!wrapRef.current?.contains(t) && !listRef.current?.contains(t)) setOpen(false);
     }
     document.addEventListener('mousedown', onDoc);
     return () => document.removeEventListener('mousedown', onDoc);
@@ -60,7 +96,8 @@ export function ReferenceSelect({ entity, value, label, onChange, id, invalid, d
     setQuery('');
   }
 
-  const display = open ? query : (label ?? (value != null ? `#${value}` : ''));
+  const current = label ?? (value != null ? `#${value}` : '');
+  const display = open ? query : current;
 
   return (
     <div className="combo" ref={wrapRef}>
@@ -77,17 +114,22 @@ export function ReferenceSelect({ entity, value, label, onChange, id, invalid, d
           aria-invalid={invalid || undefined}
           aria-describedby={describedBy}
           aria-activedescendant={open && items[active] ? `${listId}-${items[active].id}` : undefined}
-          placeholder={disabled ? '—' : 'Buscar…'}
+          // Al abrir para buscar, el valor actual queda visible como guía (antes parecía que se perdía).
+          placeholder={disabled ? '—' : open && current ? current : 'Buscar…'}
+          title={current || undefined}
           value={display}
           disabled={disabled}
           style={{ paddingRight: value != null ? 36 : undefined }}
           onFocus={() => setOpen(true)}
+          // Tras elegir una opción el foco se queda aquí: un clic nuevo también debe abrir la lista.
+          onClick={() => setOpen(true)}
           onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
           onKeyDown={(e) => {
             if (e.key === 'ArrowDown') { e.preventDefault(); setOpen(true); setActive((a) => Math.min(a + 1, items.length - 1)); }
             else if (e.key === 'ArrowUp') { e.preventDefault(); setActive((a) => Math.max(a - 1, 0)); }
             else if (e.key === 'Enter' && open && items[active]) { e.preventDefault(); choose(items[active]); }
             else if (e.key === 'Escape' && open) { e.stopPropagation(); setOpen(false); }
+            else if (e.key === 'Tab') setOpen(false);
           }}
         />
       </div>
@@ -96,8 +138,8 @@ export function ReferenceSelect({ entity, value, label, onChange, id, invalid, d
           <X size={14} aria-hidden />
         </button>
       )}
-      {open && (
-        <ul className="combo-list" id={listId} role="listbox">
+      {open && createPortal(
+        <ul className="combo-list combo-list-floating" id={listId} role="listbox" ref={listRef} style={pos}>
           {loading && <li className="combo-empty"><Spinner size={14} /></li>}
           {!loading && items.length === 0 && <li className="combo-empty">Sin resultados</li>}
           {!loading && items.map((it, i) => (
@@ -113,7 +155,8 @@ export function ReferenceSelect({ entity, value, label, onChange, id, invalid, d
               {it.label}
             </li>
           ))}
-        </ul>
+        </ul>,
+        document.body,
       )}
     </div>
   );

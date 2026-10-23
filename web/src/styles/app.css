@@ -294,6 +294,8 @@ code, pre, .mono { font-family: var(--font-mono); font-size: 0.8125rem; }
 /* ---------- Combobox (reference lookup) ---------- */
 .combo { position: relative; }
 .combo-list { position: absolute; z-index: 60; left: 0; right: 0; top: calc(100% + 4px); max-height: 240px; overflow-y: auto; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); box-shadow: var(--shadow-lg); padding: var(--space-1); margin: 0; list-style: none; }
+/* La lista vive en un portal con position: fixed (ver ReferenceSelect): por encima de diálogos y tablas. */
+.combo-list-floating { right: auto; top: auto; z-index: 1000; }
 .combo-option { padding: 7px var(--space-3); border-radius: var(--radius-sm); cursor: pointer; }
 .combo-option[aria-selected="true"], .combo-option:hover { background: var(--surface-2); }
 .combo-empty { padding: 8px var(--space-3); color: var(--text-subtle); font-size: var(--text-sm); }

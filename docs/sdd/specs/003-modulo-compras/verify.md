@@ -36,6 +36,9 @@
 | F-16 | Media | Navegador | Al enfocar la última columna de partidas **toda la página se desplazaba**: un `.sr-only` absoluto escapaba del contenedor con scroll | `position: relative` en `.table-scroll` | `compras › CA2…` (scrollX = 0) |
 | F-17 | Baja | Navegador | Campos de referencia de solo lectura decían "Buscar…" | Muestra "—" | visual |
 | F-18 | Media | Captura de referencia | Con el módulo, el menú plano (15 catálogos) **empujaba Configuración fuera de la pantalla** | Metadato `group` + secciones plegables; documentos primero | `compras › H7` |
+| F-20 | **Alta** | **Reporte del usuario** | En las partidas, la lista del buscador quedaba recortada por el contenedor con scroll de la tabla: no se podía elegir producto. **La E2E pasaba** porque Playwright desplaza el contenedor antes de hacer clic | La lista se dibuja en un portal con posición fija; se abre hacia arriba si no cabe | `pick()` exige que la opción sea visible para una persona (`elementFromPoint`); **verificado que falla con el componente anterior** |
+| F-21 | Media | Reporte del usuario | Al reabrir un buscador con valor, el texto se vaciaba y parecía que se había perdido la selección | El valor actual se muestra como guía (placeholder) | `compras › CA2…` |
+| F-22 | Media | E2E (al escribir la regresión de F-21) | Tras elegir una opción, un segundo clic en el mismo campo no abría la lista (el foco ya estaba ahí) | Abre también con clic | `compras › CA2…` |
 | F-19 | Baja | E2E | Catálogos de pruebas antiguas chocaban con los del módulo (Almacén, Proveedor) | Pruebas usan nombres propios | suite completa |
 
 ## Decisiones tomadas durante la verificación
