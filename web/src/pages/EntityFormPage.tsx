@@ -13,7 +13,7 @@ import { useToast } from '../components/Toast';
 import { HistoryPanel, stateLabel, TransitionDialog, WorkflowBar } from '../components/Workflow';
 import { Alert, Button, LoadingBlock, PageHeader } from '../components/ui';
 import {
-  blankLine, buildPayload, draftFromRow, isEmptyValue, lineErrorKey, lineFields, mergeComputed, type Draft,
+  blankLine, buildPayload, draftFromRow, isEmptyValue, lineErrorKey, lineFields, lookupFilterFor, mergeComputed, type Draft,
 } from '../lib/draft';
 import { activeFields, formatFormula, isEditableField, isRequiredFor, StateBadge, useChildDefs, useEntityDef } from '../lib/entity';
 import { formatDateTime } from '../lib/format';
@@ -284,6 +284,7 @@ export function EntityFormPage() {
         error={clientErrors[f.name] ?? fieldError(error, f.name)}
         hint={roleHint}
         isNew={isNew}
+        filter={def ? lookupFilterFor(f, { def, values: draft.values }) : undefined}
       />
     );
   }
@@ -417,6 +418,7 @@ export function EntityFormPage() {
               lines={draft.lines[lf.name] ?? []}
               roles={roles}
               readOnly={readOnly || saving}
+              parent={{ def, values: draft.values }}
               serverError={error}
               clientErrors={clientErrors}
               onAdd={() => addLine(lf)}

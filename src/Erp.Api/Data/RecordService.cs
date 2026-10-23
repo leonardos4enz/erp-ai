@@ -24,7 +24,7 @@ public sealed record HistoryItem(DateTime At, string User, string? From, string?
 /// Reglas de seguridad: identificadores solo desde <see cref="EntityDef"/> (nunca desde la petición),
 /// valores siempre parametrizados, fórmulas evaluadas en memoria con <see cref="ExprEvaluator"/>.
 /// </summary>
-public sealed class RecordService(Db db, MetadataStore store)
+public sealed partial class RecordService(Db db, MetadataStore store)
 {
     public const int MaxPageSize = 200;
     public const int MaxSearchLength = 100;
@@ -110,7 +110,8 @@ public sealed class RecordService(Db db, MetadataStore store)
         return await LoadOutputAsync(cn, null, e, model, id, user, ct) ?? throw new NotFound("El registro no existe.");
     }
 
-    public async Task<IReadOnlyList<LookupItem>> LookupAsync(string entityName, string? search, UserContext user, CancellationToken ct)
+    public async Task<IReadOnlyList<LookupItem>> LookupAsync(string entityName, string? search, UserContext user, CancellationToken ct,
+        string? filterField = null, string? filterValue = null)
     {
         var model = await store.GetAsync(ct);
         var e = await store.GetActiveAsync(entityName, ct);
@@ -134,6 +135,23 @@ public sealed class RecordService(Db db, MetadataStore store)
             if (term.Length > MaxSearchLength) term = term[..MaxSearchLength];
             cmd.Parameters.Add(new SqlParameter("@search", "%" + EscapeLike(term) + "%"));
             where += $" AND {label} LIKE @search ESCAPE '\\'";
+        }
+        // Spec 005: buscador filtrado. El campo sale de los metadatos (lista blanca); el valor es parámetro.
+        if (!string.IsNullOrEmpty(filterField))
+        {
+            var ff = e.StoredFields.FirstOrDefault(f => string.Equals(f.Name, filterField, StringComparison.OrdinalIgnoreCase))
+                     ?? throw new AppException(400, "El filtro del buscador no es válido.");
+            object? fv;
+            // Un campo padre se filtra como cualquier referencia (id del documento).
+            var asType = ff.Type == FieldTypes.Parent ? ff with { Type = FieldTypes.Reference } : ff;
+            try { fv = string.IsNullOrEmpty(filterValue) ? null : ConvertValue(asType, JsonSerializer.SerializeToElement(filterValue)); }
+            catch (Exception ex) when (ex is FieldError or FormatException or InvalidOperationException or OverflowException)
+            {
+                throw new AppException(400, "El filtro del buscador no es válido.");
+            }
+            if (fv is null) return []; // sin valor de origen todavía (p. ej. sin orden elegida): nada que ofrecer
+            cmd.Parameters.Add(new SqlParameter("@filter", fv));
+            where += $" AND t.{Quote(ff.Name)} = @filter";
         }
         cmd.CommandText = $"SELECT TOP 20 t.[Id], {label} FROM {AppTable(e.Name)} t WHERE {where} ORDER BY 2";
         var list = new List<LookupItem>();
@@ -204,6 +222,17 @@ public sealed class RecordService(Db db, MetadataStore store)
         var loader = new RelatedLoader(cn, tx, model);
         var draft = new DocDraft { CreatorId = user.Id };
         await ParseIntoAsync(draft, e, model, body, loader, lenient: false, ct);
+        return await InsertDraftAsync(new AutoCtx(cn, tx, model, user, http, 0, [], ct), e, draft, AuditActions.Create);
+    }
+
+    /// <summary>
+    /// Núcleo del alta, compartido con las automatizaciones (spec 005): estado inicial, valores por defecto,
+    /// fórmulas, reglas, folios, partidas, historial, auditoría y, al final, las automatizaciones «al crear».
+    /// </summary>
+    private async Task<long> InsertDraftAsync(AutoCtx c, EntityDef e, DocDraft draft, string auditAction)
+    {
+        var (cn, tx, model, user, ct) = (c.Cn, c.Tx, c.Model, c.User, c.Ct);
+        var loader = new RelatedLoader(cn, tx, model);
         if (e.Workflow is not null) draft.Header[Workflow.StateField] = e.Workflow.Initial;
         var env = Env(user, draft);
         Compute(draft, e, model, loader, env);
@@ -214,7 +243,8 @@ public sealed class RecordService(Db db, MetadataStore store)
         await SaveLinesAsync(cn, tx, e, model, id, draft, existing: null, user.Id, ct);
         if (e.Workflow is not null)
             await WriteHistoryAsync(cn, tx, e, id, null, e.Workflow.Initial, null, null, user.Id, ct);
-        await Audit.WriteAsync(cn, tx, http, AuditActions.Create, e.Name, id.ToString(), after: Snapshot(draft));
+        await Audit.WriteAsync(cn, tx, c.Http, auditAction, e.Name, id.ToString(), after: Snapshot(draft));
+        await FireAsync(c, e, id, AutomationEvents.Create, null);
         return id;
     }
 
@@ -243,6 +273,7 @@ public sealed class RecordService(Db db, MetadataStore store)
         var existingLines = await LoadDraftAsync(cn, tx, e, model, id, ct);
         await SaveLinesAsync(cn, tx, e, model, id, draft, existingLines, user.Id, ct);
         await Audit.WriteAsync(cn, tx, http, AuditActions.Update, e.Name, id.ToString(), before, Snapshot(draft));
+        await FireAsync(new AutoCtx(cn, tx, model, user, http, 0, [], ct), e, id, AutomationEvents.Update, null);
         var row = (await LoadOutputAsync(cn, tx, e, model, id, user, ct))!;
         await tx.CommitAsync(ct);
         return row;
@@ -277,7 +308,6 @@ public sealed class RecordService(Db db, MetadataStore store)
         var loader = new RelatedLoader(cn, tx, model);
         var draft = await LoadDraftAsync(cn, tx, e, model, id, ct) ?? throw new NotFound("El registro no existe.");
         var before = Snapshot(draft);
-        var from = draft.Header.GetValueOrDefault(Workflow.StateField) as string;
         var env = Env(user, draft);
 
         var (allowed, reason, missingRole) = CanTransition(e, t, draft, model, loader, env, user);
@@ -302,20 +332,35 @@ public sealed class RecordService(Db db, MetadataStore store)
                 errors[f.Name] = [$"{f.Label} es obligatorio para «{t.Label}»."];
         if (errors.Count > 0) throw new ValidationFailed(errors);
 
-        draft.Header[Workflow.StateField] = t.To;
-        var scope = HeaderScope(draft, e, model, loader);
-        foreach (var s in t.Set ?? [])
-            if (e.FindField(s.Field) is { } f)
-                draft.Header[f.Name] = Coerce(f, ExprEvaluator.Evaluate(s.Value, scope, env));
-        Compute(draft, e, model, loader, env);
-        Validate(draft, e, model, loader, env, user, checkRequired: false);
-
-        await UpdateHeaderAsync(cn, tx, e, id, draft.Header, rowVersion, user.Id, ct);
-        await WriteHistoryAsync(cn, tx, e, id, from, t.To, t.Name, comment, user.Id, ct);
-        await Audit.WriteAsync(cn, tx, http, $"workflow.{t.Name}", e.Name, id.ToString(), before, Snapshot(draft));
+        await ApplyTransitionAsync(new AutoCtx(cn, tx, model, user, http, 0, [], ct), e, id, draft, before, t, comment, rowVersion);
         var row = (await LoadOutputAsync(cn, tx, e, model, id, user, ct))!;
         await tx.CommitAsync(ct);
         return row;
+    }
+
+    /// <summary>
+    /// Núcleo de una transición ya autorizada (de una persona o de una automatización): estado, asignaciones,
+    /// fórmulas, reglas, historial, auditoría y automatizaciones «al ejecutar» y «al entrar al estado».
+    /// </summary>
+    private async Task ApplyTransitionAsync(AutoCtx c, EntityDef e, long id, DocDraft draft, Dictionary<string, object?> before,
+        WorkflowTransition t, string? comment, byte[]? rowVersion)
+    {
+        var loader = new RelatedLoader(c.Cn, c.Tx, c.Model);
+        var env = Env(c.User, draft);
+        var from = draft.Header.GetValueOrDefault(Workflow.StateField) as string;
+        draft.Header[Workflow.StateField] = t.To;
+        var scope = HeaderScope(draft, e, c.Model, loader);
+        foreach (var s in t.Set ?? [])
+            if (e.FindField(s.Field) is { } f)
+                draft.Header[f.Name] = Coerce(f, ExprEvaluator.Evaluate(s.Value, scope, env));
+        Compute(draft, e, c.Model, loader, env);
+        Validate(draft, e, c.Model, loader, env, c.User, checkRequired: false);
+
+        await UpdateHeaderAsync(c.Cn, c.Tx, e, id, draft.Header, rowVersion, c.User.Id, c.Ct);
+        await WriteHistoryAsync(c.Cn, c.Tx, e, id, from, t.To, t.Name, comment, c.User.Id, c.Ct);
+        await Audit.WriteAsync(c.Cn, c.Tx, c.Http, $"workflow.{t.Name}", e.Name, id.ToString(), before, Snapshot(draft));
+        await FireAsync(c, e, id, AutomationEvents.Transition, t.Name);
+        await FireAsync(c, e, id, AutomationEvents.EnterState, t.To);
     }
 
     public async Task DeleteAsync(string entityName, long id, HttpContext http, CancellationToken ct)
@@ -377,11 +422,14 @@ public sealed class RecordService(Db db, MetadataStore store)
         return scope;
     }
 
-    /// <summary>Aplica valores por defecto (campo vacío) y fórmulas: partidas primero, luego el encabezado.</summary>
-    private static void Compute(DocDraft d, EntityDef e, IReadOnlyDictionary<string, EntityDef> model, RelatedLoader loader, ExprEnv env)
+    /// <summary>
+    /// Aplica valores por defecto (campo vacío) y fórmulas: partidas primero, luego el encabezado.
+    /// Sin <paramref name="defaults"/> solo recalcula fórmulas (escrituras del motor: no inventa datos capturables).
+    /// </summary>
+    private static void Compute(DocDraft d, EntityDef e, IReadOnlyDictionary<string, EntityDef> model, RelatedLoader loader, ExprEnv env, bool defaults = true)
     {
         var header = HeaderScope(d, e, model, loader);
-        ApplyDefaults(e, d.Header, header, env);
+        if (defaults) ApplyDefaults(e, d.Header, header, env);
 
         foreach (var (field, list) in d.Lines)
         {
@@ -390,7 +438,7 @@ public sealed class RecordService(Db db, MetadataStore store)
             foreach (var line in list)
             {
                 var ls = new DocScope(child, line.Values, loader, parent: header);
-                ApplyDefaults(child, line.Values, ls, env);
+                if (defaults) ApplyDefaults(child, line.Values, ls, env);
                 foreach (var f in order) line.Values[f.Name] = Coerce(f, ExprEvaluator.Evaluate(f.Formula!, ls, env));
             }
         }
@@ -453,6 +501,7 @@ public sealed class RecordService(Db db, MetadataStore store)
         IReadOnlyDictionary<string, EntityDef> model, RelatedLoader loader, ExprEnv env, UserContext user)
     {
         var state = d.Header.GetValueOrDefault(Workflow.StateField) as string;
+        if (t.System) return (false, $"«{t.Label}» la ejecuta el sistema automáticamente.", false);
         if (!t.From.Contains(state ?? "", StringComparer.OrdinalIgnoreCase))
             return (false, $"La acción «{t.Label}» no aplica en el estado actual.", false);
         var roleOk = user.IsSuperuser || (t.Roles is { Count: > 0 } ? user.HasRole(t.Roles) : user.Access(e.Name).Update);
@@ -567,7 +616,7 @@ public sealed class RecordService(Db db, MetadataStore store)
                 if (d.Scale > s && decimal.Round(d, s) != d) throw new FieldError($"{f.Label} admite máximo {s} decimales.");
                 if (Math.Abs(decimal.Truncate(d)).ToString(CultureInfo.InvariantCulture).TrimStart('0').Length > p - s)
                     throw new FieldError($"{f.Label} es demasiado grande.");
-                return decimal.Round(d, s);
+                return WithScale(decimal.Round(d, s), s);
             }
             case FieldTypes.Boolean:
                 return v.GetBoolean();
@@ -611,7 +660,7 @@ public sealed class RecordService(Db db, MetadataStore store)
         {
             return type switch
             {
-                FieldTypes.Decimal => decimal.Round(Convert.ToDecimal(value, CultureInfo.InvariantCulture), f.Scale ?? 2, MidpointRounding.AwayFromZero),
+                FieldTypes.Decimal => WithScale(decimal.Round(Convert.ToDecimal(value, CultureInfo.InvariantCulture), f.Scale ?? 2, MidpointRounding.AwayFromZero), f.Scale ?? 2),
                 FieldTypes.Integer => (long)decimal.Round(Convert.ToDecimal(value, CultureInfo.InvariantCulture), 0, MidpointRounding.AwayFromZero),
                 FieldTypes.Boolean => value is bool b ? b : throw new InvalidCastException(),
                 FieldTypes.Date => value is DateTime d ? d.Date : throw new InvalidCastException(),
@@ -630,6 +679,13 @@ public sealed class RecordService(Db db, MetadataStore store)
     }
 
     private static string Truncate(string s, int max) => s.Length > max ? s[..max] : s;
+
+    /// <summary>
+    /// Fija la escala del campo (10 → 10.00), igual que la columna decimal de SQL Server. Regresión (spec 005):
+    /// una fórmula de texto daba «pendiente 10» en memoria y «pendiente 10.00» leída de la base.
+    /// </summary>
+    internal static decimal WithScale(decimal d, int scale) =>
+        d.Scale >= scale ? d : d + new decimal(0, 0, 0, false, (byte)Math.Clamp(scale, 0, 28));
     private static bool IsBlank(object? v) => v is null || v is string s && string.IsNullOrWhiteSpace(s);
 
     private static byte[] ReadRowVersion(string? value)
@@ -689,7 +745,7 @@ public sealed class RecordService(Db db, MetadataStore store)
     }
 
     private static async Task UpdateHeaderAsync(SqlConnection cn, SqlTransaction tx, EntityDef e, long id, Values values,
-        byte[] rowVersion, int userId, CancellationToken ct)
+        byte[]? rowVersion, int userId, CancellationToken ct)
     {
         await using var cmd = new SqlCommand { Connection = cn, Transaction = tx };
         var sets = new List<string>();
@@ -701,10 +757,11 @@ public sealed class RecordService(Db db, MetadataStore store)
         }
         cmd.Parameters.Add(new SqlParameter("@uid", userId));
         cmd.Parameters.Add(new SqlParameter("@id", id));
-        cmd.Parameters.Add(new SqlParameter("@rv", System.Data.SqlDbType.Timestamp) { Value = rowVersion });
+        // Sin versión: escritura del motor (automatización) sobre una fila ya bloqueada en esta transacción.
+        if (rowVersion is not null) cmd.Parameters.Add(new SqlParameter("@rv", System.Data.SqlDbType.Timestamp) { Value = rowVersion });
         cmd.CommandText = $"""
             UPDATE {AppTable(e.Name)} SET {string.Join(", ", sets.Append("[UpdatedAt] = SYSUTCDATETIME()").Append("[UpdatedBy] = @uid"))}
-             WHERE [Id] = @id AND [RowVer] = @rv AND [IsDeleted] = 0
+             WHERE [Id] = @id{(rowVersion is null ? "" : " AND [RowVer] = @rv")} AND [IsDeleted] = 0
             """;
         var affected = (int)(await ExecuteMappingUniqueAsync(e, async () => (object?)await cmd.ExecuteNonQueryAsync(ct)))!;
         if (affected == 0) throw new Conflict("Otro usuario modificó este registro. Recarga para ver los cambios.");
@@ -860,7 +917,7 @@ public sealed class RecordService(Db db, MetadataStore store)
                 stateLabel = state?.Label ?? stateName,
                 color = state?.Color ?? "neutral",
                 editable = state?.Editable ?? true,
-                transitions = wf.Transitions.Where(t => t.From.Contains(stateName ?? "", StringComparer.OrdinalIgnoreCase)).Select(t =>
+                transitions = wf.Transitions.Where(t => !t.System && t.From.Contains(stateName ?? "", StringComparer.OrdinalIgnoreCase)).Select(t =>
                 {
                     var (allowed, reason, _) = CanTransition(e, t, draft, model, loader, env, user);
                     return new

@@ -18,7 +18,8 @@ public sealed record ModuleSeed(string Entity, string Key, IReadOnlyList<JsonObj
 public sealed record ModuleUpgrade(string Version, string Description, ChangePlan Plan);
 
 public sealed record ModulePackage(string Id, string Name, string Version, string Icon, string Description,
-    ChangePlan Plan, IReadOnlyList<ModuleRole> Roles, IReadOnlyList<ModuleSeed> Seed, IReadOnlyList<ModuleUpgrade>? Upgrades = null)
+    ChangePlan Plan, IReadOnlyList<ModuleRole> Roles, IReadOnlyList<ModuleSeed> Seed, IReadOnlyList<ModuleUpgrade>? Upgrades = null,
+    IReadOnlyList<string>? Requires = null)
 {
     /// <summary>Plan base seguido de todas las actualizaciones: lo que recibe una instalación nueva.</summary>
     public IReadOnlyList<(string Label, ChangePlan Plan)> FullChain =>
@@ -29,7 +30,8 @@ public sealed record ModulePackage(string Id, string Name, string Version, strin
 }
 
 public sealed record ModuleInfo(string Id, string Name, string Description, string Icon, string Version, bool Installed,
-    IReadOnlyList<string> Entities, string? InstalledVersion, bool UpgradeAvailable, IReadOnlyList<string> PendingUpgrades);
+    IReadOnlyList<string> Entities, string? InstalledVersion, bool UpgradeAvailable, IReadOnlyList<string> PendingUpgrades,
+    IReadOnlyList<string> Requires, IReadOnlyList<string> MissingRequirements);
 
 /// <summary>
 /// Módulos instalables (spec 002 H7). Un módulo es solo datos: plan de cambios + roles + datos iniciales.
@@ -56,6 +58,13 @@ public sealed partial class ModuleService(Db db, MetadataStore store, PlanServic
     private ModulePackage Find(string id) =>
         Packages().FirstOrDefault(p => p.Id == id) ?? throw new NotFound("El módulo no existe.");
 
+    /// <summary>Spec 005: módulos requeridos que no están instalados.</summary>
+    private static IEnumerable<string> Missing(ModulePackage p, IEnumerable<string> installed) =>
+        (p.Requires ?? []).Where(r => !installed.Contains(r, StringComparer.OrdinalIgnoreCase));
+
+    private string Name(string moduleId) => Packages().FirstOrDefault(x => x.Id == moduleId)?.Name ?? moduleId;
+    private IReadOnlyList<string> RequiredNames(ModulePackage p) => (p.Requires ?? []).Select(Name).ToList();
+
     public async Task<IReadOnlyList<ModuleInfo>> ListAsync()
     {
         await using var cn = await db.OpenAsync();
@@ -66,7 +75,8 @@ public sealed partial class ModuleService(Db db, MetadataStore store, PlanServic
             var pending = current is null ? [] : p.PendingAfter(current);
             return new ModuleInfo(p.Id, p.Name, p.Description, p.Icon, p.Version, current is not null,
                 p.Plan.Operations.OfType<CreateEntityOp>().Select(o => o.Label).ToList(),
-                current, pending.Count > 0, pending.Select(u => $"{u.Version}: {u.Description}").ToList());
+                current, pending.Count > 0, pending.Select(u => $"{u.Version}: {u.Description}").ToList(),
+                RequiredNames(p), Missing(p, installed.Keys).Select(Name).ToList());
         }).ToList();
     }
 
@@ -96,6 +106,9 @@ public sealed partial class ModuleService(Db db, MetadataStore store, PlanServic
         await using var tx = (SqlTransaction)await cn.BeginTransactionAsync(ct);
         if (await cn.ExecuteScalarAsync<int?>("SELECT 1 FROM meta.Module WHERE Id = @id", new { id }, tx) is not null)
             throw new Conflict("El módulo ya está instalado.");
+        var installedIds = await cn.QueryAsync<string>("SELECT Id FROM meta.Module", transaction: tx);
+        if (Missing(p, installedIds).Select(Name).ToList() is { Count: > 0 } missing)
+            throw new Conflict($"Requiere el módulo {string.Join(" y ", missing)}. Instálalo primero.");
 
         // 1) Roles primero: el plan los usa en reglas y transiciones.
         var roleIds = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);

@@ -43,6 +43,12 @@ export function ModulesPage() {
                 {m.installed && <Badge tone="success" icon={CheckCircle2}>Instalado</Badge>}
               </div>
               {m.description && <p className="muted module-desc">{m.description}</p>}
+              {!m.installed && !!m.missingRequirements?.length && (
+                <Alert tone="warning" title={`Requiere ${m.missingRequirements.join(' y ')}`}>Instala primero {m.missingRequirements.length === 1 ? 'ese módulo' : 'esos módulos'}.</Alert>
+              )}
+              {!!m.requires?.length && !m.missingRequirements?.length && (
+                <p className="subtle module-requires">Usa {m.requires.join(', ')}</p>
+              )}
               {m.upgradeAvailable && !!m.pendingUpgrades?.length && (
                 <ul className="module-upgrades">
                   {m.pendingUpgrades.map((u) => <li key={u}>{u}</li>)}
@@ -53,7 +59,8 @@ export function ModulesPage() {
                 {m.entities.length} {m.entities.length === 1 ? 'catálogo' : 'catálogos'}
                 <span className="spacer" />
                 {!m.installed && (
-                  <Button size="sm" variant="primary" icon={Download} onClick={() => setSelected({ module: m, mode: 'install' })} aria-label={`Instalar ${m.name}`}>Instalar</Button>
+                  <Button size="sm" variant="primary" icon={Download} disabled={!!m.missingRequirements?.length}
+                    onClick={() => setSelected({ module: m, mode: 'install' })} aria-label={`Instalar ${m.name}`}>Instalar</Button>
                 )}
                 {m.installed && m.upgradeAvailable && (
                   <Button size="sm" variant="primary" icon={ArrowUpCircle} onClick={() => setSelected({ module: m, mode: 'upgrade' })} aria-label={`Actualizar ${m.name}`}>

@@ -160,5 +160,22 @@ export function mergeComputed(def: EntityDef, children: Record<string, EntityDef
   return { ...d, values: mergeValues(fields, d.values, d.touched, server), lines };
 }
 
+/**
+ * Spec 005: resuelve el filtro del buscador de una referencia con los valores actuales del formulario.
+ * `source` es un campo del mismo registro o, en una partida, `CampoPadre.Campo` del documento.
+ */
+export function lookupFilterFor(
+  f: FieldDef, own: { def: EntityDef; values: Values }, parent?: { def: EntityDef; values: Values },
+): { field: string; value: unknown; sourceLabel: string } | undefined {
+  const lf = f.lookupFilter;
+  if (!lf?.field || !lf.source) return undefined;
+  const [head, tail] = lf.source.split('.');
+  const src = tail ? parent : own;
+  if (!src) return undefined;
+  const name = tail ?? head;
+  const sf = src.def.fields.find((x) => x.name.toLowerCase() === name.toLowerCase());
+  return { field: lf.field, value: src.values[sf?.name ?? name] ?? null, sourceLabel: sf?.label ?? name };
+}
+
 /** Clave de error del servidor para una celda de partida: `Partidas[0].Cantidad`. */
 export const lineErrorKey = (linesField: string, index: number, field: string) => `${linesField}[${index}].${field}`;

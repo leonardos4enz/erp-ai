@@ -44,8 +44,10 @@ export const dataApi = {
   list: (entity: string, q: ListQuery, signal?: AbortSignal) =>
     api<RowList>(`/data/${enc(entity)}`, { query: { ...q }, signal }),
   get: (entity: string, id: number | string) => api<Row>(`/data/${enc(entity)}/${enc(String(id))}`),
-  lookup: (entity: string, search: string, signal?: AbortSignal) =>
-    api<LookupItem[]>(`/data/${enc(entity)}/lookup`, { query: { search }, signal }),
+  lookup: (entity: string, search: string, signal?: AbortSignal, filter?: { field: string; value: unknown }) =>
+    api<LookupItem[]>(`/data/${enc(entity)}/lookup`, {
+      query: { search, filterField: filter?.field, filterValue: filter ? String(filter.value ?? '') : undefined }, signal,
+    }),
   create: (entity: string, values: Record<string, unknown>) =>
     api<Row>(`/data/${enc(entity)}`, { method: 'POST', body: values }),
   update: (entity: string, id: number | string, values: Record<string, unknown>) =>

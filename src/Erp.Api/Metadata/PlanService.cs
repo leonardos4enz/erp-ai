@@ -1,8 +1,10 @@
 using System.Data.Common;
 using System.Text.Json;
 using Dapper;
+using Erp.Api.Data;
 using Erp.Api.Infrastructure;
 using Erp.Api.Security;
+using Microsoft.Data.SqlClient;
 
 namespace Erp.Api.Metadata;
 
@@ -56,6 +58,22 @@ public sealed class PlanService(Db db, MetadataStore store, JsonSerializerOption
 
         foreach (var name in compiled.TouchedEntities)
             await UpsertAsync(cn, tx, compiled.ResultingModel[name]);
+
+        // Spec 005: una fórmula nueva o cambiada también se calcula en los registros existentes.
+        var result = compiled.ResultingModel;
+        var recompute = plan.Operations
+            .Select(op => op switch
+            {
+                AddFieldOp a when string.Equals(a.Field.Type?.Trim(), FieldTypes.Formula, StringComparison.OrdinalIgnoreCase) => a.Entity,
+                UpdateFieldOp u when u.Formula is not null => u.Entity,
+                _ => null,
+            })
+            .OfType<string>()
+            .Where(result.ContainsKey)
+            .Select(n => AutomationRules.Root(result[n], result).Name)
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+        foreach (var root in recompute)
+            await RecordService.RecomputeFormulasAsync((SqlConnection)cn, (SqlTransaction)tx, result[root], result, CancellationToken.None);
 
         var changeSetId = await cn.ExecuteScalarAsync<int>("""
             INSERT meta.ChangeSet (Description, PlanJson, SqlText, OperationCount, AppliedBy)
@@ -118,15 +136,16 @@ public sealed class PlanService(Db db, MetadataStore store, JsonSerializerOption
             USING (SELECT @Name AS Name) AS s ON t.Name = s.Name
             WHEN MATCHED THEN UPDATE SET Label = @Label, LabelPlural = @LabelPlural, Icon = @Icon,
                 Description = @Description, DisplayField = @DisplayField, IsArchived = @IsArchived,
-                WorkflowJson = @WorkflowJson, RulesJson = @RulesJson, GroupName = @Group, UpdatedAt = SYSUTCDATETIME()
-            WHEN NOT MATCHED THEN INSERT (Name, Label, LabelPlural, Icon, Description, DisplayField, IsArchived, WorkflowJson, RulesJson, GroupName)
-                VALUES (@Name, @Label, @LabelPlural, @Icon, @Description, @DisplayField, @IsArchived, @WorkflowJson, @RulesJson, @Group)
+                WorkflowJson = @WorkflowJson, RulesJson = @RulesJson, GroupName = @Group, AutomationsJson = @AutomationsJson, UpdatedAt = SYSUTCDATETIME()
+            WHEN NOT MATCHED THEN INSERT (Name, Label, LabelPlural, Icon, Description, DisplayField, IsArchived, WorkflowJson, RulesJson, GroupName, AutomationsJson)
+                VALUES (@Name, @Label, @LabelPlural, @Icon, @Description, @DisplayField, @IsArchived, @WorkflowJson, @RulesJson, @Group, @AutomationsJson)
             OUTPUT inserted.Id;
             """, new
         {
             e.Name, e.Label, e.LabelPlural, e.Icon, e.Description, e.DisplayField, e.IsArchived, e.Group,
             WorkflowJson = e.Workflow is null ? null : JsonSerializer.Serialize(e.Workflow, MetadataStore.Json),
             RulesJson = e.Rules is null ? null : JsonSerializer.Serialize(e.Rules, MetadataStore.Json),
+            AutomationsJson = e.Automations is null ? null : JsonSerializer.Serialize(e.Automations, MetadataStore.Json),
         }, tx);
 
         foreach (var f in e.Fields)
@@ -136,13 +155,13 @@ public sealed class PlanService(Db db, MetadataStore store, JsonSerializerOption
                 USING (SELECT @EntityId AS EntityId, @Name AS Name) AS s ON t.EntityId = s.EntityId AND t.Name = s.Name
                 WHEN MATCHED THEN UPDATE SET Label = @Label, IsRequired = @Required, ShowInList = @ShowInList,
                     OptionsJson = @Options, RequiredForRolesJson = @Roles, DisplayOrder = @DisplayOrder, IsArchived = @IsArchived,
-                    DefaultValue = @DefaultValue, Formula = @Formula, IsEditable = @Editable
+                    DefaultValue = @DefaultValue, Formula = @Formula, IsEditable = @Editable, LookupFilterJson = @LookupFilter
                 WHEN NOT MATCHED THEN INSERT (EntityId, Name, Label, Type, IsRequired, IsUnique, MaxLength, [Precision], Scale,
                     OptionsJson, ReferenceEntity, DisplayOrder, ShowInList, RequiredForRolesJson, IsArchived,
-                    DefaultValue, Formula, ResultType, Prefix, Padding, ChildEntity, IsEditable)
+                    DefaultValue, Formula, ResultType, Prefix, Padding, ChildEntity, IsEditable, LookupFilterJson)
                     VALUES (@EntityId, @Name, @Label, @Type, @Required, @Unique, @MaxLength, @Precision, @Scale,
                     @Options, @ReferenceEntity, @DisplayOrder, @ShowInList, @Roles, @IsArchived,
-                    @DefaultValue, @Formula, @ResultType, @Prefix, @Padding, @ChildEntity, @Editable);
+                    @DefaultValue, @Formula, @ResultType, @Prefix, @Padding, @ChildEntity, @Editable, @LookupFilter);
                 """, new
             {
                 EntityId = entityId, f.Name, f.Label, f.Type, f.Required, f.Unique, f.MaxLength, f.Precision, f.Scale,
@@ -150,6 +169,7 @@ public sealed class PlanService(Db db, MetadataStore store, JsonSerializerOption
                 f.ReferenceEntity, f.DisplayOrder, f.ShowInList,
                 Roles = f.RequiredForRoles is null ? null : JsonSerializer.Serialize(f.RequiredForRoles),
                 f.IsArchived, f.DefaultValue, f.Formula, f.ResultType, f.Prefix, f.Padding, f.ChildEntity, f.Editable,
+                LookupFilter = f.LookupFilter is null ? null : JsonSerializer.Serialize(f.LookupFilter, MetadataStore.Json),
             }, tx);
         }
     }

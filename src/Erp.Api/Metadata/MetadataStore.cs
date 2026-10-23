@@ -42,12 +42,12 @@ public sealed class MetadataStore(Db db)
     internal static async Task<IReadOnlyDictionary<string, EntityDef>> LoadAsync(DbConnection cn, DbTransaction? tx)
     {
         var entities = await cn.QueryAsync<EntityRow>(
-            "SELECT Id, Name, Label, LabelPlural, Icon, Description, DisplayField, IsArchived, WorkflowJson, RulesJson, GroupName FROM meta.Entity",
+            "SELECT Id, Name, Label, LabelPlural, Icon, Description, DisplayField, IsArchived, WorkflowJson, RulesJson, GroupName, AutomationsJson FROM meta.Entity",
             transaction: tx);
         var fields = (await cn.QueryAsync<FieldRow>("""
             SELECT EntityId, Name, Label, Type, IsRequired, IsUnique, MaxLength, [Precision], Scale, OptionsJson,
                    ReferenceEntity, DisplayOrder, ShowInList, RequiredForRolesJson, IsArchived,
-                   DefaultValue, Formula, ResultType, Prefix, Padding, ChildEntity, IsEditable
+                   DefaultValue, Formula, ResultType, Prefix, Padding, ChildEntity, IsEditable, LookupFilterJson
               FROM meta.Field
             """, transaction: tx)).ToLookup(f => f.EntityId);
 
@@ -57,6 +57,7 @@ public sealed class MetadataStore(Db db)
             Description = e.Description, DisplayField = e.DisplayField, IsArchived = e.IsArchived, Group = e.GroupName,
             Workflow = e.WorkflowJson is null ? null : JsonSerializer.Deserialize<Workflow>(e.WorkflowJson, Json),
             Rules = e.RulesJson is null ? null : JsonSerializer.Deserialize<List<BusinessRule>>(e.RulesJson, Json),
+            Automations = e.AutomationsJson is null ? null : JsonSerializer.Deserialize<List<Automation>>(e.AutomationsJson, Json),
             Fields = fields[e.Id].OrderBy(f => f.DisplayOrder).Select(f => new FieldDef
             {
                 Name = f.Name, Label = f.Label, Type = f.Type, Required = f.IsRequired, Unique = f.IsUnique,
@@ -66,6 +67,7 @@ public sealed class MetadataStore(Db db)
                 RequiredForRoles = ParseList(f.RequiredForRolesJson), IsArchived = f.IsArchived,
                 DefaultValue = f.DefaultValue, Formula = f.Formula, ResultType = f.ResultType,
                 Prefix = f.Prefix, Padding = f.Padding, ChildEntity = f.ChildEntity, Editable = f.IsEditable,
+                LookupFilter = f.LookupFilterJson is null ? null : JsonSerializer.Deserialize<LookupFilter>(f.LookupFilterJson, Json),
             }).ToList(),
         }, StringComparer.OrdinalIgnoreCase);
     }
@@ -77,10 +79,11 @@ public sealed class MetadataStore(Db db)
         string.IsNullOrEmpty(json) ? null : JsonSerializer.Deserialize<List<string>>(json);
 
     private sealed record EntityRow(int Id, string Name, string Label, string LabelPlural, string Icon,
-        string? Description, string? DisplayField, bool IsArchived, string? WorkflowJson, string? RulesJson, string? GroupName);
+        string? Description, string? DisplayField, bool IsArchived, string? WorkflowJson, string? RulesJson, string? GroupName, string? AutomationsJson);
 
     private sealed record FieldRow(int EntityId, string Name, string Label, string Type, bool IsRequired, bool IsUnique,
         int? MaxLength, int? Precision, int? Scale, string? OptionsJson, string? ReferenceEntity, int DisplayOrder,
         bool ShowInList, string? RequiredForRolesJson, bool IsArchived,
-        string? DefaultValue, string? Formula, string? ResultType, string? Prefix, int? Padding, string? ChildEntity, bool IsEditable);
+        string? DefaultValue, string? Formula, string? ResultType, string? Prefix, int? Padding, string? ChildEntity, bool IsEditable,
+        string? LookupFilterJson);
 }

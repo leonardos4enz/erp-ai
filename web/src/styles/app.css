@@ -464,3 +464,4 @@ code, pre, .mono { font-family: var(--font-mono); font-size: 0.8125rem; }
 
 /* Spec 004: notas de versión pendientes en la tarjeta del módulo. */
 .module-upgrades { margin: 0; padding-left: var(--space-5); font-size: var(--text-sm); color: var(--text-muted); }
+.module-requires { margin: 0; font-size: var(--text-sm); }

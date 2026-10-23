@@ -70,12 +70,17 @@ public sealed record FieldDef
     public string? ChildEntity { get; init; }
     /// <summary>Spec 004: false = lo asigna el sistema (valor por defecto al crear o transiciones), nunca el usuario.</summary>
     public bool Editable { get; init; } = true;
+    /// <summary>Spec 005: el buscador de esta referencia solo ofrece registros cuyo <c>Field</c> = valor de <c>Source</c>.</summary>
+    public LookupFilter? LookupFilter { get; init; }
 
     public bool ReadOnly => FieldTypes.ReadOnly.Contains(Type);
 
     /// <summary>El cliente no puede escribirlo: calculado por el motor o asignado por el sistema.</summary>
     public bool ClientLocked => ReadOnly || !Editable;
 }
+
+/// <summary>Spec 005: <c>Field</c> es un campo del catálogo referenciado; <c>Source</c>, un campo del mismo registro o <c>CampoPadre.Campo</c>.</summary>
+public sealed record LookupFilter(string Field, string Source);
 
 public sealed record WorkflowState
 {
@@ -101,6 +106,8 @@ public sealed record WorkflowTransition
     public IReadOnlyList<FieldAssignment>? Set { get; init; }
     public string? Icon { get; init; }
     public string? Variant { get; init; }
+    /// <summary>Spec 005: solo la ejecuta una automatización; no se ofrece ni se acepta de personas.</summary>
+    public bool System { get; init; }
 }
 
 public sealed record Workflow
@@ -123,6 +130,57 @@ public sealed record BusinessRule
     public string? Field { get; init; }
 }
 
+// ---------- Spec 005: automatizaciones entre registros ----------
+
+public static class AutomationEvents
+{
+    public const string Create = "create";
+    public const string Update = "update";
+    public const string EnterState = "enterState";
+    public const string Transition = "transition";
+    public static readonly IReadOnlySet<string> All = new HashSet<string> { Create, Update, EnterState, Transition };
+}
+
+public static class AutomationActions
+{
+    public const string Update = "update";
+    public const string Transition = "transition";
+    public const string Create = "create";
+    public const string Rollup = "rollup";
+    public static readonly IReadOnlySet<string> All = new HashSet<string> { Update, Transition, Create, Rollup };
+}
+
+public sealed record MatchPair(string Field, string Source);
+
+public sealed record AutomationAction
+{
+    public required string Type { get; init; }
+    /// <summary>Repite la acción por cada partida de este campo; el ámbito es la partida.</summary>
+    public string? Lines { get; init; }
+    public string? When { get; init; }
+    /// <summary>Campo referencia del ámbito que apunta al registro destino.</summary>
+    public string? Target { get; init; }
+    public IReadOnlyList<FieldAssignment>? Set { get; init; }
+    public string? Transition { get; init; }
+    public string? Entity { get; init; }
+    public IReadOnlyList<MatchPair>? Match { get; init; }
+    public bool CreateMissing { get; init; }
+    public string? Field { get; init; }
+    public string? Sum { get; init; }
+    public string? Filter { get; init; }
+}
+
+public sealed record Automation
+{
+    public required string Name { get; init; }
+    public required string Label { get; init; }
+    public required string On { get; init; }
+    public string? State { get; init; }
+    public string? Transition { get; init; }
+    public string? When { get; init; }
+    public IReadOnlyList<AutomationAction> Actions { get; init; } = [];
+}
+
 public sealed record EntityDef
 {
     public required string Name { get; init; }
@@ -137,6 +195,7 @@ public sealed record EntityDef
     public IReadOnlyList<FieldDef> Fields { get; init; } = [];
     public Workflow? Workflow { get; init; }
     public IReadOnlyList<BusinessRule>? Rules { get; init; }
+    public IReadOnlyList<Automation>? Automations { get; init; }
 
     public IEnumerable<FieldDef> ActiveFields => Fields.Where(f => !f.IsArchived).OrderBy(f => f.DisplayOrder);
 
@@ -172,7 +231,16 @@ public sealed record ChangePlan
 [JsonDerivedType(typeof(ArchiveFieldOp), "archiveField")]
 [JsonDerivedType(typeof(SetWorkflowOp), "setWorkflow")]
 [JsonDerivedType(typeof(SetRulesOp), "setRules")]
+[JsonDerivedType(typeof(SetAutomationsOp), "setAutomations")]
 public abstract record Operation;
+
+/// <summary>Spec 005. Sin <c>Merge</c> reemplaza la lista; con <c>Merge</c> agrega o reemplaza por nombre.</summary>
+public sealed record SetAutomationsOp : Operation
+{
+    public required string Entity { get; init; }
+    public IReadOnlyList<Automation> Automations { get; init; } = [];
+    public bool Merge { get; init; }
+}
 
 public sealed record SetWorkflowOp : Operation
 {
@@ -235,6 +303,8 @@ public sealed record UpdateFieldOp : Operation
     public string? DefaultValue { get; init; }
     public string? Formula { get; init; }
     public bool? Editable { get; init; }
+    /// <summary>Spec 005: un filtro con <c>Field</c> vacío lo elimina.</summary>
+    public LookupFilter? LookupFilter { get; init; }
 }
 
 public sealed record ArchiveFieldOp : Operation

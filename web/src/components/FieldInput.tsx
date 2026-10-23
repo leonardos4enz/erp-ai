@@ -2,7 +2,7 @@ import { usersApi } from '../api/endpoints';
 import type { EntityDef, FieldDef } from '../api/types';
 import { formatFormula, isNumericField, StateBadge } from '../lib/entity';
 import { Field, Input, Select, Switch } from './ui';
-import { ReferenceSelect } from './ReferenceSelect';
+import { ReferenceSelect, type ReferenceSelectProps } from './ReferenceSelect';
 
 export interface FieldControlProps {
   field: FieldDef;
@@ -20,6 +20,8 @@ export interface FieldControlProps {
   /** Sin <label> visible: nombre accesible explícito (celdas de partidas). */
   ariaLabel?: string;
   compact?: boolean;
+  /** Spec 005: filtro del buscador ya resuelto con los valores del formulario. */
+  filter?: ReferenceSelectProps['filter'];
   /** Registro nuevo (los folios aún no existen). */
   isNew?: boolean;
 }
@@ -92,6 +94,7 @@ export function FieldControl(p: FieldControlProps) {
           id={id}
           entity={f.referenceEntity ?? ''}
           lookup={f.type === 'user' ? lookupUsers : undefined}
+          filter={f.type === 'reference' ? p.filter : undefined}
           value={(v as number | null) ?? null}
           label={p.refLabel ?? null}
           invalid={invalid}

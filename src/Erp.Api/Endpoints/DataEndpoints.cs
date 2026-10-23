@@ -16,8 +16,8 @@ public static class DataEndpoints
                 HttpContext http, RecordService records, CancellationToken ct) =>
             records.ListAsync(entity, new ListQuery(page ?? 1, pageSize ?? 25, search, sort, dir, state), http.CurrentUser(), ct));
 
-        g.MapGet("/lookup", (string entity, string? search, HttpContext http, RecordService records, CancellationToken ct) =>
-            records.LookupAsync(entity, search, http.CurrentUser(), ct));
+        g.MapGet("/lookup", (string entity, string? search, string? filterField, string? filterValue, HttpContext http, RecordService records, CancellationToken ct) =>
+            records.LookupAsync(entity, search, http.CurrentUser(), ct, filterField, filterValue));
 
         // Contrato (plan 002): la respuesta envuelve los valores en { values }.
         g.MapPost("/compute", async (string entity, ComputeRequest req, HttpContext http, RecordService records, CancellationToken ct) =>

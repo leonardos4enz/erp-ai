@@ -1,0 +1,139 @@
+{
+  "id": "inventario",
+  "name": "Inventario",
+  "version": "1.0.0",
+  "icon": "boxes",
+  "description": "Existencias por almacén y producto, y movimientos de entrada, salida, ajuste y traspaso. Las recepciones confirmadas de Compras generan sus entradas solas.",
+  "requires": ["compras"],
+  "plan": {
+    "description": "Módulo de Inventario 1.0.0",
+    "operations": [
+      { "op": "createEntity", "group": "Inventario", "name": "Existencia", "label": "Existencia", "labelPlural": "Existencias", "icon": "boxes",
+        "description": "Cantidad disponible por almacén y producto. La calcula el sistema a partir de los movimientos.",
+        "fields": [
+          { "name": "Almacen", "label": "Almacén", "type": "reference", "referenceEntity": "Almacen", "editable": false },
+          { "name": "Producto", "label": "Producto", "type": "reference", "referenceEntity": "Producto", "editable": false },
+          { "name": "Cantidad", "label": "Existencia", "type": "decimal", "precision": 18, "scale": 2, "editable": false, "defaultValue": "0" },
+          { "name": "StockMinimo", "label": "Stock mínimo", "type": "formula", "resultType": "decimal", "precision": 18, "scale": 2, "formula": "Producto.StockMinimo" },
+          { "name": "BajoMinimo", "label": "Bajo mínimo", "type": "formula", "resultType": "boolean", "formula": "Cantidad < Producto.StockMinimo" },
+          { "name": "Clave", "label": "Clave", "type": "formula", "resultType": "text", "showInList": false, "formula": "Almacen.Clave & ' · ' & Producto.Clave" }
+        ] },
+      { "op": "updateEntity", "entity": "Existencia", "displayField": "Clave" },
+      { "op": "setRules", "entity": "Existencia", "rules": [
+          { "name": "LaCreaElSistema", "assert": "NOT ISBLANK(Almacen) AND NOT ISBLANK(Producto)", "message": "Las existencias las crea el sistema con cada movimiento de inventario." },
+          { "name": "SinNegativos", "field": "Cantidad", "assert": "Cantidad >= 0", "message": "No hay existencias suficientes: la operación dejaría el inventario en negativo." }
+        ] },
+
+      { "op": "createEntity", "group": "Inventario", "name": "MovimientoInventario", "label": "Movimiento de inventario", "labelPlural": "Movimientos de inventario", "icon": "arrow-left-right", "displayField": "Folio",
+        "description": "Entradas, salidas, ajustes y traspasos. Un movimiento aplicado no se edita ni se elimina.",
+        "fields": [
+          { "name": "Folio", "label": "Folio", "type": "autonumber", "prefix": "MOV-", "padding": 6 },
+          { "name": "Fecha", "label": "Fecha", "type": "date", "required": true, "editable": false, "defaultValue": "TODAY()" },
+          { "name": "Tipo", "label": "Tipo", "type": "choice", "required": true, "options": ["Entrada", "Salida", "Ajuste", "Traspaso salida", "Traspaso entrada"] },
+          { "name": "Almacen", "label": "Almacén", "type": "reference", "referenceEntity": "Almacen", "required": true },
+          { "name": "Producto", "label": "Producto", "type": "reference", "referenceEntity": "Producto", "required": true },
+          { "name": "Cantidad", "label": "Cantidad", "type": "decimal", "precision": 18, "scale": 2, "required": true },
+          { "name": "Efecto", "label": "Efecto en existencia", "type": "formula", "resultType": "decimal", "precision": 18, "scale": 2,
+            "formula": "IF(Tipo IN ('Salida', 'Traspaso salida'), -ABS(Cantidad), IF(Tipo = 'Ajuste', Cantidad, ABS(Cantidad)))" },
+          { "name": "Referencia", "label": "Documento origen", "type": "text", "maxLength": 40, "editable": false },
+          { "name": "Notas", "label": "Notas", "type": "longtext", "showInList": false }
+        ] },
+      { "op": "setRules", "entity": "MovimientoInventario", "rules": [
+          { "name": "CantidadNoCero", "field": "Cantidad", "assert": "Cantidad <> 0", "message": "La cantidad no puede ser cero." },
+          { "name": "SoloAjusteNegativo", "field": "Cantidad", "when": "Tipo <> 'Ajuste'", "assert": "Cantidad > 0", "message": "La cantidad debe ser mayor a cero (solo un ajuste puede ser negativo)." },
+          { "name": "AjusteSupervisor", "field": "Tipo", "when": "Tipo = 'Ajuste'", "assert": "HASROLE('Supervisor de inventario') OR HASROLE('Administrador')",
+            "message": "Solo el supervisor de inventario registra ajustes." },
+          { "name": "TraspasoConDocumento", "field": "Tipo", "when": "Tipo IN ('Traspaso salida', 'Traspaso entrada')", "assert": "NOT ISBLANK(Referencia)",
+            "message": "Los traspasos se registran con un documento de traspaso." }
+        ] },
+      { "op": "setWorkflow", "entity": "MovimientoInventario", "workflow": {
+          "initial": "Aplicado",
+          "states": [ { "name": "Aplicado", "label": "Aplicado", "color": "success", "editable": false } ],
+          "transitions": []
+        } },
+      { "op": "setAutomations", "entity": "MovimientoInventario", "automations": [
+          { "name": "ActualizarExistencia", "label": "Actualizar la existencia", "on": "create",
+            "actions": [
+              { "type": "rollup", "entity": "Existencia", "match": [ { "field": "Almacen", "source": "Almacen" }, { "field": "Producto", "source": "Producto" } ],
+                "createMissing": true, "field": "Cantidad", "sum": "Efecto" }
+            ] }
+        ] },
+
+      { "op": "createEntity", "group": "Inventario", "name": "Traspaso", "label": "Traspaso", "labelPlural": "Traspasos", "icon": "arrow-right-left", "displayField": "Folio",
+        "description": "Mueve mercancía entre almacenes: al aplicarse genera una salida en el origen y una entrada en el destino.",
+        "fields": [
+          { "name": "Folio", "label": "Folio", "type": "autonumber", "prefix": "TRA-", "padding": 6 },
+          { "name": "Fecha", "label": "Fecha", "type": "date", "required": true, "editable": false, "defaultValue": "TODAY()" },
+          { "name": "AlmacenOrigen", "label": "Almacén origen", "type": "reference", "referenceEntity": "Almacen", "required": true },
+          { "name": "AlmacenDestino", "label": "Almacén destino", "type": "reference", "referenceEntity": "Almacen", "required": true },
+          { "name": "Notas", "label": "Notas", "type": "longtext", "showInList": false }
+        ] },
+      { "op": "createEntity", "group": "Inventario", "name": "TraspasoPartida", "label": "Partida de traspaso", "labelPlural": "Partidas de traspaso", "icon": "list",
+        "fields": [
+          { "name": "Traspaso", "label": "Traspaso", "type": "parent", "referenceEntity": "Traspaso" },
+          { "name": "Producto", "label": "Producto", "type": "reference", "referenceEntity": "Producto", "required": true },
+          { "name": "Cantidad", "label": "Cantidad", "type": "decimal", "precision": 18, "scale": 2, "required": true }
+        ] },
+      { "op": "setRules", "entity": "TraspasoPartida", "rules": [
+          { "name": "CantidadPositiva", "field": "Cantidad", "assert": "Cantidad > 0", "message": "La cantidad debe ser mayor a cero." }
+        ] },
+      { "op": "addField", "entity": "Traspaso", "field": { "name": "Partidas", "label": "Partidas", "type": "lines", "childEntity": "TraspasoPartida" } },
+      { "op": "addField", "entity": "Traspaso", "field": { "name": "TotalPiezas", "label": "Total a traspasar", "type": "formula", "resultType": "decimal", "precision": 18, "scale": 2, "formula": "SUM(Partidas.Cantidad)" } },
+      { "op": "setRules", "entity": "Traspaso", "rules": [
+          { "name": "AlmacenesDistintos", "field": "AlmacenDestino", "assert": "AlmacenOrigen <> AlmacenDestino", "message": "El almacén destino debe ser distinto del origen." }
+        ] },
+      { "op": "setWorkflow", "entity": "Traspaso", "workflow": {
+          "initial": "Borrador",
+          "states": [
+            { "name": "Borrador", "label": "Borrador", "color": "neutral", "editable": true },
+            { "name": "Aplicado", "label": "Aplicado", "color": "success", "editable": false },
+            { "name": "Cancelado", "label": "Cancelado", "color": "danger", "editable": false }
+          ],
+          "transitions": [
+            { "name": "aplicar", "label": "Aplicar traspaso", "from": ["Borrador"], "to": "Aplicado", "icon": "check", "variant": "primary",
+              "roles": ["Almacenista", "Supervisor de inventario"],
+              "when": "COUNT(Partidas) > 0", "whenMessage": "Agrega al menos una partida." },
+            { "name": "cancelar", "label": "Cancelar", "from": ["Borrador"], "to": "Cancelado", "icon": "ban", "variant": "danger",
+              "roles": ["Almacenista", "Supervisor de inventario"], "requireComment": true }
+          ]
+        } },
+      { "op": "setAutomations", "entity": "Traspaso", "automations": [
+          { "name": "MoverMercancia", "label": "Mover la mercancía entre almacenes", "on": "enterState", "state": "Aplicado",
+            "actions": [
+              { "type": "create", "lines": "Partidas", "entity": "MovimientoInventario", "set": [
+                  { "field": "Tipo", "value": "'Traspaso salida'" }, { "field": "Almacen", "value": "Traspaso.AlmacenOrigen" },
+                  { "field": "Producto", "value": "Producto" }, { "field": "Cantidad", "value": "Cantidad" }, { "field": "Referencia", "value": "Traspaso.Folio" } ] },
+              { "type": "create", "lines": "Partidas", "entity": "MovimientoInventario", "set": [
+                  { "field": "Tipo", "value": "'Traspaso entrada'" }, { "field": "Almacen", "value": "Traspaso.AlmacenDestino" },
+                  { "field": "Producto", "value": "Producto" }, { "field": "Cantidad", "value": "Cantidad" }, { "field": "Referencia", "value": "Traspaso.Folio" } ] }
+            ] }
+        ] },
+
+      { "op": "setAutomations", "entity": "Recepcion", "merge": true, "automations": [
+          { "name": "EntradaAlmacen", "label": "Registrar la entrada al almacén", "on": "enterState", "state": "Confirmada",
+            "actions": [
+              { "type": "create", "lines": "Partidas", "entity": "MovimientoInventario", "set": [
+                  { "field": "Tipo", "value": "'Entrada'" }, { "field": "Almacen", "value": "Recepcion.Almacen" },
+                  { "field": "Producto", "value": "Producto" }, { "field": "Cantidad", "value": "Cantidad" }, { "field": "Referencia", "value": "Recepcion.Folio" } ] }
+            ] }
+        ] }
+    ]
+  },
+  "roles": [
+    { "name": "Supervisor de inventario", "description": "Consulta existencias, registra ajustes y administra traspasos.", "canManageModel": false, "canManageUsers": false, "canViewAudit": true,
+      "permissions": [
+        { "entity": "Existencia", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false },
+        { "entity": "MovimientoInventario", "canRead": true, "canCreate": true, "canUpdate": false, "canDelete": false },
+        { "entity": "Traspaso", "canRead": true, "canCreate": true, "canUpdate": true, "canDelete": true },
+        { "entity": "Almacen", "canRead": true, "canCreate": true, "canUpdate": true, "canDelete": false },
+        { "entity": "Producto", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false }
+      ] },
+    { "name": "Almacenista", "description": "Registra recepciones de mercancía, salidas y traspasos.", "canManageModel": false, "canManageUsers": false, "canViewAudit": false,
+      "permissions": [
+        { "entity": "Existencia", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false },
+        { "entity": "MovimientoInventario", "canRead": true, "canCreate": true, "canUpdate": false, "canDelete": false },
+        { "entity": "Traspaso", "canRead": true, "canCreate": true, "canUpdate": true, "canDelete": true }
+      ] }
+  ],
+  "seed": []
+}

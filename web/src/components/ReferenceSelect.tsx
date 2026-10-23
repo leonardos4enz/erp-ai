@@ -21,6 +21,8 @@ export interface ReferenceSelectProps {
   compact?: boolean;
   /** Fuente alternativa de opciones (p. ej. usuarios). Por defecto: GET /data/{entity}/lookup. */
   lookup?: (search: string, signal: AbortSignal) => Promise<LookupItem[]>;
+  /** Spec 005: solo ofrece registros con `field` = `value` (p. ej. partidas de la orden elegida). */
+  filter?: { field: string; value: unknown; sourceLabel: string };
 }
 
 const LIST_MAX_HEIGHT = 240;
@@ -46,7 +48,7 @@ function listPosition(anchor: HTMLElement): CSSProperties {
 }
 
 /** Accessible async combobox backed by GET /data/{entity}/lookup. */
-export function ReferenceSelect({ entity, value, label, onChange, id, invalid, disabled, describedBy, ariaLabel, compact, lookup }: ReferenceSelectProps) {
+export function ReferenceSelect({ entity, value, label, onChange, id, invalid, disabled, describedBy, ariaLabel, compact, lookup, filter }: ReferenceSelectProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [items, setItems] = useState<LookupItem[]>([]);
@@ -58,17 +60,21 @@ export function ReferenceSelect({ entity, value, label, onChange, id, invalid, d
   const wrapRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
 
+  const filterValue = filter?.value ?? null;
+  const waitingSource = !!filter && (filterValue === null || filterValue === '');
+
   useEffect(() => {
     if (!open) return;
+    if (waitingSource) { setItems([]); setLoading(false); return; }
     const ctrl = new AbortController();
     setLoading(true);
-    (lookup ? lookup(debounced, ctrl.signal) : dataApi.lookup(entity, debounced, ctrl.signal))
+    (lookup ? lookup(debounced, ctrl.signal) : dataApi.lookup(entity, debounced, ctrl.signal, filter ? { field: filter.field, value: filterValue } : undefined))
       .then((r) => { setItems(r); setActive(0); })
       .catch(() => { if (!ctrl.signal.aborted) setItems([]); })
       .finally(() => { if (!ctrl.signal.aborted) setLoading(false); });
     return () => ctrl.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entity, debounced, open]);
+  }, [entity, debounced, open, filter?.field, filterValue]);
 
   // Sigue al campo si la página, la tabla de partidas o la ventana se desplazan o cambian de tamaño.
   useLayoutEffect(() => {
@@ -141,7 +147,9 @@ export function ReferenceSelect({ entity, value, label, onChange, id, invalid, d
       {open && createPortal(
         <ul className="combo-list combo-list-floating" id={listId} role="listbox" ref={listRef} style={pos}>
           {loading && <li className="combo-empty"><Spinner size={14} /></li>}
-          {!loading && items.length === 0 && <li className="combo-empty">Sin resultados</li>}
+          {!loading && items.length === 0 && (
+            <li className="combo-empty">{waitingSource ? `Elige primero ${filter!.sourceLabel.toLowerCase()}` : 'Sin resultados'}</li>
+          )}
           {!loading && items.map((it, i) => (
             <li
               key={it.id}

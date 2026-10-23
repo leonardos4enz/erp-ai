@@ -39,6 +39,8 @@ async function pageAs(browser: Browser, w: Who): Promise<Page> {
  */
 async function pick(page: Page, label: string | RegExp, search: string, option: RegExp) {
   await page.getByLabel(label).fill(search);
+  // Espera a que la búsqueda filtre: la opción buscada debe ser la primera, como la vería una persona.
+  await expect(page.getByRole('listbox').getByRole('option').first()).toHaveAccessibleName(option);
   const opt = page.getByRole('option', { name: option }).first();
   await expect(opt).toBeVisible();
   const visibleToHuman = await opt.evaluate((el) => {
@@ -266,15 +268,21 @@ test('Recepción: solo se confirma con la orden enviada y número de factura; lu
   const computed = (await (await a.post('/api/data/Recepcion/compute', { data: { values: { OrdenCompra: id } } })).json()).values;
   expect(computed.Almacen).toBe(ids.almacen); // sugerido desde la orden
 
-  let rec = await (await a.post('/api/data/Recepcion', { data: { OrdenCompra: id, Partidas: [{ Producto: ids.caja, Cantidad: 100 }] } })).json();
+  // Spec 005: la partida de la recepción se liga a la partida de la orden (el producto se toma de ella).
+  const lineId = sentOc.body.Partidas[0].id;
+  let rec = await (await a.post('/api/data/Recepcion', { data: { OrdenCompra: id, Partidas: [{ PartidaOrden: lineId, Cantidad: 100 }] } })).json();
   expect(rec.Folio).toMatch(/^REC-\d{6}$/);
+  expect(rec.Partidas[0].Producto).toBe(ids.caja);
   const blocked = await transition('almacen', 'Recepcion', rec, 'confirmar');
   expect(blocked.status).toBe(400);
   expect(blocked.body.title).toMatch(/factura/);
 
   rec = await (await a.put(`/api/data/Recepcion/${rec.id}`, { data: { _rowVersion: rec._rowVersion, Factura: 'F-2026-001' } })).json();
   expect((await transition('almacen', 'Recepcion', rec, 'confirmar')).body.Estado).toBe('Confirmada');
-  expect((await transition('almacen', 'OrdenCompra', sentOc.body, 'recibir')).body.Estado).toBe('Recibida');
+  // Spec 005 · H2 CA3: la orden se recibe sola; ya nadie la marca a mano.
+  const received = await (await a.get(`/api/data/OrdenCompra/${id}`)).json();
+  expect(received.Estado).toBe('Recibida');
+  expect(received.PendientePorRecibir).toBe(0);
 
   const history = await (await (await as('comprador')).get(`/api/data/OrdenCompra/${id}/history`)).json();
   expect(history.map((h: { to: string }) => h.to)).toEqual(['Borrador', 'PorAutorizar', 'Autorizada', 'Enviada', 'Recibida']);
@@ -378,4 +386,129 @@ test('Seguridad: las partidas no se editan directo ni el estado se fuerza por AP
   expect((await forced.json()).Estado).toBe('Borrador'); // el campo de estado se ignora
   // El almacenista no puede crear órdenes.
   expect((await (await as('almacen')).post('/api/data/OrdenCompra', { data: {} })).status()).toBe(403);
+});
+
+// ---------------- Spec 005 (Compras 1.2.0): cantidades recibidas y pendientes ----------------
+
+type Doc = { id: number; _rowVersion: string; Folio: string; Partidas: { id: number }[]; [k: string]: unknown };
+
+/** Orden lista para recibir: creada, autorizada por el gerente y enviada al proveedor. */
+async function sentOrder(lines: { producto: number; cantidad: number; precio?: number }[]): Promise<Doc> {
+  const c = await as('comprador');
+  const res = await c.post('/api/data/OrdenCompra', { data: {
+    Proveedor: ids.proveedor, Almacen: ids.almacen,
+    Partidas: lines.map((l) => ({ Producto: l.producto, Cantidad: l.cantidad, ...(l.precio ? { PrecioUnitario: l.precio } : {}) })),
+  } });
+  expect(res.status(), await res.text()).toBe(201);
+  const sent = await transition('comprador', 'OrdenCompra', await res.json(), 'enviar');
+  const ok = await transition('gerente', 'OrdenCompra', sent.body, 'autorizar');
+  const out = await transition('comprador', 'OrdenCompra', ok.body, 'enviarProveedor');
+  expect(out.body.Estado).toBe('Enviada');
+  return out.body;
+}
+
+async function confirmReception(oc: { id: number }, partidas: { PartidaOrden: number; Cantidad: number }[], factura: string) {
+  const a = await as('almacen');
+  const res = await a.post('/api/data/Recepcion', { data: { OrdenCompra: oc.id, Factura: factura, Partidas: partidas } });
+  expect(res.status(), await res.text()).toBe(201);
+  return transition('almacen', 'Recepcion', await res.json(), 'confirmar');
+}
+
+let partialOc: Doc;
+
+test('Spec 005 · H2 CA1 · CA2: la orden muestra lo pendiente y el buscador solo ofrece partidas de la orden elegida', async () => {
+  partialOc = await sentOrder([{ producto: ids.caja, cantidad: 10, precio: 20 }, { producto: ids.pelicula, cantidad: 4 }]);
+  const lines = partialOc.Partidas as unknown as { id: number; CantidadRecibida: number; Pendiente: number }[];
+  expect(lines.map((l) => [l.CantidadRecibida, l.Pendiente])).toEqual([[0, 10], [0, 4]]);
+  expect(partialOc.PendientePorRecibir).toBe(14);
+  // Las transiciones de recepción ya no se ofrecen a personas.
+  const offered = (partialOc._workflow as { transitions: { name: string }[] }).transitions.map((t) => t.name);
+  expect(offered).not.toContain('recibir');
+  expect(offered).not.toContain('recibirParcial');
+
+  const a = await as('almacen');
+  // Regresión (F-01, spec 005): filtrar por un campo «documento padre» respondía 400.
+  const lookup = await (await a.get('/api/data/OrdenCompraPartida/lookup', { params: { filterField: 'Orden', filterValue: String(partialOc.id) } })).json();
+  expect(lookup.map((x: { id: number }) => x.id).sort()).toEqual(lines.map((l) => l.id).sort());
+  expect(lookup.map((x: { label: string }) => x.label)).toContain('CAJ-30 · Caja corrugada 30×30×30 cm · pendiente 10.00');
+  // Sin orden elegida no hay nada que ofrecer; un filtro por un campo inexistente se rechaza.
+  expect(await (await a.get('/api/data/OrdenCompraPartida/lookup', { params: { filterField: 'Orden', filterValue: '' } })).json()).toEqual([]);
+  expect((await a.get('/api/data/OrdenCompraPartida/lookup', { params: { filterField: 'Orden]; DROP TABLE x;--', filterValue: '1' } })).status()).toBe(400);
+
+  // Sugerencias al ligar: producto y cantidad pendiente.
+  const computed = (await (await a.post('/api/data/Recepcion/compute', { data: { values: {
+    OrdenCompra: partialOc.id, Partidas: [{ PartidaOrden: lines[1].id }],
+  } } })).json()).values;
+  expect(computed.Partidas[0].Producto).toBe(ids.pelicula);
+  expect(computed.Partidas[0].Cantidad).toBe(4);
+});
+
+test('Spec 005 · H2 CA4: no se recibe más de lo pendiente ni una partida de otra orden', async () => {
+  const a = await as('almacen');
+  const over = await a.post('/api/data/Recepcion', { data: { OrdenCompra: partialOc.id, Partidas: [{ PartidaOrden: partialOc.Partidas[0].id, Cantidad: 11 }] } });
+  expect(over.status()).toBe(400);
+  expect((await over.json()).errors['Partidas[0].Cantidad'].join(' ')).toMatch(/excede lo pendiente/);
+
+  const other = (await (await a.get(`/api/data/OrdenCompra/${Number(ocUiUrl.split('/').pop())}`)).json()).Partidas[0].id;
+  const foreign = await a.post('/api/data/Recepcion', { data: { OrdenCompra: partialOc.id, Partidas: [{ PartidaOrden: other, Cantidad: 1 }] } });
+  expect(foreign.status()).toBe(400);
+  expect((await foreign.json()).errors['Partidas[0].PartidaOrden'].join(' ')).toMatch(/no pertenece/);
+
+  // Nadie marca la orden recibida a mano: la transición es del sistema, aunque se llame por API.
+  const manual = await transition('almacen', 'OrdenCompra', partialOc, 'recibir');
+  expect(manual.status).toBe(400);
+  expect(manual.body.title).toMatch(/la ejecuta el sistema/);
+});
+
+test('Spec 005 · H2 CA3 · CA5: una recepción parcial acumula, actualiza el costo y deja la orden en «Recibida parcial»', async () => {
+  const c = await as('comprador');
+  expect((await (await c.get(`/api/data/Producto/${ids.caja}`)).json()).CostoUltimo).toBe(18.5);
+  const confirmed = await confirmReception(partialOc, [{ PartidaOrden: partialOc.Partidas[0].id, Cantidad: 6 }], 'F-005-1');
+  expect(confirmed.status, JSON.stringify(confirmed.body)).toBe(200);
+
+  const oc = await (await c.get(`/api/data/OrdenCompra/${partialOc.id}`)).json();
+  expect(oc.Estado).toBe('RecibidaParcial');
+  expect(oc.Partidas[0].CantidadRecibida).toBe(6);
+  expect(oc.Partidas[0].Pendiente).toBe(4);
+  expect(oc.PendientePorRecibir).toBe(8);
+  // CA5: el costo último toma el precio neto de la orden en pesos.
+  expect((await (await c.get(`/api/data/Producto/${ids.caja}`)).json()).CostoUltimo).toBe(20);
+});
+
+test('Spec 005 · H2: el almacenista liga la partida desde la UI y al completar la orden se recibe sola', async ({ browser }) => {
+  const page = await pageAs(browser, 'almacen');
+  await page.goto('/c/Recepcion/new');
+  await page.getByRole('button', { name: 'Agregar partida' }).click();
+  // Sin orden elegida, el buscador de la partida lo explica.
+  await page.getByLabel('Partida de la orden, partida 1').click();
+  await expect(page.getByText('Elige primero orden de compra')).toBeVisible();
+  await page.keyboard.press('Escape');
+
+  await pick(page, /^Orden de compra/, partialOc.Folio, new RegExp(partialOc.Folio));
+  await pick(page, 'Partida de la orden, partida 1', 'PEL', /PEL-ST .* pendiente 4\.00/);
+  await expect(page.getByLabel('Producto, partida 1')).toHaveValue(/Película estirable/);
+  await expect(page.getByLabel('Cantidad recibida, partida 1')).toHaveValue('4');
+  await page.getByLabel(/^Factura del proveedor/).fill('F-005-2');
+  await expectAccessible(page);
+  await page.getByRole('button', { name: 'Crear' }).click();
+  await expect(page.getByText('Registro creado')).toBeVisible();
+  await page.getByRole('button', { name: 'Confirmar recepción' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Confirmar recepción' }).click();
+  await expect(page.getByText('Estado: Confirmada')).toBeVisible();
+
+  // Falta la caja: sigue parcial. La última recepción completa la orden.
+  const c = await as('comprador');
+  expect((await (await c.get(`/api/data/OrdenCompra/${partialOc.id}`)).json()).Estado).toBe('RecibidaParcial');
+  expect((await confirmReception(partialOc, [{ PartidaOrden: partialOc.Partidas[0].id, Cantidad: 4 }], 'F-005-3')).status).toBe(200);
+
+  await page.goto(`/c/OrdenCompra/${partialOc.id}`);
+  await expect(page.getByText('Estado', { exact: true }).locator('..').getByText('Recibida', { exact: true })).toBeVisible();
+  await expect(page.getByRole('columnheader', { name: 'Recibido' })).toBeVisible();
+  await expect(page.getByRole('columnheader', { name: 'Pendiente', exact: true })).toBeVisible();
+  // Spec 005 · H1 CA6: el historial dice que el cambio fue automático y desde qué recepción.
+  await expect(page.getByText(/Automática: Acumular lo recibido en la orden \(Recepción REC-\d{6}\)/).first()).toBeVisible();
+  await page.context().close();
+
+  const history = await (await c.get(`/api/data/OrdenCompra/${partialOc.id}/history`)).json();
+  expect(history.map((h: { to: string }) => h.to)).toEqual(['Borrador', 'PorAutorizar', 'Autorizada', 'Enviada', 'RecibidaParcial', 'Recibida']);
 });

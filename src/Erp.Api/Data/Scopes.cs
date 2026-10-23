@@ -39,6 +39,9 @@ public sealed class RelatedLoader(SqlConnection cn, SqlTransaction? tx, IReadOnl
     public SqlConnection Connection => cn;
     public SqlTransaction? Transaction => tx;
 
+    /// <summary>Olvida lo leído: después de que una automatización escribe, la siguiente acción lee datos frescos.</summary>
+    public void Reset() => _rows.Clear();
+
     public Values? Row(string entity, long id)
     {
         if (_rows.TryGetValue((entity, id), out var cached)) return cached;

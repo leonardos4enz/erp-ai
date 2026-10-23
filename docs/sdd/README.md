@@ -48,4 +48,5 @@ y cada sesión queda como registro de una sola entrega. Al cerrar la spec:
 | 002 | [Motor: documentos, fórmulas, reglas y procesos](specs/002-motor-procesos/spec.md) | Implementado |
 | 003 | [Módulo de Compras](specs/003-modulo-compras/spec.md) | Implementado |
 | 004 | [Campos asignados por el sistema y actualización de módulos](specs/004-campos-sistema-y-actualizaciones/spec.md) | Implementado |
-| 005–011 | Automatizaciones, seguridad por campo/registro, vistas y reportes, integraciones, entornos, multi-empresa, IA | [Roadmap](roadmap.md) |
+| 005 | [Automatizaciones entre registros, cantidades e Inventario](specs/005-automatizaciones-inventario/spec.md) | Implementado |
+| 006–011 | Seguridad por campo/registro, vistas y reportes, integraciones, entornos, multi-empresa, IA | [Roadmap](roadmap.md) |

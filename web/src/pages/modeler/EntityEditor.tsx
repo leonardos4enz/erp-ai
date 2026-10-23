@@ -4,7 +4,7 @@ import {
 } from 'lucide-react';
 import { ApiError } from '../../api/client';
 import { adminApi } from '../../api/endpoints';
-import type { ChangePlan, EntityDef, FieldDef, FieldType, FormulaResultType, Operation, Rule, Workflow } from '../../api/types';
+import type { Automation, ChangePlan, EntityDef, FieldDef, FieldType, FormulaResultType, Operation, Rule, Workflow } from '../../api/types';
 import { Dialog } from '../../components/Dialog';
 import { CURATED_ICONS, DynamicIcon } from '../../components/DynamicIcon';
 import { TagInput } from '../../components/TagInput';
@@ -34,7 +34,10 @@ function parseJson<T>(text: string, kind: 'array' | 'object'): JsonResult<T> {
   }
 }
 
-const canonical = (v: unknown) => JSON.stringify(v ?? null);
+/** Sin propiedades nulas: el servidor las omite al leer, así que no cambian el significado y solo estorban. */
+const withoutNulls = (_k: string, v: unknown) => (v === null ? undefined : v);
+const canonical = (v: unknown) => JSON.stringify(v ?? null, withoutNulls);
+const pretty = (v: unknown) => JSON.stringify(v, withoutNulls, 2);
 
 function parseJsonError(text: string, kind: 'array' | 'object'): string | undefined {
   const r = parseJson<unknown>(text, kind);
@@ -59,6 +62,7 @@ interface Draft {
   fields: DraftField[];
   rulesJson: string;
   workflowJson: string;
+  automationsJson: string;
 }
 
 let keySeq = 0;
@@ -76,7 +80,7 @@ function draftFrom(def?: EntityDef): Draft {
   if (!def) {
     const f = blankField(0);
     f.label = 'Nombre'; f.name = 'Nombre'; f.required = true; f.maxLength = 150;
-    return { name: '', label: '', labelPlural: '', icon: 'package', description: '', displayField: '', group: '', fields: [f], rulesJson: '', workflowJson: '' };
+    return { name: '', label: '', labelPlural: '', icon: 'package', description: '', displayField: '', group: '', fields: [f], rulesJson: '', workflowJson: '', automationsJson: '' };
   }
   const fields = def.fields
     .slice()
@@ -85,8 +89,9 @@ function draftFrom(def?: EntityDef): Draft {
   return {
     name: def.name, label: def.label, labelPlural: def.labelPlural, icon: def.icon || 'database',
     description: def.description ?? '', displayField: def.displayField ?? '', group: def.group ?? '', fields,
-    rulesJson: def.rules?.length ? JSON.stringify(def.rules, null, 2) : '',
-    workflowJson: def.workflow ? JSON.stringify(def.workflow, null, 2) : '',
+    rulesJson: def.rules?.length ? pretty(def.rules) : '',
+    workflowJson: def.workflow ? pretty(def.workflow) : '',
+    automationsJson: def.automations?.length ? pretty(def.automations) : '',
   };
 }
 
@@ -114,7 +119,7 @@ function cleanField(f: DraftField, order: number): FieldDef {
   return out;
 }
 
-/** Operaciones setRules / setWorkflow cuando el JSON cambió respecto al original. */
+/** Operaciones setRules / setWorkflow / setAutomations cuando el JSON cambió respecto al original. */
 function behaviourOperations(entity: string, original: EntityDef | undefined, d: Draft): Operation[] {
   const ops: Operation[] = [];
   const rules = parseJson<Rule[]>(d.rulesJson, 'array');
@@ -124,6 +129,11 @@ function behaviourOperations(entity: string, original: EntityDef | undefined, d:
   }
   if (workflow.ok && workflow.value && canonical(workflow.value) !== canonical(original?.workflow ?? null)) {
     ops.push({ op: 'setWorkflow', entity, workflow: workflow.value });
+  }
+  // Va al final: las automatizaciones pueden usar estados y transiciones del proceso recién definido.
+  const automations = parseJson<Automation[]>(d.automationsJson, 'array');
+  if (automations.ok && canonical(automations.value ?? []) !== canonical(original?.automations ?? [])) {
+    ops.push({ op: 'setAutomations', entity, automations: automations.value ?? [] });
   }
   return ops;
 }
@@ -199,6 +209,8 @@ function validate(d: Draft, isNew: boolean, existingNames: string[]): Record<str
   if (!rules.ok) e.rulesJson = rules.error;
   const workflow = parseJson<Workflow>(d.workflowJson, 'object');
   if (!workflow.ok) e.workflowJson = workflow.error;
+  const automations = parseJson<Automation[]>(d.automationsJson, 'array');
+  if (!automations.ok) e.automationsJson = automations.error;
   return e;
 }
 
@@ -522,10 +534,10 @@ export function EntityEditor({ original, entities, onCancel, onReview }: EntityE
         </div>
       </section>
 
-      <details className="card card-pad advanced-section" open={!!(original?.rules?.length || original?.workflow) || undefined}>
+      <details className="card card-pad advanced-section" open={!!(original?.rules?.length || original?.workflow || original?.automations?.length) || undefined}>
         <summary className="advanced-summary">
-          <span className="section-title">Reglas y proceso</span>
-          <span className="subtle">Avanzado · validaciones de negocio y estados del documento</span>
+          <span className="section-title">Reglas, proceso y automatizaciones</span>
+          <span className="subtle">Avanzado · validaciones de negocio, estados del documento y efectos en otros registros</span>
         </summary>
         <div className="stack" style={{ marginTop: 'var(--space-4)' }}>
           <Textarea
@@ -549,6 +561,17 @@ export function EntityEditor({ original, entities, onCancel, onReview }: EntityE
             error={visibleErrors.workflowJson ?? (d.workflowJson ? parseJsonError(d.workflowJson, 'object') : undefined)}
             value={d.workflowJson}
             onChange={(e) => setD((s) => ({ ...s, workflowJson: e.target.value }))}
+          />
+          <Textarea
+            className="mono json-editor"
+            label="Automatizaciones (JSON)"
+            rows={12}
+            spellCheck={false}
+            placeholder={'[\n  { "name": "AlConfirmar", "label": "Al confirmar", "on": "enterState", "state": "Confirmada",\n    "actions": [{ "type": "transition", "target": "OrdenCompra", "transition": "recibir" }] }\n]'}
+            hint="Efectos en otros registros: on (create, update, enterState, transition) y acciones update, transition, create o rollup. Corren en la misma transacción; se validan en la vista previa."
+            error={visibleErrors.automationsJson ?? (d.automationsJson ? parseJsonError(d.automationsJson, 'array') : undefined)}
+            value={d.automationsJson}
+            onChange={(e) => setD((s) => ({ ...s, automationsJson: e.target.value }))}
           />
         </div>
       </details>

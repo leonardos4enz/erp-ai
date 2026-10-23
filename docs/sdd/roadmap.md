@@ -10,8 +10,8 @@ en orden, no en paralelo: casi todas tocan el núcleo del motor (`PlanCompiler`,
 
 | Spec | Estado |
 |---|---|
-| 005 Automatizaciones + inventario | **Siguiente** |
-| 006 Seguridad por campo/registro | Pendiente |
+| 005 Automatizaciones + inventario | Implementado ([spec](specs/005-automatizaciones-inventario/spec.md)) |
+| 006 Seguridad por campo/registro | **Siguiente** |
 | 007 Vistas, layouts, reportes | Pendiente |
 | 008 Integraciones | Pendiente |
 | 009 Entornos | Pendiente |

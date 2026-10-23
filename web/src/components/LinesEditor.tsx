@@ -2,7 +2,7 @@ import { ListPlus, Plus, Trash2 } from 'lucide-react';
 import { fieldError, type ApiError } from '../api/client';
 import type { EntityDef, FieldDef } from '../api/types';
 import { formatFormula, isEditableField, isNumericField, isRequiredFor } from '../lib/entity';
-import { lineErrorKey, lineFields, type LineDraft } from '../lib/draft';
+import { lineErrorKey, lineFields, lookupFilterFor, type LineDraft, type Values } from '../lib/draft';
 import { FieldControl } from './FieldInput';
 import { Button } from './ui';
 
@@ -12,6 +12,8 @@ export interface LinesEditorProps {
   lines: LineDraft[];
   roles: string[];
   readOnly: boolean;
+  /** Documento dueño de las partidas: para filtros como `Recepcion.OrdenCompra`. */
+  parent?: { def: EntityDef; values: Values };
   serverError: ApiError | null;
   clientErrors: Record<string, string>;
   onAdd: () => void;
@@ -20,7 +22,7 @@ export interface LinesEditorProps {
 }
 
 /** Partidas de un documento: tabla editable con una fila por renglón. */
-export function LinesEditor({ field, child, lines, roles, readOnly, serverError, clientErrors, onAdd, onRemove, onChange }: LinesEditorProps) {
+export function LinesEditor({ field, child, lines, roles, readOnly, parent, serverError, clientErrors, onAdd, onRemove, onChange }: LinesEditorProps) {
   const columns = lineFields(child).filter((f) => f.showInList !== false);
   const totalsOnly = (f: FieldDef) => f.type === 'formula' || f.type === 'autonumber';
 
@@ -84,6 +86,7 @@ export function LinesEditor({ field, child, lines, roles, readOnly, serverError,
                           describedBy={err ? `${id}-err` : undefined}
                           ariaLabel={name}
                           isNew={l.id == null}
+                          filter={lookupFilterFor(c, { def: child, values: l.values }, parent)}
                           compact
                         />
                         {err && <span id={`${id}-err`} className="field-error cell-error" role="alert">{err}</span>}

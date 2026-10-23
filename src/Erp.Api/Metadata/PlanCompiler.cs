@@ -58,6 +58,7 @@ public static partial class PlanCompiler
                 ArchiveFieldOp op => ArchiveField(ctx, op),
                 SetWorkflowOp op => SetWorkflow(ctx, op),
                 SetRulesOp op => SetRules(ctx, op),
+                SetAutomationsOp op => SetAutomations(ctx, op),
                 _ => ctx.Fail("Operación desconocida."),
             };
             // Solo se registra el efecto si la operación fue válida; así las siguientes ven un modelo coherente.
@@ -76,6 +77,17 @@ public static partial class PlanCompiler
         foreach (var name in touched)
             foreach (var message in ValidateFinal(working[name], working, knownRoles))
                 errors.Add(new(lastOp[name], message));
+
+        // Spec 005: las automatizaciones dependen de otros catálogos (campos, procesos), así que se revisan
+        // todas aunque el plan no toque su catálogo: un cambio en el destino no puede romperlas en silencio.
+        if (touched.Count > 0)
+        {
+            foreach (var e in working.Values.Where(e => !e.IsArchived && e.Automations is { Count: > 0 }))
+                foreach (var message in AutomationRules.Validate(e, working, knownRoles))
+                    errors.Add(new(lastOp.GetValueOrDefault(e.Name, -1), message));
+            if (AutomationRules.FindCycle(working) is { } cycle)
+                errors.Add(new(-1, $"Ciclo de automatizaciones: {string.Join(" → ", cycle)}. Una automatización no puede terminar disparándose a sí misma."));
+        }
 
         return new CompiledPlan(new PlanPreview(errors.Count == 0, errors, steps), working, sql, touched);
     }
@@ -99,6 +111,7 @@ public static partial class PlanCompiler
         {
             Check(f.DefaultValue, $"valor por defecto de {f.Name}");
             Check(f.Formula, $"fórmula de {f.Name}");
+            if (f.LookupFilter is { } lf) msgs.AddRange(ValidateLookupFilter(e, f, lf, model));
             if (f.Type == FieldTypes.Lines)
             {
                 if (!model.TryGetValue(f.ChildEntity ?? "", out var child) || child.IsArchived)
@@ -121,6 +134,24 @@ public static partial class PlanCompiler
             foreach (var s in t.Set ?? []) Check(s.Value, $"transición {t.Name} › {s.Field}");
         }
         foreach (var m in msgs) yield return m;
+    }
+
+    /// <summary>El filtro del buscador: campo del catálogo referenciado = campo propio o del documento padre.</summary>
+    private static IEnumerable<string> ValidateLookupFilter(EntityDef e, FieldDef f, LookupFilter lf, IReadOnlyDictionary<string, EntityDef> model)
+    {
+        var where = $"{e.Name}.{f.Name} (filtro del buscador)";
+        if (f.Type != FieldTypes.Reference) { yield return $"{where}: solo las referencias admiten filtro."; yield break; }
+        if (!model.TryGetValue(f.ReferenceEntity ?? "", out var target)) yield break; // se reporta en la validación del campo
+        var tf = target.FindField(lf.Field ?? "");
+        if (tf is null || tf.IsArchived || FieldTypes.IsVirtual(tf.Type))
+            yield return $"{where}: '{lf.Field}' no es un campo de {target.Name}.";
+        var parts = (lf.Source ?? "").Split('.');
+        var head = e.FindField(parts[0]);
+        if (parts.Length > 2 || head is null || head.IsArchived || FieldTypes.IsVirtual(head.Type))
+            yield return $"{where}: '{lf.Source}' no es un campo de {e.Name}.";
+        else if (parts.Length == 2 && (head.Type != FieldTypes.Parent || !model.TryGetValue(head.ReferenceEntity ?? "", out var parent) ||
+                                       parent.FindField(parts[1]) is not { IsArchived: false } pf || FieldTypes.IsVirtual(pf.Type)))
+            yield return $"{where}: '{lf.Source}' debe ser un campo del documento padre (p. ej. {(e.ParentField?.Name ?? "Documento")}.Campo).";
     }
 
     private sealed record OpResult(EntityDef Entity, string Description, IReadOnlyList<string> Sql);
@@ -257,6 +288,8 @@ public static partial class PlanCompiler
             ctx.Error($"'{f.Name}' no es un campo de fórmula.");
         if (op.Formula is not null && string.IsNullOrWhiteSpace(op.Formula))
             ctx.Error($"La fórmula de '{f.Name}' no puede quedar vacía.");
+        if (op.LookupFilter is not null && f.Type != FieldTypes.Reference)
+            ctx.Error($"'{f.Name}' no es una referencia: no admite filtro del buscador.");
         if (ctx.ErrorCount > start) return null;
 
         var updated = f with
@@ -270,6 +303,7 @@ public static partial class PlanCompiler
             DefaultValue = op.DefaultValue is null ? f.DefaultValue : op.DefaultValue.Trim() is { Length: > 0 } d ? d : null,
             Formula = op.Formula?.Trim() ?? f.Formula,
             Editable = f.ReadOnly || f.Type == FieldTypes.Lines || (op.Editable ?? f.Editable),
+            LookupFilter = op.LookupFilter is null ? f.LookupFilter : string.IsNullOrWhiteSpace(op.LookupFilter.Field) ? null : op.LookupFilter,
         };
         ValidateLock(ctx, updated);
         if (ctx.ErrorCount > start) return null;
@@ -379,6 +413,35 @@ public static partial class PlanCompiler
         return new(e with { Rules = op.Rules }, $"Definir {op.Rules.Count} regla(s) de negocio en '{e.Label}'", []);
     }
 
+    /// <summary>Forma básica aquí; campos, destinos y expresiones en la pasada final (<see cref="AutomationRules"/>).</summary>
+    private static OpResult? SetAutomations(Ctx ctx, SetAutomationsOp op)
+    {
+        var e = ctx.Active(op.Entity);
+        if (e is null) return null;
+        var start = ctx.ErrorCount;
+        if (e.IsChild) ctx.Error($"{e.Name} es una partida: las automatizaciones se declaran en su documento (usa \"lines\").");
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var a in op.Automations)
+        {
+            if (!Identifiers.IsValid(a.Name, out var err)) ctx.Error($"Automatización: {err}");
+            else if (!names.Add(a.Name)) ctx.Error($"La automatización '{a.Name}' está repetida.");
+            ValidateLabel(ctx, a.Label, $"La etiqueta de la automatización '{a.Name}'");
+        }
+        if (ctx.ErrorCount > start) return null;
+
+        IReadOnlyList<Automation> list = op.Automations;
+        if (op.Merge)
+        {
+            var incoming = op.Automations.ToDictionary(a => a.Name, StringComparer.OrdinalIgnoreCase);
+            var kept = (e.Automations ?? []).Select(a => incoming.Remove(a.Name, out var repl) ? repl : a).ToList();
+            list = [.. kept, .. op.Automations.Where(a => incoming.ContainsKey(a.Name))];
+        }
+        if (list.Count > AutomationRules.MaxAutomations) return ctx.Fail($"Máximo {AutomationRules.MaxAutomations} automatizaciones por catálogo.");
+        var verb = op.Merge ? "Agregar o actualizar" : "Definir";
+        return new(e with { Automations = list.Count == 0 ? null : list },
+            $"{verb} {op.Automations.Count} automatización(es) en '{e.Label}': {string.Join(", ", op.Automations.Select(a => a.Label))}", []);
+    }
+
     // ---------------- Validaciones ----------------
 
     private static FieldDef Normalize(FieldDef f, int order)
@@ -409,6 +472,7 @@ public static partial class PlanCompiler
             ChildEntity = type == FieldTypes.Lines ? f.ChildEntity : null,
             ShowInList = type != FieldTypes.Lines && f.ShowInList,
             Editable = computed || f.Editable,
+            LookupFilter = type == FieldTypes.Reference ? f.LookupFilter : null,
         };
     }
 
@@ -495,9 +559,11 @@ public static partial class PlanCompiler
     {
         if (displayField is null) return true;
         var f = e.FindField(displayField);
-        if (f is null || f.IsArchived || f.Type is not (FieldTypes.Text or FieldTypes.Choice or FieldTypes.Autonumber))
+        // Spec 005: también una fórmula de texto (p. ej. «clave · descripción · pendiente» de una partida).
+        var textFormula = f is { Type: FieldTypes.Formula, ResultType: FieldTypes.Text };
+        if (f is null || f.IsArchived || !(textFormula || f.Type is FieldTypes.Text or FieldTypes.Choice or FieldTypes.Autonumber))
         {
-            ctx.Error($"El campo para mostrar '{displayField}' debe ser un campo de texto, lista o folio activo.");
+            ctx.Error($"El campo para mostrar '{displayField}' debe ser un campo de texto, lista, folio o fórmula de texto activo.");
             return false;
         }
         return true;

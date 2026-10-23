@@ -34,6 +34,8 @@ export interface FieldDef {
   readOnly?: boolean;
   /** false: lo asigna el sistema (al crear o en transiciones), nunca el usuario. */
   editable?: boolean;
+  /** Spec 005: el buscador solo ofrece registros con `field` = valor de `source` (campo propio o `CampoPadre.Campo`). */
+  lookupFilter?: { field: string; source: string } | null;
 }
 
 export type StateColor = 'neutral' | 'accent' | 'success' | 'warning' | 'danger';
@@ -53,9 +55,39 @@ export interface WorkflowTransitionDef {
   set?: { field: string; value: string }[];
   icon?: string;
   variant?: 'primary' | 'secondary' | 'danger';
+  /** Spec 005: solo la ejecuta una automatización (no aparece como botón). */
+  system?: boolean;
 }
 
 export interface Workflow { initial: string; states: WorkflowState[]; transitions: WorkflowTransitionDef[] }
+
+export type AutomationEvent = 'create' | 'update' | 'enterState' | 'transition';
+
+export interface AutomationAction {
+  type: 'update' | 'transition' | 'create' | 'rollup';
+  lines?: string;
+  when?: string;
+  target?: string;
+  set?: { field: string; value: string }[];
+  transition?: string;
+  entity?: string;
+  match?: { field: string; source: string }[];
+  createMissing?: boolean;
+  field?: string;
+  sum?: string;
+  filter?: string;
+}
+
+/** Spec 005: «cuando pase X en este catálogo, haz Y en otros registros». */
+export interface Automation {
+  name: string;
+  label: string;
+  on: AutomationEvent;
+  state?: string;
+  transition?: string;
+  when?: string;
+  actions: AutomationAction[];
+}
 
 export interface Rule { name: string; message: string; assert: string; when?: string; field?: string }
 
@@ -72,6 +104,7 @@ export interface EntityDef {
   fields: FieldDef[];
   workflow?: Workflow | null;
   rules?: Rule[] | null;
+  automations?: Automation[] | null;
   isChild?: boolean;
   parentEntity?: string;
 }
@@ -95,10 +128,11 @@ export type Operation =
   | { op: 'updateEntity'; entity: string; label?: string; labelPlural?: string; icon?: string; description?: string; displayField?: string; group?: string }
   | { op: 'archiveEntity'; entity: string }
   | { op: 'addField'; entity: string; field: FieldDef }
-  | { op: 'updateField'; entity: string; field: string; label?: string; required?: boolean; showInList?: boolean; options?: string[]; requiredForRoles?: string[]; displayOrder?: number; defaultValue?: string; formula?: string; editable?: boolean }
+  | { op: 'updateField'; entity: string; field: string; label?: string; required?: boolean; showInList?: boolean; options?: string[]; requiredForRoles?: string[]; displayOrder?: number; defaultValue?: string; formula?: string; editable?: boolean; lookupFilter?: { field: string; source: string } }
   | { op: 'archiveField'; entity: string; field: string }
   | { op: 'setWorkflow'; entity: string; workflow: Workflow }
-  | { op: 'setRules'; entity: string; rules: Rule[] };
+  | { op: 'setRules'; entity: string; rules: Rule[] }
+  | { op: 'setAutomations'; entity: string; automations: Automation[]; merge?: boolean };
 
 export interface ChangePlan { description: string; operations: Operation[] }
 
@@ -177,6 +211,8 @@ export interface ModuleInfo {
   installedVersion?: string | null;
   upgradeAvailable?: boolean;
   pendingUpgrades?: string[];
+  requires?: string[];
+  missingRequirements?: string[];
 }
 
 export type ModulePreview = PlanPreview & { roles: string[]; seedRecords: number };

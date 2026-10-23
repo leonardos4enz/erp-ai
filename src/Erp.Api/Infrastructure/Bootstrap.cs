@@ -195,6 +195,9 @@ public static class Bootstrap
         IF COL_LENGTH('meta.Field', 'Padding') IS NULL ALTER TABLE meta.Field ADD Padding int NULL;
         IF COL_LENGTH('meta.Field', 'ChildEntity') IS NULL ALTER TABLE meta.Field ADD ChildEntity nvarchar(50) NULL;
         IF COL_LENGTH('meta.Field', 'IsEditable') IS NULL ALTER TABLE meta.Field ADD IsEditable bit NOT NULL CONSTRAINT DF_Field_IsEditable DEFAULT 1;
+        -- Spec 005
+        IF COL_LENGTH('meta.Entity', 'AutomationsJson') IS NULL ALTER TABLE meta.Entity ADD AutomationsJson nvarchar(max) NULL;
+        IF COL_LENGTH('meta.Field', 'LookupFilterJson') IS NULL ALTER TABLE meta.Field ADD LookupFilterJson nvarchar(400) NULL;
 
         IF OBJECT_ID('meta.Sequence') IS NULL
         CREATE TABLE meta.Sequence (

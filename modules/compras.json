@@ -1,9 +1,9 @@
 {
   "id": "compras",
   "name": "Compras",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "icon": "shopping-cart",
-  "description": "Requisiciones, órdenes de compra con autorización por montos y recepción de mercancía. Incluye proveedores, productos y catálogos base.",
+  "description": "Requisiciones, órdenes de compra con autorización por montos y recepción de mercancía con cantidades recibidas y pendientes. Incluye proveedores, productos y catálogos base.",
   "plan": {
     "description": "Módulo de Compras 1.0.0",
     "operations": [
@@ -269,6 +269,76 @@
         { "op": "addField", "entity": "RequisicionPartida", "field": { "name": "Almacen", "label": "Almacén", "type": "reference", "referenceEntity": "Almacen", "defaultValue": "Requisicion.Almacen" } },
         { "op": "updateField", "entity": "OrdenCompra", "field": "AutorizadoPor", "editable": false },
         { "op": "updateField", "entity": "OrdenCompra", "field": "FechaAutorizacion", "editable": false }
+      ] } },
+    { "version": "1.2.0",
+      "description": "Cantidad recibida y pendiente por partida; la recepción se liga a la partida de la orden y, al confirmarse, acumula lo recibido, actualiza el costo del producto y mueve la orden sola a «Recibida parcial» o «Recibida».",
+      "plan": { "description": "Compras 1.2.0", "operations": [
+        { "op": "addField", "entity": "OrdenCompraPartida", "field": { "name": "CantidadRecibida", "label": "Recibido", "type": "decimal", "precision": 18, "scale": 2, "editable": false, "defaultValue": "0" } },
+        { "op": "addField", "entity": "OrdenCompraPartida", "field": { "name": "Pendiente", "label": "Pendiente", "type": "formula", "resultType": "decimal", "precision": 18, "scale": 2, "formula": "Cantidad - CantidadRecibida" } },
+        { "op": "addField", "entity": "OrdenCompraPartida", "field": { "name": "CostoMXN", "label": "Costo unitario MXN", "type": "formula", "resultType": "decimal", "precision": 18, "scale": 2, "showInList": false,
+            "formula": "ROUND(PrecioUnitario * (1 - DescuentoPct / 100) * Orden.TipoCambio, 2)" } },
+        { "op": "addField", "entity": "OrdenCompraPartida", "field": { "name": "Descripcion", "label": "Descripción", "type": "formula", "resultType": "text", "showInList": false,
+            "formula": "Producto.Clave & ' · ' & Producto.Descripcion & ' · pendiente ' & Pendiente" } },
+        { "op": "updateEntity", "entity": "OrdenCompraPartida", "displayField": "Descripcion" },
+        { "op": "addField", "entity": "OrdenCompra", "field": { "name": "PendientePorRecibir", "label": "Pendiente por recibir", "type": "formula", "resultType": "decimal", "precision": 18, "scale": 2,
+            "formula": "SUM(Partidas.Pendiente)", "displayOrder": 14 } },
+        { "op": "setWorkflow", "entity": "OrdenCompra", "workflow": {
+            "initial": "Borrador",
+            "states": [
+              { "name": "Borrador", "label": "Borrador", "color": "neutral", "editable": true },
+              { "name": "PorAutorizar", "label": "Por autorizar", "color": "warning", "editable": false },
+              { "name": "Autorizada", "label": "Autorizada", "color": "success", "editable": false },
+              { "name": "Rechazada", "label": "Rechazada", "color": "danger", "editable": false },
+              { "name": "Enviada", "label": "Enviada al proveedor", "color": "accent", "editable": false },
+              { "name": "RecibidaParcial", "label": "Recibida parcial", "color": "warning", "editable": false },
+              { "name": "Recibida", "label": "Recibida", "color": "success", "editable": false },
+              { "name": "Cerrada", "label": "Cerrada", "color": "neutral", "editable": false },
+              { "name": "Cancelada", "label": "Cancelada", "color": "danger", "editable": false }
+            ],
+            "transitions": [
+              { "name": "enviar", "label": "Enviar a autorización", "from": ["Borrador"], "to": "PorAutorizar", "icon": "send", "variant": "primary",
+                "roles": ["Comprador", "Gerente de compras", "Director"],
+                "when": "COUNT(Partidas) > 0", "whenMessage": "Agrega al menos una partida." },
+              { "name": "autorizar", "label": "Autorizar", "from": ["PorAutorizar"], "to": "Autorizada", "icon": "shield-check", "variant": "primary",
+                "roles": ["Gerente de compras", "Director"],
+                "when": "HASROLE('Director') OR (TotalMXN <= 50000 AND NOT ISCREATOR())",
+                "whenMessage": "Requiere al Director: la orden supera $50,000 MXN o la creaste tú (control interno).",
+                "set": [ { "field": "AutorizadoPor", "value": "CURRENTUSER()" }, { "field": "FechaAutorizacion", "value": "NOW()" } ] },
+              { "name": "devolver", "label": "Devolver", "from": ["PorAutorizar"], "to": "Borrador", "icon": "undo-2",
+                "roles": ["Gerente de compras", "Director"], "requireComment": true },
+              { "name": "rechazar", "label": "Rechazar", "from": ["PorAutorizar"], "to": "Rechazada", "icon": "x", "variant": "danger",
+                "roles": ["Gerente de compras", "Director"], "requiredFields": ["MotivoRechazo"] },
+              { "name": "enviarProveedor", "label": "Enviar al proveedor", "from": ["Autorizada"], "to": "Enviada", "icon": "mail", "variant": "primary",
+                "roles": ["Comprador", "Gerente de compras", "Director"] },
+              { "name": "recibirParcial", "label": "Recibida parcial", "from": ["Enviada"], "to": "RecibidaParcial", "icon": "package-open", "system": true },
+              { "name": "recibir", "label": "Recibida", "from": ["Enviada", "RecibidaParcial"], "to": "Recibida", "icon": "package-check", "system": true },
+              { "name": "cerrar", "label": "Cerrar", "from": ["Recibida", "RecibidaParcial"], "to": "Cerrada", "icon": "lock",
+                "roles": ["Gerente de compras", "Director"] },
+              { "name": "cancelar", "label": "Cancelar", "from": ["Borrador", "PorAutorizar", "Autorizada", "Enviada"], "to": "Cancelada", "icon": "ban", "variant": "danger",
+                "roles": ["Comprador", "Gerente de compras", "Director"], "requiredFields": ["MotivoCancelacion"] }
+            ]
+          } },
+        { "op": "addField", "entity": "RecepcionPartida", "field": { "name": "PartidaOrden", "label": "Partida de la orden", "type": "reference", "referenceEntity": "OrdenCompraPartida",
+            "required": true, "displayOrder": 1, "lookupFilter": { "field": "Orden", "source": "Recepcion.OrdenCompra" } } },
+        { "op": "updateField", "entity": "RecepcionPartida", "field": "Producto", "displayOrder": 2, "defaultValue": "PartidaOrden.Producto" },
+        { "op": "updateField", "entity": "RecepcionPartida", "field": "Cantidad", "displayOrder": 3, "defaultValue": "PartidaOrden.Pendiente" },
+        { "op": "updateField", "entity": "RecepcionPartida", "field": "Observaciones", "displayOrder": 4 },
+        { "op": "setRules", "entity": "RecepcionPartida", "rules": [
+            { "name": "CantidadPositiva", "field": "Cantidad", "assert": "Cantidad > 0", "message": "La cantidad recibida debe ser mayor a cero." },
+            { "name": "PartidaDeLaOrden", "field": "PartidaOrden", "assert": "PartidaOrden.Orden = Recepcion.OrdenCompra", "message": "La partida no pertenece a la orden de compra de esta recepción." },
+            { "name": "ProductoDeLaPartida", "field": "Producto", "assert": "Producto = PartidaOrden.Producto", "message": "El producto no coincide con el de la partida de la orden." },
+            { "name": "NoExcederPendiente", "field": "Cantidad", "assert": "Cantidad <= PartidaOrden.Pendiente", "message": "La cantidad excede lo pendiente de recibir en la partida de la orden." }
+          ] },
+        { "op": "setAutomations", "entity": "Recepcion", "merge": true, "automations": [
+            { "name": "AcumularRecibido", "label": "Acumular lo recibido en la orden", "on": "enterState", "state": "Confirmada",
+              "actions": [
+                { "type": "rollup", "lines": "Partidas", "target": "PartidaOrden", "field": "CantidadRecibida", "sum": "Cantidad",
+                  "filter": "Recepcion.Estado = 'Confirmada'" },
+                { "type": "update", "lines": "Partidas", "target": "Producto", "set": [ { "field": "CostoUltimo", "value": "PartidaOrden.CostoMXN" } ] },
+                { "type": "transition", "target": "OrdenCompra", "transition": "recibir", "when": "OrdenCompra.PendientePorRecibir <= 0" },
+                { "type": "transition", "target": "OrdenCompra", "transition": "recibirParcial", "when": "OrdenCompra.PendientePorRecibir > 0" }
+              ] }
+          ] }
       ] } }
   ],
   "roles": [    { "name": "Solicitante", "description": "Crea y envía requisiciones de compra.", "canManageModel": false, "canManageUsers": false, "canViewAudit": false,
