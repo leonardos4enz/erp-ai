@@ -68,8 +68,13 @@ public sealed record FieldDef
     public string? Prefix { get; init; }
     public int? Padding { get; init; }
     public string? ChildEntity { get; init; }
+    /// <summary>Spec 004: false = lo asigna el sistema (valor por defecto al crear o transiciones), nunca el usuario.</summary>
+    public bool Editable { get; init; } = true;
 
     public bool ReadOnly => FieldTypes.ReadOnly.Contains(Type);
+
+    /// <summary>El cliente no puede escribirlo: calculado por el motor o asignado por el sistema.</summary>
+    public bool ClientLocked => ReadOnly || !Editable;
 }
 
 public sealed record WorkflowState
@@ -229,6 +234,7 @@ public sealed record UpdateFieldOp : Operation
     /// <summary>Cadena vacía elimina el valor por defecto.</summary>
     public string? DefaultValue { get; init; }
     public string? Formula { get; init; }
+    public bool? Editable { get; init; }
 }
 
 public sealed record ArchiveFieldOp : Operation

@@ -1,7 +1,7 @@
 import { ListPlus, Plus, Trash2 } from 'lucide-react';
 import { fieldError, type ApiError } from '../api/client';
 import type { EntityDef, FieldDef } from '../api/types';
-import { formatFormula, isNumericField, isRequiredFor } from '../lib/entity';
+import { formatFormula, isEditableField, isNumericField, isRequiredFor } from '../lib/entity';
 import { lineErrorKey, lineFields, type LineDraft } from '../lib/draft';
 import { FieldControl } from './FieldInput';
 import { Button } from './ui';
@@ -78,7 +78,7 @@ export function LinesEditor({ field, child, lines, roles, readOnly, serverError,
                           value={l.values[c.name]}
                           refLabel={l.values[`${c.name}__label`] as string | null}
                           onChange={(v, label) => onChange(i, c.name, v, label)}
-                          disabled={readOnly}
+                          disabled={readOnly || (!isEditableField(c) && !totalsOnly(c))}
                           required={isRequiredFor(c, roles)}
                           invalid={!!err}
                           describedBy={err ? `${id}-err` : undefined}

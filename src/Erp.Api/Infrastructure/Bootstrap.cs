@@ -194,6 +194,7 @@ public static class Bootstrap
         IF COL_LENGTH('meta.Field', 'Prefix') IS NULL ALTER TABLE meta.Field ADD Prefix nvarchar(10) NULL;
         IF COL_LENGTH('meta.Field', 'Padding') IS NULL ALTER TABLE meta.Field ADD Padding int NULL;
         IF COL_LENGTH('meta.Field', 'ChildEntity') IS NULL ALTER TABLE meta.Field ADD ChildEntity nvarchar(50) NULL;
+        IF COL_LENGTH('meta.Field', 'IsEditable') IS NULL ALTER TABLE meta.Field ADD IsEditable bit NOT NULL CONSTRAINT DF_Field_IsEditable DEFAULT 1;
 
         IF OBJECT_ID('meta.Sequence') IS NULL
         CREATE TABLE meta.Sequence (

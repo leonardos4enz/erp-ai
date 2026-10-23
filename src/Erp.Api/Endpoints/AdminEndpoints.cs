@@ -57,6 +57,13 @@ public static partial class AdminEndpoints
         });
         g.MapPost("/modules/{id}/install", async (string id, HttpContext http, ModuleService modules, CancellationToken ct) =>
             new { changeSetId = await modules.InstallAsync(id, http, ct) });
+        g.MapPost("/modules/{id}/upgrade/preview", async (string id, HttpContext http, ModuleService modules, CancellationToken ct) =>
+        {
+            if (!http.CurrentUser().IsSuperuser) throw new Forbidden();
+            return await modules.UpgradePreviewAsync(id, ct);
+        });
+        g.MapPost("/modules/{id}/upgrade", async (string id, HttpContext http, ModuleService modules, CancellationToken ct) =>
+            new { changeSetId = await modules.UpgradeAsync(id, http, ct) });
 
         g.MapPost("/roles", (RoleRequest req, HttpContext http, Db db, MetadataStore store, CancellationToken ct) => SaveRole(null, req, http, db, store, ct));
         g.MapPut("/roles/{id:int}", (int id, RoleRequest req, HttpContext http, Db db, MetadataStore store, CancellationToken ct) => SaveRole(id, req, http, db, store, ct));

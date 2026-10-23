@@ -461,3 +461,6 @@ code, pre, .mono { font-family: var(--font-mono); font-size: 0.8125rem; }
   .totals-card { max-width: none; }
   .lines-head { padding: var(--space-3) var(--space-4); }
 }
+
+/* Spec 004: notas de versión pendientes en la tarjeta del módulo. */
+.module-upgrades { margin: 0; padding-left: var(--space-5); font-size: var(--text-sm); color: var(--text-muted); }

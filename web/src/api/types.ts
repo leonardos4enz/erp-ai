@@ -32,6 +32,8 @@ export interface FieldDef {
   childEntity?: string;
   /** Lo calcula el servidor (formula, autonumber, state…). */
   readOnly?: boolean;
+  /** false: lo asigna el sistema (al crear o en transiciones), nunca el usuario. */
+  editable?: boolean;
 }
 
 export type StateColor = 'neutral' | 'accent' | 'success' | 'warning' | 'danger';
@@ -93,7 +95,7 @@ export type Operation =
   | { op: 'updateEntity'; entity: string; label?: string; labelPlural?: string; icon?: string; description?: string; displayField?: string; group?: string }
   | { op: 'archiveEntity'; entity: string }
   | { op: 'addField'; entity: string; field: FieldDef }
-  | { op: 'updateField'; entity: string; field: string; label?: string; required?: boolean; showInList?: boolean; options?: string[]; requiredForRoles?: string[]; displayOrder?: number; defaultValue?: string; formula?: string }
+  | { op: 'updateField'; entity: string; field: string; label?: string; required?: boolean; showInList?: boolean; options?: string[]; requiredForRoles?: string[]; displayOrder?: number; defaultValue?: string; formula?: string; editable?: boolean }
   | { op: 'archiveField'; entity: string; field: string }
   | { op: 'setWorkflow'; entity: string; workflow: Workflow }
   | { op: 'setRules'; entity: string; rules: Rule[] };
@@ -172,6 +174,9 @@ export interface ModuleInfo {
   version: string;
   installed: boolean;
   entities: string[];
+  installedVersion?: string | null;
+  upgradeAvailable?: boolean;
+  pendingUpgrades?: string[];
 }
 
 export type ModulePreview = PlanPreview & { roles: string[]; seedRecords: number };

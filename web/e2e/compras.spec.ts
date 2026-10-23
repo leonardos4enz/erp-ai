@@ -284,7 +284,7 @@ test('Requisición: el solicitante la envía y solo el gerente la aprueba', asyn
   const s = await as('solicitante');
   const dep = (await (await s.get('/api/data/Departamento/lookup')).json())[0].id;
   let req = await (await s.post('/api/data/Requisicion', { data: {
-    Departamento: dep, Justificacion: 'Reposición de empaque', Partidas: [{ Producto: ids.caja, Cantidad: 40 }],
+    Departamento: dep, Almacen: ids.almacen, Justificacion: 'Reposición de empaque', Partidas: [{ Producto: ids.caja, Cantidad: 40 }],
   } })).json();
   expect(req.Folio).toMatch(/^REQ-\d{6}$/);
   expect(req.TotalEstimado).toBe(740); // 40 × costo último 18.50
@@ -293,6 +293,68 @@ test('Requisición: el solicitante la envía y solo el gerente la aprueba', asyn
   req = (await transition('solicitante', 'Requisicion', req, 'enviar')).body;
   expect((await transition('solicitante', 'Requisicion', req, 'aprobar')).status).toBe(403);
   expect((await transition('gerente', 'Requisicion', req, 'aprobar')).body.Estado).toBe('Aprobada');
+});
+
+// ---------------- Spec 004 (Compras 1.1.0) ----------------
+
+test('Spec 004 · H1: fecha y solicitante de la requisición los asigna el sistema, aunque se envíen otros', async ({ browser }) => {
+  const s = await as('solicitante');
+  const admin = await apiAs(ADMIN.username, ADMIN.password);
+  const otherUser = (await (await admin.get('/api/users/lookup', { params: { search: 'Director E2E' } })).json())[0].id;
+  const dep = (await (await s.get('/api/data/Departamento/lookup')).json())[0].id;
+  const today = new Date().toLocaleDateString('en-CA'); // AAAA-MM-DD local (el servidor corre en esta máquina)
+
+  // Intento de suplantar: fecha pasada y otro solicitante.
+  let req = await (await s.post('/api/data/Requisicion', { data: {
+    Departamento: dep, Almacen: ids.almacen, Justificacion: 'Prueba de campos del sistema',
+    Fecha: '2020-01-01', Solicitante: otherUser, Partidas: [{ Producto: ids.caja, Cantidad: 1 }],
+  } })).json();
+  expect(req.Fecha).toBe(today);
+  expect(req.Solicitante__label).toBe('Solicitante E2E');
+
+  // Tampoco se cambian al editar (CA2), ni por API directa.
+  req = await (await s.put(`/api/data/Requisicion/${req.id}`, { data: { _rowVersion: req._rowVersion, Fecha: '2020-01-01', Solicitante: otherUser } })).json();
+  expect(req.Fecha).toBe(today);
+  expect(req.Solicitante__label).toBe('Solicitante E2E');
+
+  // CA3: la pantalla los muestra bloqueados y lo explica.
+  const page = await pageAs(browser, 'solicitante');
+  await page.goto('/c/Requisicion/new');
+  await expect(page.getByLabel(/^Fecha(?! requerida)/)).toBeDisabled();
+  await expect(page.getByLabel(/^Solicitante/)).toBeDisabled();
+  await expect(page.getByText('Lo asigna el sistema').first()).toBeVisible();
+  await expect(page.getByLabel(/^Solicitante/)).toHaveValue('Solicitante E2E');
+  await page.context().close();
+});
+
+test('Spec 004 · H3: cada partida sugiere el almacén de la requisición y se puede cambiar', async () => {
+  const s = await as('solicitante');
+  const otro = await (await (await apiAs(ADMIN.username, ADMIN.password)).post('/api/data/Almacen', { data: { Clave: 'ALM-02', Nombre: 'Almacén refacciones' } })).json();
+  const computed = (await (await s.post('/api/data/Requisicion/compute', { data: { values: {
+    Almacen: ids.almacen, Partidas: [{ Producto: ids.caja, Cantidad: 1 }, { Producto: ids.caja, Cantidad: 2, Almacen: otro.id }],
+  } } })).json()).values;
+  expect(computed.Partidas[0].Almacen).toBe(ids.almacen);   // sugerido desde el encabezado
+  expect(computed.Partidas[1].Almacen).toBe(otro.id);       // elegido por partida
+  expect(computed.Partidas[1].Almacen__label).toBe('Almacén refacciones');
+
+  const missing = await s.post('/api/data/Requisicion', { data: { Departamento: 1, Justificacion: 'x', Partidas: [] } });
+  expect((await missing.json()).errors.Almacen).toBeTruthy(); // almacén destino obligatorio
+});
+
+test('Spec 004: "Autorizado por" solo lo asigna la transición, no la captura', async () => {
+  const c = await as('comprador');
+  const director = (await (await c.get('/api/users/lookup', { params: { search: 'Director E2E' } })).json())[0].id;
+  const oc = await newOrder('comprador', [{ producto: ids.caja, cantidad: 1 }], { AutorizadoPor: director, FechaAutorizacion: '2026-01-01T00:00:00Z' });
+  expect(oc.body.AutorizadoPor).toBeNull();
+  expect(oc.body.FechaAutorizacion).toBeNull();
+});
+
+test('Spec 004 · H2: una instalación nueva ya incluye todas las actualizaciones', async () => {
+  const admin = await apiAs(ADMIN.username, ADMIN.password);
+  const mod = (await (await admin.get('/api/admin/modules')).json()).find((m: { id: string }) => m.id === 'compras');
+  expect(mod.installedVersion).toBe(mod.version);
+  expect(mod.upgradeAvailable).toBe(false);
+  expect((await admin.post('/api/admin/modules/compras/upgrade/preview')).status()).toBe(409);
 });
 
 test('Listado de órdenes: filtro por estado con conteos', async ({ browser }) => {

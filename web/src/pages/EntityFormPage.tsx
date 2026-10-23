@@ -268,7 +268,8 @@ export function EntityFormPage() {
   function renderField(f: FieldDef) {
     const fid = `f-${f.name}`;
     const required = isRequiredFor(f, roles);
-    const roleHint = !f.required && required && isEditableField(f) ? 'Obligatorio para tu rol' : undefined;
+    const roleHint = f.editable === false ? 'Lo asigna el sistema'
+      : !f.required && required && isEditableField(f) ? 'Obligatorio para tu rol' : undefined;
     return (
       <FieldInput
         key={f.name}

@@ -94,6 +94,8 @@ export const adminApi = {
   modules: () => api<ModuleInfo[]>('/admin/modules'),
   previewModule: (id: string) => api<ModulePreview>(`/admin/modules/${enc(id)}/preview`, { method: 'POST' }),
   installModule: (id: string) => api<{ changeSetId: number }>(`/admin/modules/${enc(id)}/install`, { method: 'POST' }),
+  previewUpgrade: (id: string) => api<ModulePreview>(`/admin/modules/${enc(id)}/upgrade/preview`, { method: 'POST' }),
+  upgradeModule: (id: string) => api<{ changeSetId: number }>(`/admin/modules/${enc(id)}/upgrade`, { method: 'POST' }),
 };
 
 export const auditApi = {

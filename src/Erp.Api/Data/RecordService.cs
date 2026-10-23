@@ -483,7 +483,7 @@ public sealed class RecordService(Db db, MetadataStore store)
             if (IgnoredKeys.Contains(prop.Name) || prop.Name.EndsWith("__label", StringComparison.Ordinal)) continue;
             var f = e.FindField(prop.Name);
             if (f is null || f.IsArchived) { if (!lenient) errors[prop.Name] = ["Campo desconocido."]; continue; }
-            if (f.ReadOnly) continue;
+            if (f.ClientLocked) continue; // calculado o asignado por el sistema: el cliente no lo escribe
 
             if (f.Type == FieldTypes.Lines)
             {
@@ -505,7 +505,7 @@ public sealed class RecordService(Db db, MetadataStore store)
                         if (IgnoredKeys.Contains(lp.Name) || lp.Name.EndsWith("__label", StringComparison.Ordinal)) continue;
                         var lf = child.FindField(lp.Name);
                         if (lf is null || lf.IsArchived) { if (!lenient) errors[$"{f.Name}[{i}].{lp.Name}"] = ["Campo desconocido."]; continue; }
-                        if (lf.ReadOnly || lf.Type == FieldTypes.Lines) continue;
+                        if (lf.ClientLocked || lf.Type == FieldTypes.Lines) continue;
                         try { line.Values[lf.Name] = await ParseValueAsync(lf, lp.Value, loader, ct); }
                         catch (FieldError ex) { if (!lenient) errors[$"{f.Name}[{i}].{lf.Name}"] = [ex.Message]; }
                     }

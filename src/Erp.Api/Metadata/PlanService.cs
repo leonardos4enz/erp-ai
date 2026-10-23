@@ -76,6 +76,29 @@ public sealed class PlanService(Db db, MetadataStore store, JsonSerializerOption
         return changeSetId;
     }
 
+    /// <summary>
+    /// Vista previa de varios planes en secuencia (base + actualizaciones de un módulo): cada uno se
+    /// compila sobre el modelo que deja el anterior, igual que al aplicarlos.
+    /// </summary>
+    internal async Task<PlanPreview> PreviewChainAsync(IReadOnlyList<(string Label, ChangePlan Plan)> chain,
+        IReadOnlySet<string> extraRoles, CancellationToken ct)
+    {
+        IReadOnlyDictionary<string, EntityDef> model = await store.GetAsync(ct);
+        await using var cn = await db.OpenAsync(ct);
+        var roles = (await LoadRolesAsync(cn, null)).Union(extraRoles).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var errors = new List<PlanError>();
+        var steps = new List<PlanStep>();
+        foreach (var (label, plan) in chain)
+        {
+            var compiled = PlanCompiler.Compile(plan, model, roles);
+            var prefix = chain.Count > 1 ? $"[{label}] " : "";
+            errors.AddRange(compiled.Preview.Errors.Select(e => e with { Message = prefix + e.Message }));
+            steps.AddRange(compiled.Preview.Steps.Select(s => s with { Description = prefix + s.Description }));
+            model = compiled.ResultingModel;
+        }
+        return new PlanPreview(errors.Count == 0, errors, steps);
+    }
+
     /// <summary>Compila contra el modelo actual con roles adicionales que aún no existen (vista previa de módulos).</summary>
     internal async Task<CompiledPlan> CompileWithRolesAsync(ChangePlan plan, IReadOnlySet<string> extraRoles, CancellationToken ct)
     {
@@ -113,20 +136,20 @@ public sealed class PlanService(Db db, MetadataStore store, JsonSerializerOption
                 USING (SELECT @EntityId AS EntityId, @Name AS Name) AS s ON t.EntityId = s.EntityId AND t.Name = s.Name
                 WHEN MATCHED THEN UPDATE SET Label = @Label, IsRequired = @Required, ShowInList = @ShowInList,
                     OptionsJson = @Options, RequiredForRolesJson = @Roles, DisplayOrder = @DisplayOrder, IsArchived = @IsArchived,
-                    DefaultValue = @DefaultValue, Formula = @Formula
+                    DefaultValue = @DefaultValue, Formula = @Formula, IsEditable = @Editable
                 WHEN NOT MATCHED THEN INSERT (EntityId, Name, Label, Type, IsRequired, IsUnique, MaxLength, [Precision], Scale,
                     OptionsJson, ReferenceEntity, DisplayOrder, ShowInList, RequiredForRolesJson, IsArchived,
-                    DefaultValue, Formula, ResultType, Prefix, Padding, ChildEntity)
+                    DefaultValue, Formula, ResultType, Prefix, Padding, ChildEntity, IsEditable)
                     VALUES (@EntityId, @Name, @Label, @Type, @Required, @Unique, @MaxLength, @Precision, @Scale,
                     @Options, @ReferenceEntity, @DisplayOrder, @ShowInList, @Roles, @IsArchived,
-                    @DefaultValue, @Formula, @ResultType, @Prefix, @Padding, @ChildEntity);
+                    @DefaultValue, @Formula, @ResultType, @Prefix, @Padding, @ChildEntity, @Editable);
                 """, new
             {
                 EntityId = entityId, f.Name, f.Label, f.Type, f.Required, f.Unique, f.MaxLength, f.Precision, f.Scale,
                 Options = f.Options is null ? null : JsonSerializer.Serialize(f.Options),
                 f.ReferenceEntity, f.DisplayOrder, f.ShowInList,
                 Roles = f.RequiredForRoles is null ? null : JsonSerializer.Serialize(f.RequiredForRoles),
-                f.IsArchived, f.DefaultValue, f.Formula, f.ResultType, f.Prefix, f.Padding, f.ChildEntity,
+                f.IsArchived, f.DefaultValue, f.Formula, f.ResultType, f.Prefix, f.Padding, f.ChildEntity, f.Editable,
             }, tx);
         }
     }

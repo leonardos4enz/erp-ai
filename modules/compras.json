@@ -1,7 +1,7 @@
 {
   "id": "compras",
   "name": "Compras",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "icon": "shopping-cart",
   "description": "Requisiciones, órdenes de compra con autorización por montos y recepción de mercancía. Incluye proveedores, productos y catálogos base.",
   "plan": {
@@ -259,8 +259,19 @@
         } }
     ]
   },
-  "roles": [
-    { "name": "Solicitante", "description": "Crea y envía requisiciones de compra.", "canManageModel": false, "canManageUsers": false, "canViewAudit": false,
+  "upgrades": [
+    { "version": "1.1.0",
+      "description": "Fecha y solicitante de la requisición asignados por el sistema; almacén destino por requisición y por partida; autorización de la OC solo por transición.",
+      "plan": { "description": "Compras 1.1.0", "operations": [
+        { "op": "updateField", "entity": "Requisicion", "field": "Fecha", "editable": false },
+        { "op": "updateField", "entity": "Requisicion", "field": "Solicitante", "editable": false },
+        { "op": "addField", "entity": "Requisicion", "field": { "name": "Almacen", "label": "Almacén destino", "type": "reference", "referenceEntity": "Almacen", "required": true, "displayOrder": 2 } },
+        { "op": "addField", "entity": "RequisicionPartida", "field": { "name": "Almacen", "label": "Almacén", "type": "reference", "referenceEntity": "Almacen", "defaultValue": "Requisicion.Almacen" } },
+        { "op": "updateField", "entity": "OrdenCompra", "field": "AutorizadoPor", "editable": false },
+        { "op": "updateField", "entity": "OrdenCompra", "field": "FechaAutorizacion", "editable": false }
+      ] } }
+  ],
+  "roles": [    { "name": "Solicitante", "description": "Crea y envía requisiciones de compra.", "canManageModel": false, "canManageUsers": false, "canViewAudit": false,
       "permissions": [
         { "entity": "Requisicion", "canRead": true, "canCreate": true, "canUpdate": true, "canDelete": true },
         { "entity": "Producto", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false },

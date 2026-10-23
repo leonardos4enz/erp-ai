@@ -38,4 +38,5 @@ constitution.md  (principios fijos, se lee siempre)
 | 001 | [Núcleo de metadatos, API genérica y UI dinámica](specs/001-nucleo-metadatos/spec.md) | Implementado (MVP) |
 | 002 | [Motor: documentos, fórmulas, reglas y procesos](specs/002-motor-procesos/spec.md) | Implementado |
 | 003 | [Módulo de Compras](specs/003-modulo-compras/spec.md) | Implementado |
-| 004 | Asistente IA (MiniMax) sobre Planes de Cambios | Pendiente |
+| 004 | [Campos asignados por el sistema y actualización de módulos](specs/004-campos-sistema-y-actualizaciones/spec.md) | Implementado |
+| 005–011 | Automatizaciones, seguridad por campo/registro, vistas y reportes, integraciones, entornos, multi-empresa, IA | [Roadmap](roadmap.md) |

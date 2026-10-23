@@ -47,7 +47,7 @@ public sealed class MetadataStore(Db db)
         var fields = (await cn.QueryAsync<FieldRow>("""
             SELECT EntityId, Name, Label, Type, IsRequired, IsUnique, MaxLength, [Precision], Scale, OptionsJson,
                    ReferenceEntity, DisplayOrder, ShowInList, RequiredForRolesJson, IsArchived,
-                   DefaultValue, Formula, ResultType, Prefix, Padding, ChildEntity
+                   DefaultValue, Formula, ResultType, Prefix, Padding, ChildEntity, IsEditable
               FROM meta.Field
             """, transaction: tx)).ToLookup(f => f.EntityId);
 
@@ -65,7 +65,7 @@ public sealed class MetadataStore(Db db)
                 DisplayOrder = f.DisplayOrder, ShowInList = f.ShowInList,
                 RequiredForRoles = ParseList(f.RequiredForRolesJson), IsArchived = f.IsArchived,
                 DefaultValue = f.DefaultValue, Formula = f.Formula, ResultType = f.ResultType,
-                Prefix = f.Prefix, Padding = f.Padding, ChildEntity = f.ChildEntity,
+                Prefix = f.Prefix, Padding = f.Padding, ChildEntity = f.ChildEntity, Editable = f.IsEditable,
             }).ToList(),
         }, StringComparer.OrdinalIgnoreCase);
     }
@@ -82,5 +82,5 @@ public sealed class MetadataStore(Db db)
     private sealed record FieldRow(int EntityId, string Name, string Label, string Type, bool IsRequired, bool IsUnique,
         int? MaxLength, int? Precision, int? Scale, string? OptionsJson, string? ReferenceEntity, int DisplayOrder,
         bool ShowInList, string? RequiredForRolesJson, bool IsArchived,
-        string? DefaultValue, string? Formula, string? ResultType, string? Prefix, int? Padding, string? ChildEntity);
+        string? DefaultValue, string? Formula, string? ResultType, string? Prefix, int? Padding, string? ChildEntity, bool IsEditable);
 }

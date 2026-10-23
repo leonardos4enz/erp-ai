@@ -32,7 +32,7 @@ export const MODELER_FIELD_TYPES: FieldType[] = [
 
 /** Campos cuyo valor calcula o asigna el servidor; nunca se envían al guardar. */
 export function isComputedField(f: FieldDef): boolean {
-  return f.readOnly === true || f.type === 'formula' || f.type === 'autonumber' || f.type === 'state' || f.type === 'parent';
+  return f.readOnly === true || f.editable === false || f.type === 'formula' || f.type === 'autonumber' || f.type === 'state' || f.type === 'parent';
 }
 
 /** Campos que la persona captura directamente en el formulario. */

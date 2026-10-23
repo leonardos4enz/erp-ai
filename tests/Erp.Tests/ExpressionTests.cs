@@ -279,6 +279,43 @@ public class WorkflowCompilerTests
         Assert.False(Compile(Orden(), new UpdateFieldOp { Entity = "Orden", Field = "Folio", DefaultValue = "'X'" }).Preview.Valid);
     }
 
+    // Spec 004 · campos asignados por el sistema
+    [Fact]
+    public void Non_editable_required_field_needs_a_default()
+    {
+        var withoutDefault = Compile(Orden(), new AddFieldOp { Entity = "Orden", Field = new FieldDef
+            { Name = "Solicitante", Label = "Solicitante", Type = FieldTypes.User, Required = true, Editable = false } });
+        Assert.False(withoutDefault.Preview.Valid);
+
+        var withDefault = Compile(Orden(), new AddFieldOp { Entity = "Orden", Field = new FieldDef
+            { Name = "Solicitante", Label = "Solicitante", Type = FieldTypes.User, Required = true, Editable = false, DefaultValue = "CURRENTUSER()" } });
+        Assert.True(withDefault.Preview.Valid);
+        Assert.True(withDefault.ResultingModel["Orden"].FindField("Solicitante")!.ClientLocked);
+    }
+
+    [Fact]
+    public void Update_field_can_lock_a_field_and_transitions_cannot_ask_users_to_capture_it()
+    {
+        var locked = Compile(Orden(), new UpdateFieldOp { Entity = "Orden", Field = "Fecha", Editable = false });
+        Assert.True(locked.Preview.Valid);
+        Assert.False(locked.ResultingModel["Orden"].FindField("Fecha")!.Editable);
+
+        var bad = Compile(Orden(), new UpdateFieldOp { Entity = "Orden", Field = "Fecha", Editable = false },
+            new SetWorkflowOp { Entity = "Orden", Workflow = Flow() with
+            {
+                Transitions = [new() { Name = "autorizar", Label = "Autorizar", From = ["Borrador"], To = "Autorizada", RequiredFields = ["Fecha"] }],
+            } });
+        Assert.False(bad.Preview.Valid);
+
+        // Pero una transición sí puede asignarlo (p. ej. "Autorizado por").
+        var set = Compile(Orden(), new UpdateFieldOp { Entity = "Orden", Field = "Fecha", Editable = false },
+            new SetWorkflowOp { Entity = "Orden", Workflow = Flow() with
+            {
+                Transitions = [new() { Name = "autorizar", Label = "Autorizar", From = ["Borrador"], To = "Autorizada", Set = [new("Fecha", "TODAY()")] }],
+            } });
+        Assert.True(set.Preview.Valid, string.Join("; ", set.Preview.Errors.Select(e => e.Message)));
+    }
+
     [Fact]
     public void Default_value_expressions_are_validated() =>
         Assert.False(Compile(Orden(), new AddFieldOp { Entity = "Orden", Field = new FieldDef

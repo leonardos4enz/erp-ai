@@ -102,6 +102,7 @@ function cleanField(f: DraftField, order: number): FieldDef {
     required: !computed && !!f.required, unique: !computed && !!f.unique, showInList: !!f.showInList, displayOrder: order,
   };
   if (!computed && f.requiredForRoles?.length) out.requiredForRoles = f.requiredForRoles;
+  if (!computed && f.editable === false) out.editable = false;
   if (f.type === 'text' && f.maxLength) out.maxLength = f.maxLength;
   if (f.type === 'decimal') { out.precision = f.precision ?? 18; out.scale = f.scale ?? 2; }
   if (f.type === 'choice') out.options = f.options ?? [];
@@ -162,6 +163,7 @@ export function buildOperations(original: EntityDef | undefined, d: Draft): Oper
     if (f.label.trim() !== o.label) { u.label = f.label.trim(); changed = true; }
     if (!!f.required !== !!o.required) { u.required = !!f.required; changed = true; }
     if (!!f.showInList !== !!o.showInList) { u.showInList = !!f.showInList; changed = true; }
+    if ((f.editable !== false) !== (o.editable !== false)) { u.editable = f.editable !== false; changed = true; }
     if (f.type === 'choice' && !sameList(f.options, o.options)) { u.options = f.options ?? []; changed = true; }
     if (!sameList(f.requiredForRoles, o.requiredForRoles)) { u.requiredForRoles = f.requiredForRoles ?? []; changed = true; }
     if (i !== (o.displayOrder ?? i)) { u.displayOrder = i; changed = true; }
@@ -318,6 +320,9 @@ function FieldRow({ f, index, count, errors, entities, roleNames, onChange, onMo
       {expanded && !f.isArchived && (
         <div className="field-row-body">
           {!computed && <Switch checked={!!f.required} onChange={(v) => onChange({ required: v })} label="Obligatorio" />}
+          {!computed && f.type !== 'parent' && (
+            <Switch checked={f.editable !== false} onChange={(v) => onChange({ editable: v })} label="Editable por el usuario" />
+          )}
           <Switch checked={!!f.showInList} onChange={(v) => onChange({ showInList: v })} label="Mostrar en listado" />
           {!computed && f.type !== 'parent' && (
             <Switch checked={!!f.unique} disabled={locked || f.type === 'boolean' || f.type === 'longtext' || f.type === 'user'} onChange={(v) => onChange({ unique: v })} label="Valor único" />

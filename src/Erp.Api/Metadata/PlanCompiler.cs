@@ -269,8 +269,14 @@ public static partial class PlanCompiler
             DisplayOrder = op.DisplayOrder ?? f.DisplayOrder,
             DefaultValue = op.DefaultValue is null ? f.DefaultValue : op.DefaultValue.Trim() is { Length: > 0 } d ? d : null,
             Formula = op.Formula?.Trim() ?? f.Formula,
+            Editable = f.ReadOnly || f.Type == FieldTypes.Lines || (op.Editable ?? f.Editable),
         };
-        return new(ReplaceField(e, updated), $"Actualizar campo '{updated.Label}' de '{e.Label}'", []);
+        ValidateLock(ctx, updated);
+        if (ctx.ErrorCount > start) return null;
+        var detail = updated.Editable != f.Editable
+            ? updated.Editable ? " (vuelve a ser editable por el usuario)" : " (ahora lo asigna el sistema)"
+            : "";
+        return new(ReplaceField(e, updated), $"Actualizar campo '{updated.Label}' de '{e.Label}'{detail}", []);
     }
 
     private static OpResult? ArchiveField(Ctx ctx, ArchiveFieldOp op)
@@ -332,7 +338,7 @@ public static partial class PlanCompiler
             if (t.Icon is not null) ValidateIcon(ctx, t.Icon);
             if (t.Variant is not null && !Variants.Contains(t.Variant)) ctx.Error($"{where}: variante '{t.Variant}' no válida.");
             foreach (var rf in t.RequiredFields ?? [])
-                if (e.FindField(rf) is not { IsArchived: false } fd || fd.ReadOnly || fd.Type == FieldTypes.Lines)
+                if (e.FindField(rf) is not { IsArchived: false } fd || fd.ClientLocked || fd.Type == FieldTypes.Lines)
                     ctx.Error($"{where}: '{rf}' no es un campo capturable de {e.Name}.");
             foreach (var s in t.Set ?? [])
                 if (e.FindField(s.Field) is not { IsArchived: false } fd || fd.ReadOnly || fd.Type == FieldTypes.Lines)
@@ -402,6 +408,7 @@ public static partial class PlanCompiler
             Padding = type == FieldTypes.Autonumber ? f.Padding ?? 6 : null,
             ChildEntity = type == FieldTypes.Lines ? f.ChildEntity : null,
             ShowInList = type != FieldTypes.Lines && f.ShowInList,
+            Editable = computed || f.Editable,
         };
     }
 
@@ -447,6 +454,14 @@ public static partial class PlanCompiler
         if (f.Unique && !FieldTypes.Uniqueable.Contains(f.Type))
             ctx.Error($"El tipo '{f.Type}' no admite valores únicos ('{f.Name}').");
         if (f.RequiredForRoles is not null) ValidateRoles(ctx, f.RequiredForRoles);
+        ValidateLock(ctx, f);
+    }
+
+    /// <summary>Un campo asignado por el sistema y obligatorio necesita de dónde tomar su valor.</summary>
+    private static void ValidateLock(Ctx ctx, FieldDef f)
+    {
+        if (!f.Editable && f.Required && f.DefaultValue is null)
+            ctx.Error($"'{f.Name}' no es editable y es obligatorio: necesita un valor por defecto (p. ej. TODAY() o CURRENTUSER()).");
     }
 
     private static void ValidateOptions(Ctx ctx, IReadOnlyList<string> options)
