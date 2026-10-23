@@ -183,7 +183,7 @@ public static partial class AdminEndpoints
 
     private static async Task<IReadOnlyList<UserDto>> LoadUsersAsync(System.Data.Common.DbConnection cn)
     {
-        var users = await cn.QueryAsync<UserRow>("SELECT Id, Username, DisplayName, IsActive, LastLoginAt, LockoutEnd, Unit FROM meta.[User] ORDER BY Username");
+        var users = await cn.QueryAsync<UserRow>("SELECT Id, Username, DisplayName, IsActive, LastLoginAt, LockoutEnd, Unit FROM meta.[User] WHERE IsService = 0 ORDER BY Username");
         var roles = (await cn.QueryAsync<(int UserId, int RoleId)>("SELECT UserId, RoleId FROM meta.UserRole")).ToLookup(x => x.UserId, x => x.RoleId);
         return users.Select(u => new UserDto(u.Id, u.Username, u.DisplayName, u.IsActive, u.LastLoginAt,
             u.LockoutEnd > DateTime.UtcNow ? u.LockoutEnd : null, roles[u.Id].ToList(), u.Unit)).ToList();

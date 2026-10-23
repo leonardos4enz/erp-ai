@@ -206,6 +206,63 @@ public static class Bootstrap
         IF COL_LENGTH('meta.Entity', 'ViewsJson') IS NULL ALTER TABLE meta.Entity ADD ViewsJson nvarchar(max) NULL;
         IF COL_LENGTH('meta.Entity', 'ReportsJson') IS NULL ALTER TABLE meta.Entity ADD ReportsJson nvarchar(max) NULL;
 
+        -- Spec 008
+        IF COL_LENGTH('meta.Entity', 'WebhooksJson') IS NULL ALTER TABLE meta.Entity ADD WebhooksJson nvarchar(max) NULL;
+        IF COL_LENGTH('meta.[User]', 'IsService') IS NULL ALTER TABLE meta.[User] ADD IsService bit NOT NULL CONSTRAINT DF_User_IsService DEFAULT 0;
+
+        IF OBJECT_ID('meta.ApiKey') IS NULL
+        CREATE TABLE meta.ApiKey (
+            Id int IDENTITY PRIMARY KEY,
+            Name nvarchar(100) NOT NULL,
+            PublicId char(12) NOT NULL CONSTRAINT UX_ApiKey_PublicId UNIQUE,
+            SecretHash varbinary(32) NOT NULL,
+            PreviousSecretHash varbinary(32) NULL,
+            PreviousExpiresAt datetime2(3) NULL,
+            UserId int NOT NULL REFERENCES meta.[User](Id),
+            CreatedBy int NOT NULL REFERENCES meta.[User](Id),
+            CreatedAt datetime2(3) NOT NULL DEFAULT SYSUTCDATETIME(),
+            ExpiresAt datetime2(3) NULL,
+            RotatedAt datetime2(3) NULL,
+            RevokedAt datetime2(3) NULL,
+            LastUsedAt datetime2(3) NULL
+        );
+
+        IF OBJECT_ID('meta.WebhookEndpoint') IS NULL
+        CREATE TABLE meta.WebhookEndpoint (
+            EntityName nvarchar(50) NOT NULL,
+            WebhookName nvarchar(50) NOT NULL,
+            UrlProtected nvarchar(max) NOT NULL,
+            Destination nvarchar(300) NOT NULL,
+            SecretProtected nvarchar(max) NOT NULL,
+            IsActive bit NOT NULL,
+            SecretCreatedAt datetime2(3) NOT NULL DEFAULT SYSUTCDATETIME(),
+            UpdatedAt datetime2(3) NOT NULL DEFAULT SYSUTCDATETIME(),
+            UpdatedBy int NOT NULL REFERENCES meta.[User](Id),
+            PRIMARY KEY (EntityName, WebhookName)
+        );
+
+        IF OBJECT_ID('meta.WebhookDelivery') IS NULL
+        CREATE TABLE meta.WebhookDelivery (
+            Id bigint IDENTITY PRIMARY KEY,
+            DeliveryId uniqueidentifier NOT NULL CONSTRAINT UX_WebhookDelivery_DeliveryId UNIQUE,
+            EntityName nvarchar(50) NOT NULL,
+            WebhookName nvarchar(50) NOT NULL,
+            RecordId bigint NULL,
+            Event nvarchar(20) NOT NULL,
+            EventKey nvarchar(50) NULL,
+            PayloadJson nvarchar(max) NOT NULL,
+            Status nvarchar(12) NOT NULL,
+            Attempts int NOT NULL DEFAULT 0,
+            NextAttemptAt datetime2(3) NOT NULL DEFAULT SYSUTCDATETIME(),
+            LeaseUntil datetime2(3) NULL,
+            LastStatusCode int NULL,
+            LastError nvarchar(300) NULL,
+            CreatedAt datetime2(3) NOT NULL DEFAULT SYSUTCDATETIME(),
+            DeliveredAt datetime2(3) NULL
+        );
+        IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_WebhookDelivery_Pending')
+            CREATE INDEX IX_WebhookDelivery_Pending ON meta.WebhookDelivery (Status, NextAttemptAt);
+
         IF OBJECT_ID('meta.Dashboard') IS NULL
         CREATE TABLE meta.Dashboard (
             Name nvarchar(50) NOT NULL PRIMARY KEY,

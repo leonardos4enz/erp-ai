@@ -45,6 +45,8 @@ export function setUnauthorizedHandler(handler: UnauthorizedHandler | null) {
 interface RequestOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
   body?: unknown;
+  /** Spec 008: archivo tal cual (importación); no se serializa como JSON. */
+  rawBody?: Blob;
   query?: Record<string, string | number | boolean | undefined | null>;
   signal?: AbortSignal;
   /** Do not trigger the global 401 redirect (used by login / me). */
@@ -66,6 +68,7 @@ export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T
   const headers: Record<string, string> = { Accept: 'application/json' };
   if (method !== 'GET') headers['X-ERP-Request'] = '1';
   if (opts.body !== undefined) headers['Content-Type'] = 'application/json';
+  if (opts.rawBody !== undefined) headers['Content-Type'] = 'application/octet-stream';
 
   let res: Response;
   try {
@@ -73,7 +76,7 @@ export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T
       method,
       headers,
       credentials: 'same-origin',
-      body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+      body: opts.rawBody ?? (opts.body !== undefined ? JSON.stringify(opts.body) : undefined),
       signal: opts.signal,
     });
   } catch (e) {

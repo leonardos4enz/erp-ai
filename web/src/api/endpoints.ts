@@ -1,7 +1,7 @@
 import { api } from './client';
 import type {
   AuditEntry, ChangePlan, ChangeSetSummary, DashboardResult, DashboardSummary, EntityDef, HistoryEntry, LayoutState, LookupItem, Me,
-  ModuleInfo, ModulePreview, Paged, PlanPreview, ReportResult, ReportSummary, Role, Row, RowList, SavedView, User, ViewFilter, ViewList,
+  ApiKey, ImportResult, ModuleInfo, ModulePreview, WebhookDelivery, WebhookSummary, Paged, PlanPreview, ReportResult, ReportSummary, Role, Row, RowList, SavedView, User, ViewFilter, ViewList,
 } from './types';
 
 const enc = encodeURIComponent;
@@ -67,6 +67,21 @@ export const dataApi = {
     api<Row>(`/data/${enc(entity)}/${enc(String(id))}/transition`, { method: 'POST', body: input }),
   history: (entity: string, id: number | string, signal?: AbortSignal) =>
     api<HistoryEntry[]>(`/data/${enc(entity)}/${enc(String(id))}/history`, { signal }),
+  /** Spec 008: vista previa (dryRun) o importación de un CSV/XLSX; todo o nada. */
+  importFile: (entity: string, file: Blob, dryRun: boolean) =>
+    api<ImportResult>(`/data/${enc(entity)}/import`, { method: 'POST', rawBody: file, query: { dryRun } }),
+  /** Spec 008: URL de descarga del listado como se ve (GET: misma sesión por cookie, sin cabecera CSRF). */
+  exportUrl: (entity: string, format: 'csv' | 'xlsx', q: Omit<ListQuery, 'page' | 'pageSize'>, columns: string[]) => {
+    const qs = new URLSearchParams({ format });
+    if (columns.length) qs.set('columns', columns.join(','));
+    if (q.search) qs.set('search', q.search);
+    if (q.sort) qs.set('sort', q.sort);
+    if (q.dir) qs.set('dir', q.dir);
+    if (q.state) qs.set('state', q.state);
+    const f = filtersParam(q.filters);
+    if (f) qs.set('filters', f);
+    return `/api/data/${enc(entity)}/export?${qs.toString()}`;
+  },
 };
 
 export interface ViewInput {
@@ -139,6 +154,26 @@ export const adminApi = {
   installModule: (id: string) => api<{ changeSetId: number }>(`/admin/modules/${enc(id)}/install`, { method: 'POST' }),
   previewUpgrade: (id: string) => api<ModulePreview>(`/admin/modules/${enc(id)}/upgrade/preview`, { method: 'POST' }),
   upgradeModule: (id: string) => api<{ changeSetId: number }>(`/admin/modules/${enc(id)}/upgrade`, { method: 'POST' }),
+};
+
+export const integrationsApi = {
+  webhooks: (signal?: AbortSignal) => api<WebhookSummary[]>('/admin/webhooks', { signal }),
+  configure: (entity: string, name: string, input: { url?: string; active: boolean }) =>
+    api<{ secret?: string | null }>(`/admin/webhooks/${enc(entity)}/${enc(name)}`, { method: 'PUT', body: input }),
+  rotate: (entity: string, name: string) => api<{ secret: string }>(`/admin/webhooks/${enc(entity)}/${enc(name)}/rotate`, { method: 'POST' }),
+  test: (entity: string, name: string) =>
+    api<{ ok: boolean; status?: number | null; error?: string | null; deliveryId: string }>(`/admin/webhooks/${enc(entity)}/${enc(name)}/test`, { method: 'POST' }),
+  removeDestination: (entity: string, name: string) => api<void>(`/admin/webhooks/${enc(entity)}/${enc(name)}`, { method: 'DELETE' }),
+  deliveries: (q: { entity?: string; name?: string; status?: string }, signal?: AbortSignal) =>
+    api<WebhookDelivery[]>('/admin/webhooks/deliveries', { query: q, signal }),
+  retry: (id: number) => api<void>(`/admin/webhooks/deliveries/${id}/retry`, { method: 'POST' }),
+  keys: (signal?: AbortSignal) => api<ApiKey[]>('/admin/api-keys', { signal }),
+  createKey: (input: { name: string; roleIds: number[]; expiresInDays?: number }) =>
+    api<{ key: ApiKey; secret: string }>('/admin/api-keys', { method: 'POST', body: input }),
+  updateKey: (id: number, input: { name: string; roleIds: number[] }) => api<ApiKey>(`/admin/api-keys/${id}`, { method: 'PUT', body: input }),
+  rotateKey: (id: number, graceHours: 0 | 24) =>
+    api<{ key: ApiKey; secret: string }>(`/admin/api-keys/${id}/rotate`, { method: 'POST', body: { graceHours } }),
+  revokeKey: (id: number) => api<void>(`/admin/api-keys/${id}/revoke`, { method: 'POST' }),
 };
 
 export const auditApi = {

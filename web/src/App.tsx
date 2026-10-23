@@ -11,6 +11,7 @@ import { ModelerPage } from './pages/ModelerPage';
 import { SecurityPage } from './pages/SecurityPage';
 import { AuditPage } from './pages/AuditPage';
 import { ModulesPage } from './pages/ModulesPage';
+import { IntegrationsPage } from './pages/IntegrationsPage';
 import { ReportPage, ReportsPage } from './pages/ReportsPage';
 import { DashboardPage, DashboardsPage } from './pages/DashboardsPage';
 import { NotFoundPage, ForbiddenPage } from './pages/StatusPages';
@@ -50,6 +51,7 @@ export function App() {
         <Route path="admin/model" element={<Guard allow={!!(me?.canManageModel || me?.isSuperuser)}><ModelerPage /></Guard>} />
         <Route path="admin/security" element={<Guard allow={!!(me?.canManageUsers || me?.isSuperuser)}><SecurityPage /></Guard>} />
         <Route path="admin/modules" element={<Guard allow={!!me?.isSuperuser}><ModulesPage /></Guard>} />
+        <Route path="admin/integrations" element={<Guard allow={!!me?.isSuperuser}><IntegrationsPage /></Guard>} />
         <Route path="admin/audit" element={<Guard allow={!!(me?.canViewAudit || me?.isSuperuser)}><AuditPage /></Guard>} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>

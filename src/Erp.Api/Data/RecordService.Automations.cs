@@ -37,7 +37,11 @@ public sealed partial class RecordService
             AutomationEvents.Transition => string.Equals(a.Transition, key, StringComparison.OrdinalIgnoreCase),
             _ => true,
         }).ToList();
-        if (autos.Count == 0) return;
+        if (autos.Count == 0)
+        {
+            await EnqueueWebhooksAsync(c, e, id, ev, key);
+            return;
+        }
         if (c.Depth >= MaxAutomationDepth)
             throw new AppException(400, $"Las automatizaciones se encadenaron más de {MaxAutomationDepth} niveles " +
                                         $"({string.Join(" › ", c.Chain)}). Revisa si hay un ciclo.");
@@ -58,6 +62,8 @@ public sealed partial class RecordService
             catch (AppException ex) { throw new AutomationFailed(auto.Label, FirstMessage(ex)); }
             catch (ExprException ex) { throw new AutomationFailed(auto.Label, $"error al calcular: {ex.Message}"); }
         }
+        // Spec 008: la carga del webhook ya refleja lo que hicieron las automatizaciones de este mismo evento.
+        await EnqueueWebhooksAsync(c, e, id, ev, key);
     }
 
     private static string FirstMessage(AppException ex) =>

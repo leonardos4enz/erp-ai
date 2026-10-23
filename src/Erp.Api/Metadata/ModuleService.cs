@@ -15,7 +15,8 @@ public sealed record ModuleRole(string Name, string? Description, bool CanManage
 public sealed record ModulePermission(string Entity, bool CanRead, bool CanCreate, bool CanUpdate, bool CanDelete);
 public sealed record ModuleSeed(string Entity, string Key, IReadOnlyList<JsonObject> Records);
 /// <summary>Spec 004: cambios de una versión posterior a la base, aplicables sobre una instalación existente.</summary>
-public sealed record ModuleUpgrade(string Version, string Description, ChangePlan Plan);
+/// <summary>Spec 008: <c>Roles</c> son roles nuevos (con sus permisos) que la versión agrega, p. ej. un rol de servicio.</summary>
+public sealed record ModuleUpgrade(string Version, string Description, ChangePlan Plan, IReadOnlyList<ModuleRole>? Roles = null);
 
 public sealed record ModulePackage(string Id, string Name, string Version, string Icon, string Description,
     ChangePlan Plan, IReadOnlyList<ModuleRole> Roles, IReadOnlyList<ModuleSeed> Seed, IReadOnlyList<ModuleUpgrade>? Upgrades = null,
@@ -27,6 +28,9 @@ public sealed record ModulePackage(string Id, string Name, string Version, strin
 
     public IReadOnlyList<ModuleUpgrade> PendingAfter(string installed) =>
         (Upgrades ?? []).Where(u => System.Version.Parse(u.Version) > System.Version.Parse(installed)).ToList();
+
+    /// <summary>Roles de la base y de todas las actualizaciones (instalación nueva).</summary>
+    public IReadOnlyList<ModuleRole> AllRoles => [.. Roles, .. (Upgrades ?? []).SelectMany(u => u.Roles ?? [])];
 }
 
 public sealed record ModuleInfo(string Id, string Name, string Description, string Icon, string Version, bool Installed,
@@ -83,7 +87,7 @@ public sealed partial class ModuleService(Db db, MetadataStore store, PlanServic
     public async Task<object> PreviewAsync(string id, CancellationToken ct)
     {
         var p = Find(id);
-        var preview = await plans.PreviewChainAsync(p.FullChain, p.Roles.Select(r => r.Name).ToHashSet(StringComparer.OrdinalIgnoreCase), ct);
+        var preview = await plans.PreviewChainAsync(p.FullChain, p.AllRoles.Select(r => r.Name).ToHashSet(StringComparer.OrdinalIgnoreCase), ct);
         await using var cn = await db.OpenAsync(ct);
         var existing = (await PlanService.LoadRolesAsync(cn, null));
         return new
@@ -91,7 +95,7 @@ public sealed partial class ModuleService(Db db, MetadataStore store, PlanServic
             preview.Valid,
             preview.Errors,
             preview.Steps,
-            roles = p.Roles.Select(r => r.Name).Where(n => !existing.Contains(n)).ToList(),
+            roles = p.AllRoles.Select(r => r.Name).Where(n => !existing.Contains(n)).ToList(),
             seedRecords = p.Seed.Sum(s => s.Records.Count),
         };
     }
@@ -110,16 +114,8 @@ public sealed partial class ModuleService(Db db, MetadataStore store, PlanServic
         if (Missing(p, installedIds).Select(Name).ToList() is { Count: > 0 } missing)
             throw new Conflict($"Requiere el módulo {string.Join(" y ", missing)}. Instálalo primero.");
 
-        // 1) Roles primero: el plan los usa en reglas y transiciones.
-        var roleIds = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        foreach (var r in p.Roles)
-        {
-            roleIds[r.Name] = await cn.ExecuteScalarAsync<int?>("SELECT Id FROM meta.Role WHERE Name = @Name", new { r.Name }, tx)
-                ?? await cn.ExecuteScalarAsync<int>("""
-                    INSERT meta.Role (Name, Description, CanManageModel, CanManageUsers, CanViewAudit)
-                    OUTPUT inserted.Id VALUES (@Name, @Description, @CanManageModel, @CanManageUsers, @CanViewAudit)
-                    """, new { r.Name, r.Description, r.CanManageModel, r.CanManageUsers, r.CanViewAudit }, tx);
-        }
+        // 1) Roles primero: el plan los usa en reglas, transiciones y webhooks.
+        var roleIds = await EnsureRolesAsync(cn, tx, p.AllRoles);
 
         // 2) Modelo: plan base y luego cada actualización, en orden (spec 004 · H2 CA1).
         var changeSetId = 0;
@@ -128,18 +124,7 @@ public sealed partial class ModuleService(Db db, MetadataStore store, PlanServic
         var model = await MetadataStore.LoadAsync(cn, tx);
 
         // 3) Permisos por catálogo.
-        foreach (var r in p.Roles)
-        foreach (var perm in r.Permissions)
-        {
-            if (!model.TryGetValue(perm.Entity, out var e)) throw new AppException(400, $"El módulo da permisos sobre '{perm.Entity}', que no existe.");
-            await cn.ExecuteAsync("""
-                MERGE meta.EntityPermission AS t
-                USING (SELECT @RoleId AS RoleId, @Entity AS EntityName) AS s ON t.RoleId = s.RoleId AND t.EntityName = s.EntityName
-                WHEN MATCHED THEN UPDATE SET CanRead = @CanRead, CanCreate = @CanCreate, CanUpdate = @CanUpdate, CanDelete = @CanDelete
-                WHEN NOT MATCHED THEN INSERT (RoleId, EntityName, CanRead, CanCreate, CanUpdate, CanDelete)
-                    VALUES (@RoleId, @Entity, @CanRead, @CanCreate, @CanUpdate, @CanDelete);
-                """, new { RoleId = roleIds[r.Name], Entity = e.Name, perm.CanRead, perm.CanCreate, perm.CanUpdate, perm.CanDelete }, tx);
-        }
+        await GrantAsync(cn, tx, p.AllRoles, roleIds, model);
 
         // 4) Datos iniciales, por el mismo motor que la captura (valores por defecto, fórmulas, reglas, folios).
         var seeded = 0;
@@ -161,7 +146,7 @@ public sealed partial class ModuleService(Db db, MetadataStore store, PlanServic
         await cn.ExecuteAsync("INSERT meta.Module (Id, Version, InstalledBy) VALUES (@Id, @Version, @UserId)",
             new { p.Id, p.Version, UserId = user.Id }, tx);
         await Audit.WriteAsync(cn, tx, http, "module.install", "Modulo", p.Id,
-            after: new { p.Id, p.Version, changeSetId, roles = p.Roles.Select(r => r.Name), seeded });
+            after: new { p.Id, p.Version, changeSetId, roles = p.AllRoles.Select(r => r.Name), seeded });
         await tx.CommitAsync(ct);
         store.Invalidate();
         return changeSetId;
@@ -172,8 +157,11 @@ public sealed partial class ModuleService(Db db, MetadataStore store, PlanServic
         var p = Find(id);
         var pending = p.PendingAfter(await InstalledVersionAsync(id) ?? throw new Conflict("El módulo no está instalado."));
         if (pending.Count == 0) throw new Conflict("El módulo ya está en la versión más reciente.");
-        var preview = await plans.PreviewChainAsync(pending.Select(u => ($"v{u.Version}", u.Plan)).ToList(), new HashSet<string>(), ct);
-        return new { preview.Valid, preview.Errors, preview.Steps, roles = Array.Empty<string>(), seedRecords = 0,
+        var newRoles = pending.SelectMany(u => u.Roles ?? []).Select(r => r.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var preview = await plans.PreviewChainAsync(pending.Select(u => ($"v{u.Version}", u.Plan)).ToList(), newRoles, ct);
+        await using var cn = await db.OpenAsync(ct);
+        var existing = await PlanService.LoadRolesAsync(cn, null);
+        return new { preview.Valid, preview.Errors, preview.Steps, roles = newRoles.Where(n => !existing.Contains(n)).ToList(), seedRecords = 0,
             versions = pending.Select(u => new { u.Version, u.Description }) };
     }
 
@@ -189,15 +177,51 @@ public sealed partial class ModuleService(Db db, MetadataStore store, PlanServic
         var pending = p.PendingAfter(installed);
         if (pending.Count == 0) throw new Conflict("El módulo ya está en la versión más reciente.");
 
+        // Spec 008: los roles nuevos de cada versión existen antes del plan (los usan sus webhooks) y reciben permisos después.
+        var newRoles = pending.SelectMany(u => u.Roles ?? []).ToList();
+        var roleIds = await EnsureRolesAsync(cn, tx, newRoles);
         var changeSetId = 0;
         foreach (var u in pending)
             changeSetId = await plans.ApplyInTransactionAsync(cn, tx, u.Plan with { Description = $"{p.Name} {u.Version}: {u.Description}" }, http);
+        await GrantAsync(cn, tx, newRoles, roleIds, await MetadataStore.LoadAsync(cn, tx));
         await cn.ExecuteAsync("UPDATE meta.Module SET Version = @Version WHERE Id = @id", new { id, p.Version }, tx);
         await Audit.WriteAsync(cn, tx, http, "module.upgrade", "Modulo", p.Id,
-            before: new { version = installed }, after: new { version = p.Version, changeSetId, applied = pending.Select(u => u.Version) });
+            before: new { version = installed }, after: new { version = p.Version, changeSetId, applied = pending.Select(u => u.Version), roles = newRoles.Select(r => r.Name) });
         await tx.CommitAsync(ct);
         store.Invalidate();
         return changeSetId;
+    }
+
+    /// <summary>Crea los roles que falten (los existentes se conservan tal cual) y devuelve el id de cada uno.</summary>
+    private static async Task<Dictionary<string, int>> EnsureRolesAsync(SqlConnection cn, SqlTransaction tx, IEnumerable<ModuleRole> roles)
+    {
+        var roleIds = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var r in roles)
+        {
+            roleIds[r.Name] = await cn.ExecuteScalarAsync<int?>("SELECT Id FROM meta.Role WHERE Name = @Name", new { r.Name }, tx)
+                ?? await cn.ExecuteScalarAsync<int>("""
+                    INSERT meta.Role (Name, Description, CanManageModel, CanManageUsers, CanViewAudit)
+                    OUTPUT inserted.Id VALUES (@Name, @Description, @CanManageModel, @CanManageUsers, @CanViewAudit)
+                    """, new { r.Name, r.Description, r.CanManageModel, r.CanManageUsers, r.CanViewAudit }, tx);
+        }
+        return roleIds;
+    }
+
+    private static async Task GrantAsync(SqlConnection cn, SqlTransaction tx, IEnumerable<ModuleRole> roles, Dictionary<string, int> roleIds,
+        IReadOnlyDictionary<string, EntityDef> model)
+    {
+        foreach (var r in roles)
+        foreach (var perm in r.Permissions)
+        {
+            if (!model.TryGetValue(perm.Entity, out var e)) throw new AppException(400, $"El módulo da permisos sobre '{perm.Entity}', que no existe.");
+            await cn.ExecuteAsync("""
+                MERGE meta.EntityPermission AS t
+                USING (SELECT @RoleId AS RoleId, @Entity AS EntityName) AS s ON t.RoleId = s.RoleId AND t.EntityName = s.EntityName
+                WHEN MATCHED THEN UPDATE SET CanRead = @CanRead, CanCreate = @CanCreate, CanUpdate = @CanUpdate, CanDelete = @CanDelete
+                WHEN NOT MATCHED THEN INSERT (RoleId, EntityName, CanRead, CanCreate, CanUpdate, CanDelete)
+                    VALUES (@RoleId, @Entity, @CanRead, @CanCreate, @CanUpdate, @CanDelete);
+                """, new { RoleId = roleIds[r.Name], Entity = e.Name, perm.CanRead, perm.CanCreate, perm.CanUpdate, perm.CanDelete }, tx);
+        }
     }
 
     private async Task<string?> InstalledVersionAsync(string id)

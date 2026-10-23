@@ -137,6 +137,18 @@ function ModuleDialog({ module: m, mode, onClose, onDone }: { module: ModuleInfo
       )}
       {preview && (
         <div className="stack">
+          {/* Regresión (revisión exploratoria 008, F-01): una actualización también puede crear roles (de servicio). */}
+          {upgrade && preview.roles.length > 0 && (
+            <div className="module-summary">
+              <div className="module-summary-item">
+                <ShieldCheck size={16} aria-hidden />
+                <div>
+                  <div className="subtle">Roles que se crearán</div>
+                  <div>{preview.roles.join(', ')}</div>
+                </div>
+              </div>
+            </div>
+          )}
           {!upgrade && (
             <div className="module-summary">
               <div className="module-summary-item">

@@ -101,6 +101,77 @@ export interface ReportDef {
   limit?: number;
   chart?: 'bar' | 'line' | 'pie';
 }
+// ---------- Spec 008: integraciones ----------
+export interface WebhookEvent { on: 'create' | 'update' | 'enterState' | 'transition'; state?: string | null; transition?: string | null }
+export interface WebhookDef {
+  name: string;
+  label: string;
+  description?: string;
+  events: WebhookEvent[];
+  when?: string;
+  role: string;
+  fields?: string[];
+}
+export interface WebhookSummary {
+  entity: string;
+  entityLabel: string;
+  name: string;
+  label: string;
+  description?: string | null;
+  events: WebhookEvent[];
+  role: string;
+  fields?: string[] | null;
+  configured: boolean;
+  active: boolean;
+  destination?: string | null;
+  secretCreatedAt?: string | null;
+  lastStatus?: DeliveryStatus | null;
+  lastAt?: string | null;
+}
+export type DeliveryStatus = 'pending' | 'delivered' | 'failed' | 'canceled';
+export interface WebhookDelivery {
+  id: number;
+  deliveryId: string;
+  entity: string;
+  webhook: string;
+  event: string;
+  eventKey?: string | null;
+  recordId?: number | null;
+  status: DeliveryStatus;
+  attempts: number;
+  lastStatusCode?: number | null;
+  lastError?: string | null;
+  createdAt: string;
+  nextAttemptAt?: string | null;
+  deliveredAt?: string | null;
+}
+export interface ApiKey {
+  id: number;
+  name: string;
+  prefix: string;
+  roleIds: number[];
+  username: string;
+  createdAt: string;
+  createdBy: string;
+  expiresAt?: string | null;
+  lastUsedAt?: string | null;
+  rotatedAt?: string | null;
+  previousExpiresAt?: string | null;
+  revokedAt?: string | null;
+  status: 'active' | 'expired' | 'revoked';
+}
+export interface ImportColumn { column: string; field?: string | null; label?: string | null; status: 'ok' | 'ignored' | 'error'; message?: string | null }
+export interface ImportResult {
+  dryRun: boolean;
+  format: 'csv' | 'xlsx';
+  total: number;
+  imported: number;
+  valid: boolean;
+  columns: ImportColumn[];
+  errors: { row: number; column?: string | null; field?: string | null; message: string }[];
+  truncatedErrors: boolean;
+}
+
 export interface ReportSummary { entity: string; entityLabel: string; group?: string | null; name: string; label: string; description?: string | null; chart?: string | null }
 export interface ReportColumn { key: string; label: string; kind: 'group' | 'measure'; type: 'text' | 'number' | 'date' | 'boolean'; scale?: number | null }
 export interface ReportResult {
@@ -202,6 +273,8 @@ export interface EntityDef {
   /** Spec 007: solo la reciben los modeladores. */
   views?: ViewDef[] | null;
   reports?: ReportDef[] | null;
+  /** Spec 008: solo la reciben los modeladores. */
+  webhooks?: WebhookDef[] | null;
   isChild?: boolean;
   parentEntity?: string;
 }
@@ -235,6 +308,7 @@ export type Operation =
   | { op: 'setLayout'; entity: string; layout: Layout | null }
   | { op: 'setViews'; entity: string; views: ViewDef[] }
   | { op: 'setReports'; entity: string; reports: ReportDef[] }
+  | { op: 'setWebhooks'; entity: string; webhooks: WebhookDef[] }
   | { op: 'setDashboard'; dashboard: DashboardDef }
   | { op: 'archiveDashboard'; name: string };
 

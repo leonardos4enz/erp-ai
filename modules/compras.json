@@ -1,7 +1,7 @@
 {
   "id": "compras",
   "name": "Compras",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "icon": "shopping-cart",
   "description": "Requisiciones, órdenes de compra con autorización por montos y recepción de mercancía con cantidades recibidas y pendientes. Incluye proveedores, productos y catálogos base.",
   "plan": {
@@ -431,6 +431,26 @@
               { "type": "chart", "entity": "OrdenCompra", "report": "ComprasPorProveedor", "measure": 1, "wide": true },
               { "type": "table", "entity": "OrdenCompraPartida", "report": "ProductosMasComprados", "wide": true }
             ] } }
+      ] } },
+    { "version": "1.5.0",
+      "description": "Integraciones: rol de servicio «Integración de almacén» (sin acceso a importes) y webhook «Orden autorizada», que avisa al sistema del almacén cuando una orden se autoriza. El destino se configura en cada entorno.",
+      "roles": [
+        { "name": "Integración de almacén", "description": "Rol de servicio: el sistema del almacén consulta órdenes autorizadas, sin precios ni importes.", "canManageModel": false, "canManageUsers": false, "canViewAudit": false,
+          "permissions": [
+            { "entity": "OrdenCompra", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false },
+            { "entity": "Proveedor", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false },
+            { "entity": "Producto", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false },
+            { "entity": "Almacen", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false },
+            { "entity": "UnidadMedida", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false }
+          ] }
+      ],
+      "plan": { "description": "Compras 1.5.0", "operations": [
+        { "op": "setWebhooks", "entity": "OrdenCompra", "webhooks": [
+            { "name": "OrdenAutorizada", "label": "Orden autorizada",
+              "description": "Avisa al almacén qué llegará, a dónde y cuándo. Sin importes: el rol de servicio no los ve.",
+              "events": [{ "on": "enterState", "state": "Autorizada" }], "role": "Integración de almacén",
+              "fields": ["Folio", "Proveedor", "Fecha", "FechaEntrega", "Almacen", "Estado", "Partidas"] }
+          ] }
       ] } }
   ],
   "roles": [    { "name": "Solicitante", "description": "Crea y envía requisiciones de compra.", "canManageModel": false, "canManageUsers": false, "canViewAudit": false,

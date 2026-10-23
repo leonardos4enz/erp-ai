@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { ArrowDown, ArrowUp, ArrowUpDown, BookmarkPlus, ChevronLeft, ChevronRight, Columns3, Filter, Inbox, Plus, Search, SearchX, Trash2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, BookmarkPlus, ChevronLeft, ChevronRight, Columns3, Download, Filter, Inbox, Plus, Search, SearchX, Trash2, Upload } from 'lucide-react';
 import { ApiError, fieldError } from '../api/client';
 import { dataApi, viewsApi } from '../api/endpoints';
 import type { EntityDef, RowList, SavedView, StateCount, ViewFilter, ViewList } from '../api/types';
@@ -8,6 +8,7 @@ import { useAuth } from '../auth/AuthContext';
 import { ConfirmDialog, Dialog } from '../components/Dialog';
 import { resolveIcon } from '../components/DynamicIcon';
 import { FilterChips, FilterDialog, filterableFields } from '../components/FilterBuilder';
+import { ExportDialog, ImportDialog } from '../components/ImportExport';
 import { useToast } from '../components/Toast';
 import { Alert, Button, Checkbox, EmptyState, Input, LoadingBlock, PageHeader, Select, Spinner } from '../components/ui';
 import { activeFields, CellValue, isNumericField, stateTone, useEntityDef } from '../lib/entity';
@@ -65,6 +66,10 @@ export function EntityListPage() {
   const [columnsOpen, setColumnsOpen] = useState(false);
   const [saveOpen, setSaveOpen] = useState(false);
   const [confirmDeleteView, setConfirmDeleteView] = useState(false);
+  // Spec 008: exportar la vista actual e importar registros.
+  const [exportOpen, setExportOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [reload, setReload] = useState(0);
   const debouncedSearch = useDebounced(search, 300);
 
   function update(next: Record<string, string | undefined>) {
@@ -86,7 +91,7 @@ export function EntityListPage() {
   const p = perms(entity);
   const { data, loading, error } = useAsync<RowList | undefined>(
     (signal) => (def && p.read ? dataApi.list(def.name, { page, pageSize, search: params.get('search') ?? undefined, sort, dir, state, filters }, signal) : Promise.resolve(undefined)),
-    [def?.name, page, pageSize, params.get('search'), sort, dir, state, filtersRaw, p.read],
+    [def?.name, page, pageSize, params.get('search'), sort, dir, state, filtersRaw, p.read, reload],
   );
 
   // Spec 007: vistas compartidas (por rol) y personales.
@@ -194,6 +199,9 @@ export function EntityListPage() {
           {currentView?.personal && (
             <Button size="sm" variant="ghost" icon={Trash2} onClick={() => setConfirmDeleteView(true)}>Eliminar vista</Button>
           )}
+          <span className="spacer" />
+          <Button size="sm" icon={Download} onClick={() => setExportOpen(true)} aria-haspopup="dialog">Exportar</Button>
+          {canCreate && <Button size="sm" icon={Upload} onClick={() => setImportOpen(true)} aria-haspopup="dialog">Importar</Button>}
         </div>
       )}
       <FilterChips def={def} filters={filters} onRemove={(i) => setFilters(filters.filter((_, j) => j !== i))} />
@@ -296,6 +304,12 @@ export function EntityListPage() {
         </div>
       )}
 
+      <ExportDialog open={exportOpen} def={def} onClose={() => setExportOpen(false)} columns={columns.map((c) => c.name)}
+        query={{ search: params.get('search') ?? undefined, sort, dir: sort ? dir : undefined, state, filters }} />
+      {canCreate && (
+        <ImportDialog open={importOpen} def={def} onClose={() => setImportOpen(false)}
+          onImported={() => { setImportOpen(false); setReload((r) => r + 1); setCounts(undefined); }} />
+      )}
       <FilterDialog open={filtersOpen} def={def} filters={filters} onClose={() => setFiltersOpen(false)}
         onApply={(f) => { setFiltersOpen(false); setFilters(f); }} />
       <ColumnsDialog open={columnsOpen} def={def} current={columns.map((c) => c.name)} onClose={() => setColumnsOpen(false)}

@@ -406,10 +406,12 @@ public class InterfaceTests
         var json = new JsonSerializerOptions(JsonSerializerDefaults.Web);
         IReadOnlyDictionary<string, EntityDef> model = new Dictionary<string, EntityDef>(StringComparer.OrdinalIgnoreCase);
         IReadOnlyDictionary<string, DashboardDef> boards = new Dictionary<string, DashboardDef>(StringComparer.OrdinalIgnoreCase);
+        // Spec 008: los roles se acumulan como en la base real (los webhooks de Compras usan su rol de servicio aunque el plan sea de Inventario).
+        var roles = new HashSet<string>(["Administrador"], StringComparer.OrdinalIgnoreCase);
         foreach (var file in new[] { "compras.json", "inventario.json" })
         {
             var p = JsonSerializer.Deserialize<ModulePackage>(File.ReadAllText(Path.Combine(ModulesFolder(), file)), json)!;
-            var roles = p.Roles.Select(r => r.Name).Concat(["Administrador", "Solicitante", "Comprador", "Gerente de compras", "Director", "Almacenista"]).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            roles.UnionWith(p.AllRoles.Select(r => r.Name));
             foreach (var (label, plan) in p.FullChain)
             {
                 var c = PlanCompiler.Compile(plan, model, roles, boards);
@@ -419,5 +421,7 @@ public class InterfaceTests
         }
         Assert.Equal(["Compras", "Inventario"], boards.Keys.Order());
         Assert.NotNull(model["OrdenCompra"].Layout);
+        Assert.Equal("OrdenAutorizada", model["OrdenCompra"].Webhooks!.Single().Name);
+        Assert.Equal("ExistenciaActualizada", model["Existencia"].Webhooks!.Single().Name);
     }
 }

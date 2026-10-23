@@ -48,6 +48,11 @@ export default defineConfig({
       Database__AutoCreate: 'true',
       Bootstrap__AdminPassword: process.env.E2E_ADMIN_PASSWORD,
       Security__LoginAttemptsPerMinute: '1000',
+      // Spec 008: el receptor de webhooks de la suite escucha en 127.0.0.1 por http; ninguna otra IP interna se permite.
+      Webhooks__AllowHttp: 'true',
+      Webhooks__AllowedInternalAddresses: '127.0.0.1',
+      Webhooks__PollSeconds: '1',
+      Webhooks__RetryDelaysSeconds: '1,1',
       Spa__Path: path.join(root, 'web', 'dist'),
     },
   },

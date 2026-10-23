@@ -151,9 +151,9 @@ public sealed class PlanService(Db db, MetadataStore store, JsonSerializerOption
             WHEN MATCHED THEN UPDATE SET Label = @Label, LabelPlural = @LabelPlural, Icon = @Icon,
                 Description = @Description, DisplayField = @DisplayField, IsArchived = @IsArchived,
                 WorkflowJson = @WorkflowJson, RulesJson = @RulesJson, GroupName = @Group, AutomationsJson = @AutomationsJson, SecurityJson = @SecurityJson,
-                LayoutJson = @LayoutJson, ViewsJson = @ViewsJson, ReportsJson = @ReportsJson, UpdatedAt = SYSUTCDATETIME()
-            WHEN NOT MATCHED THEN INSERT (Name, Label, LabelPlural, Icon, Description, DisplayField, IsArchived, WorkflowJson, RulesJson, GroupName, AutomationsJson, SecurityJson, LayoutJson, ViewsJson, ReportsJson)
-                VALUES (@Name, @Label, @LabelPlural, @Icon, @Description, @DisplayField, @IsArchived, @WorkflowJson, @RulesJson, @Group, @AutomationsJson, @SecurityJson, @LayoutJson, @ViewsJson, @ReportsJson)
+                LayoutJson = @LayoutJson, ViewsJson = @ViewsJson, ReportsJson = @ReportsJson, WebhooksJson = @WebhooksJson, UpdatedAt = SYSUTCDATETIME()
+            WHEN NOT MATCHED THEN INSERT (Name, Label, LabelPlural, Icon, Description, DisplayField, IsArchived, WorkflowJson, RulesJson, GroupName, AutomationsJson, SecurityJson, LayoutJson, ViewsJson, ReportsJson, WebhooksJson)
+                VALUES (@Name, @Label, @LabelPlural, @Icon, @Description, @DisplayField, @IsArchived, @WorkflowJson, @RulesJson, @Group, @AutomationsJson, @SecurityJson, @LayoutJson, @ViewsJson, @ReportsJson, @WebhooksJson)
             OUTPUT inserted.Id;
             """, new
         {
@@ -165,6 +165,7 @@ public sealed class PlanService(Db db, MetadataStore store, JsonSerializerOption
             LayoutJson = e.Layout is null ? null : JsonSerializer.Serialize(e.Layout, MetadataStore.Json),
             ViewsJson = e.Views is null ? null : JsonSerializer.Serialize(e.Views, MetadataStore.Json),
             ReportsJson = e.Reports is null ? null : JsonSerializer.Serialize(e.Reports, MetadataStore.Json),
+            WebhooksJson = e.Webhooks is null ? null : JsonSerializer.Serialize(e.Webhooks, MetadataStore.Json),
         }, tx);
 
         foreach (var f in e.Fields)

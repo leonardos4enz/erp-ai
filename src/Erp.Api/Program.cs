@@ -4,10 +4,12 @@ using System.Threading.RateLimiting;
 using Erp.Api.Data;
 using Erp.Api.Endpoints;
 using Erp.Api.Infrastructure;
+using Erp.Api.Integrations;
 using Erp.Api.Metadata;
 using Erp.Api.Security;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http.Json;
 using Microsoft.Extensions.FileProviders;
 
@@ -43,9 +45,24 @@ builder.Services.AddScoped<RecordService>();
 builder.Services.AddScoped<ModuleService>();
 builder.Services.AddScoped<ReportService>();
 builder.Services.AddScoped<ViewService>();
+// Spec 008: integraciones. Las llaves de Data Protection (cifran destino y secreto de webhooks) viven fuera del repositorio.
+var dp = builder.Services.AddDataProtection().SetApplicationName("ErpAi");
+if (builder.Configuration["DataProtection:KeysPath"] is { Length: > 0 } keysPath) dp.PersistKeysToFileSystem(new DirectoryInfo(keysPath));
+var webhookOptions = WebhookOptions.From(builder.Configuration);
+builder.Services.AddSingleton(webhookOptions);
+builder.Services.AddSingleton(new WebhookUrlPolicy(webhookOptions.AllowHttp, webhookOptions.AllowedInternal));
+builder.Services.AddSingleton<WebhookSecrets>();
+builder.Services.AddSingleton<WebhookSender>();
+builder.Services.AddScoped<WebhookService>();
+builder.Services.AddScoped<ApiKeyService>();
+builder.Services.AddHostedService<WebhookDispatcher>();
 
 // ---------- Autenticación: cookie (ADR-0002) ----------
-builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+// Spec 008: con «Authorization: Bearer» se usa la clave de API (y nunca la cookie); si no, la cookie.
+builder.Services.AddAuthentication("erp")
+    .AddPolicyScheme("erp", "erp", o => o.ForwardDefaultSelector = http =>
+        ApiKeyHandler.IsBearer(http.Request) ? ApiKeyHandler.SchemeName : CookieAuthenticationDefaults.AuthenticationScheme)
+    .AddScheme<AuthenticationSchemeOptions, ApiKeyHandler>(ApiKeyHandler.SchemeName, null)
     .AddCookie(o =>
     {
         o.Cookie.Name = "erp.auth";
@@ -64,7 +81,7 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
             var ok = int.TryParse(c.Principal?.FindFirstValue(ClaimTypes.NameIdentifier), out var id)
                      & Guid.TryParse(c.Principal?.FindFirstValue(AuthEndpoints.StampClaim), out var stamp);
             var user = ok ? await loader.LoadAsync(id, stamp, c.HttpContext.RequestAborted) : null;
-            if (user is null)
+            if (user is null || user.IsService)
             {
                 c.RejectPrincipal();
                 await c.HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
@@ -116,6 +133,7 @@ if (spaFiles is not null)
 }
 
 app.UseAuthentication();
+app.UseApiKeyScope();
 app.UseRateLimiter();
 app.UseAuthorization();
 app.UseCsrfHeaderCheck();
@@ -126,6 +144,7 @@ app.MapData();
 app.MapAdmin();
 app.MapAudit();
 app.MapAnalytics();
+app.MapIntegrations();
 app.MapGet("/api/health", () => Results.Ok(new { status = "ok" })).AllowAnonymous();
 app.MapFallback("/api/{**path}", () => Results.Problem(title: "Ruta no encontrada.", statusCode: 404));
 

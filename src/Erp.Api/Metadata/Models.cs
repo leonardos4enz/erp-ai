@@ -380,6 +380,31 @@ public sealed record DashboardDef
     public bool IsArchived { get; init; }
 }
 
+// ---------- Spec 008: integraciones ----------
+
+/// <summary>Evento que dispara un webhook: los mismos de las automatizaciones (spec 005).</summary>
+public sealed record WebhookEvent
+{
+    public required string On { get; init; }
+    public string? State { get; init; }
+    public string? Transition { get; init; }
+}
+
+/// <summary>
+/// Qué se avisa y con qué permisos (<c>Role</c>: rol de servicio, spec 006). El destino y el secreto no son metadatos:
+/// se configuran por entorno (ver plan 008).
+/// </summary>
+public sealed record WebhookDef
+{
+    public required string Name { get; init; }
+    public required string Label { get; init; }
+    public string? Description { get; init; }
+    public IReadOnlyList<WebhookEvent> Events { get; init; } = [];
+    public string? When { get; init; }
+    public required string Role { get; init; }
+    public IReadOnlyList<string>? Fields { get; init; }
+}
+
 public sealed record EntityDef
 {
     public required string Name { get; init; }
@@ -402,6 +427,8 @@ public sealed record EntityDef
     public IReadOnlyList<ViewDef>? Views { get; init; }
     /// <summary>Spec 007: reportes (solo se envían a modeladores; los usuarios los consultan por /api/reports).</summary>
     public IReadOnlyList<ReportDef>? Reports { get; init; }
+    /// <summary>Spec 008: webhooks salientes (solo se envían a modeladores; el destino se configura por entorno).</summary>
+    public IReadOnlyList<WebhookDef>? Webhooks { get; init; }
 
     public bool SystemManaged => Security?.SystemManaged == true;
 
@@ -446,7 +473,15 @@ public sealed record ChangePlan
 [JsonDerivedType(typeof(SetReportsOp), "setReports")]
 [JsonDerivedType(typeof(SetDashboardOp), "setDashboard")]
 [JsonDerivedType(typeof(ArchiveDashboardOp), "archiveDashboard")]
+[JsonDerivedType(typeof(SetWebhooksOp), "setWebhooks")]
 public abstract record Operation;
+
+/// <summary>Spec 008. Reemplaza los webhooks del catálogo.</summary>
+public sealed record SetWebhooksOp : Operation
+{
+    public required string Entity { get; init; }
+    public IReadOnlyList<WebhookDef> Webhooks { get; init; } = [];
+}
 
 /// <summary>Spec 007. <c>null</c> elimina el layout (formulario derivado del orden de los campos).</summary>
 public sealed record SetLayoutOp : Operation

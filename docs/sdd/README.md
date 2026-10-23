@@ -51,4 +51,5 @@ y cada sesión queda como registro de una sola entrega. Al cerrar la spec:
 | 005 | [Automatizaciones entre registros, cantidades e Inventario](specs/005-automatizaciones-inventario/spec.md) | Implementado |
 | 006 | [Seguridad por campo y por registro](specs/006-seguridad-campos-registros/spec.md) | Implementado |
 | 007 | [Metadatos de interfaz: layouts, vistas, reportes y tableros](specs/007-metadatos-interfaz/spec.md) | Implementado |
-| 008–011 | Integraciones, entornos, multi-empresa, IA | [Roadmap](roadmap.md) |
+| 008 | [Integraciones: webhooks, claves de API, importación y exportación](specs/008-integraciones/spec.md) | Implementado |
+| 009–011 | Entornos, multi-empresa, IA | [Roadmap](roadmap.md) |

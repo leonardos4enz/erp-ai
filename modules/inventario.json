@@ -1,7 +1,7 @@
 {
   "id": "inventario",
   "name": "Inventario",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "icon": "boxes",
   "description": "Existencias por almacén y producto, y movimientos de entrada, salida, ajuste y traspaso. Las recepciones confirmadas de Compras generan sus entradas solas.",
   "requires": ["compras"],
@@ -149,6 +149,24 @@
               { "type": "chart", "entity": "Existencia", "report": "PorAlmacen", "wide": true },
               { "type": "table", "entity": "MovimientoInventario", "report": "PorMes", "wide": true }
             ] } }
+      ] } },
+    { "version": "1.3.0",
+      "description": "Integraciones: rol de servicio «Integración de tienda» y webhook «Existencia actualizada», que avisa a la tienda en línea cada vez que cambia una existencia. El destino se configura en cada entorno.",
+      "roles": [
+        { "name": "Integración de tienda", "description": "Rol de servicio: la tienda en línea consulta existencias por producto y almacén.", "canManageModel": false, "canManageUsers": false, "canViewAudit": false,
+          "permissions": [
+            { "entity": "Existencia", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false },
+            { "entity": "Producto", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false },
+            { "entity": "Almacen", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false }
+          ] }
+      ],
+      "plan": { "description": "Inventario 1.3.0", "operations": [
+        { "op": "setWebhooks", "entity": "Existencia", "webhooks": [
+            { "name": "ExistenciaActualizada", "label": "Existencia actualizada",
+              "description": "La escribe el motor al aplicar movimientos; la tienda recibe almacén, producto y cantidad.",
+              "events": [{ "on": "create" }, { "on": "update" }], "role": "Integración de tienda",
+              "fields": ["Almacen", "Producto", "Cantidad", "BajoMinimo"] }
+          ] }
       ] } }
   ],
   "roles": [

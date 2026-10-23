@@ -39,13 +39,14 @@ public sealed partial class RecordService(Db db, MetadataStore store)
 
     // ======================= Lectura =======================
 
-    public async Task<ListResult> ListAsync(string entityName, ListQuery q, UserContext user, CancellationToken ct)
+    /// <param name="maxPageSize">Spec 008: la exportación pide más filas que una página de pantalla.</param>
+    public async Task<ListResult> ListAsync(string entityName, ListQuery q, UserContext user, CancellationToken ct, int maxPageSize = MaxPageSize)
     {
         var (e, model) = await RootEntityAsync(entityName, ct);
         Require(user.Access(e.Name).Read);
 
         var page = Math.Max(1, q.Page);
-        var size = Math.Clamp(q.PageSize, 1, MaxPageSize);
+        var size = Math.Clamp(q.PageSize, 1, maxPageSize);
         var (select, from) = SelectClause(e, model);
         var where = new StringBuilder("t.[IsDeleted] = 0");
 
@@ -191,7 +192,7 @@ public sealed partial class RecordService(Db db, MetadataStore store)
     {
         await using var cn = await db.OpenAsync(ct);
         await using var cmd = new SqlCommand(
-            "SELECT TOP 20 Id, DisplayName FROM meta.[User] WHERE IsActive = 1 AND (@s IS NULL OR DisplayName LIKE @s ESCAPE '\\' OR Username LIKE @s ESCAPE '\\') ORDER BY DisplayName", cn);
+            "SELECT TOP 20 Id, DisplayName FROM meta.[User] WHERE IsActive = 1 AND IsService = 0 AND (@s IS NULL OR DisplayName LIKE @s ESCAPE '\\' OR Username LIKE @s ESCAPE '\\') ORDER BY DisplayName", cn);
         var term = string.IsNullOrWhiteSpace(search) ? null : "%" + EscapeLike(search.Trim()[..Math.Min(search.Trim().Length, MaxSearchLength)]) + "%";
         cmd.Parameters.Add(new SqlParameter("@s", (object?)term ?? DBNull.Value));
         var list = new List<LookupItem>();

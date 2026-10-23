@@ -4,7 +4,7 @@ import {
 } from 'lucide-react';
 import { ApiError } from '../../api/client';
 import { adminApi } from '../../api/endpoints';
-import type { Automation, ChangePlan, EntityDef, FieldDef, FieldType, FormulaResultType, Layout, Operation, ReportDef, Rule, SecurityPolicy, ViewDef, Workflow } from '../../api/types';
+import type { Automation, ChangePlan, EntityDef, FieldDef, FieldType, FormulaResultType, Layout, Operation, ReportDef, Rule, SecurityPolicy, ViewDef, WebhookDef, Workflow } from '../../api/types';
 import { Dialog } from '../../components/Dialog';
 import { CURATED_ICONS, DynamicIcon } from '../../components/DynamicIcon';
 import { TagInput } from '../../components/TagInput';
@@ -67,6 +67,7 @@ interface Draft {
   layoutJson: string;
   viewsJson: string;
   reportsJson: string;
+  webhooksJson: string;
 }
 
 let keySeq = 0;
@@ -84,7 +85,7 @@ function draftFrom(def?: EntityDef): Draft {
   if (!def) {
     const f = blankField(0);
     f.label = 'Nombre'; f.name = 'Nombre'; f.required = true; f.maxLength = 150;
-    return { name: '', label: '', labelPlural: '', icon: 'package', description: '', displayField: '', group: '', fields: [f], rulesJson: '', workflowJson: '', automationsJson: '', securityJson: '', layoutJson: '', viewsJson: '', reportsJson: '' };
+    return { name: '', label: '', labelPlural: '', icon: 'package', description: '', displayField: '', group: '', fields: [f], rulesJson: '', workflowJson: '', automationsJson: '', securityJson: '', layoutJson: '', viewsJson: '', reportsJson: '', webhooksJson: '' };
   }
   const fields = def.fields
     .slice()
@@ -100,6 +101,7 @@ function draftFrom(def?: EntityDef): Draft {
     layoutJson: def.layout ? pretty(def.layout) : '',
     viewsJson: def.views?.length ? pretty(def.views) : '',
     reportsJson: def.reports?.length ? pretty(def.reports) : '',
+    webhooksJson: def.webhooks?.length ? pretty(def.webhooks) : '',
   };
 }
 
@@ -160,6 +162,11 @@ function behaviourOperations(entity: string, original: EntityDef | undefined, d:
   const reports = parseJson<ReportDef[]>(d.reportsJson, 'array');
   if (reports.ok && canonical(reports.value ?? []) !== canonical(original?.reports ?? [])) {
     ops.push({ op: 'setReports', entity, reports: reports.value ?? [] });
+  }
+  // Spec 008: el destino y el secreto no son metadatos (se configuran en Integraciones).
+  const webhooks = parseJson<WebhookDef[]>(d.webhooksJson, 'array');
+  if (webhooks.ok && canonical(webhooks.value ?? []) !== canonical(original?.webhooks ?? [])) {
+    ops.push({ op: 'setWebhooks', entity, webhooks: webhooks.value ?? [] });
   }
   return ops;
 }
@@ -264,6 +271,8 @@ function validate(d: Draft, isNew: boolean, existingNames: string[]): Record<str
   if (!views.ok) e.viewsJson = views.error;
   const reports = parseJson<ReportDef[]>(d.reportsJson, 'array');
   if (!reports.ok) e.reportsJson = reports.error;
+  const webhooks = parseJson<WebhookDef[]>(d.webhooksJson, 'array');
+  if (!webhooks.ok) e.webhooksJson = webhooks.error;
   return e;
 }
 
@@ -587,7 +596,7 @@ export function EntityEditor({ original, entities, onCancel, onReview }: EntityE
         </div>
       </section>
 
-      <details className="card card-pad advanced-section" open={!!(original?.rules?.length || original?.workflow || original?.automations?.length || original?.security || original?.layout || original?.views?.length || original?.reports?.length) || undefined}>
+      <details className="card card-pad advanced-section" open={!!(original?.rules?.length || original?.workflow || original?.automations?.length || original?.security || original?.layout || original?.views?.length || original?.reports?.length || original?.webhooks?.length) || undefined}>
         <summary className="advanced-summary">
           <span className="section-title">Reglas, proceso, automatizaciones, seguridad e interfaz</span>
           <span className="subtle">Avanzado · validaciones de negocio, estados del documento, efectos en otros registros y quién ve o edita qué</span>
@@ -669,6 +678,17 @@ export function EntityEditor({ original, entities, onCancel, onReview }: EntityE
             error={visibleErrors.reportsJson ?? (d.reportsJson ? parseJsonError(d.reportsJson, 'array') : undefined)}
             value={d.reportsJson}
             onChange={(e) => setD((s) => ({ ...s, reportsJson: e.target.value }))}
+          />
+          <Textarea
+            className="mono json-editor"
+            label="Webhooks (JSON)"
+            rows={10}
+            spellCheck={false}
+            placeholder={'[\n  { "name": "Alta", "label": "Registro nuevo", "events": [{ "on": "create" }],\n    "role": "Integración", "fields": ["Folio", "Nombre"] }\n]'}
+            hint="events (on: create, update, enterState con state, transition con transition), role (rol de servicio: se envía lo que ese rol ve), fields, when. El destino y el secreto se configuran en Integraciones."
+            error={visibleErrors.webhooksJson ?? (d.webhooksJson ? parseJsonError(d.webhooksJson, 'array') : undefined)}
+            value={d.webhooksJson}
+            onChange={(e) => setD((s) => ({ ...s, webhooksJson: e.target.value }))}
           />
         </div>
       </details>
