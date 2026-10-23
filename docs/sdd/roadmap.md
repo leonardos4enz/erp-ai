@@ -4,6 +4,20 @@ Origen: auditoría externa (2026-10-23) que comparó el proyecto con Salesforce,
 **Las observaciones son correctas.** Este documento las convierte en specs ordenadas por
 dependencia y valor. Cada una sigue el flujo SDD completo (spec → plan → tareas → verify).
 
+## Cómo se ejecuta
+**Una spec = una sesión nueva** (ver [README](README.md#una-spec-por-sesión)). Las specs se hacen
+en orden, no en paralelo: casi todas tocan el núcleo del motor (`PlanCompiler`, `RecordService`).
+
+| Spec | Estado |
+|---|---|
+| 005 Automatizaciones + inventario | **Siguiente** |
+| 006 Seguridad por campo/registro | Pendiente |
+| 007 Vistas, layouts, reportes | Pendiente |
+| 008 Integraciones | Pendiente |
+| 009 Entornos | Pendiente |
+| 010 Multi-empresa / multi-moneda | Pendiente |
+| 011 Asistente IA | Pendiente |
+
 ## Diagnóstico
 | Brecha señalada | Situación actual | Spec |
 |---|---|---|
