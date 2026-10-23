@@ -184,6 +184,48 @@ public static class Bootstrap
         IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_AuditLog_Entity')
             CREATE INDEX IX_AuditLog_Entity ON meta.AuditLog (EntityName, At DESC);
 
+        -- ---- Spec 002: migración idempotente sobre bases creadas con la spec 001 ----
+        IF COL_LENGTH('meta.Entity', 'WorkflowJson') IS NULL ALTER TABLE meta.Entity ADD WorkflowJson nvarchar(max) NULL;
+        IF COL_LENGTH('meta.Entity', 'RulesJson') IS NULL ALTER TABLE meta.Entity ADD RulesJson nvarchar(max) NULL;
+        IF COL_LENGTH('meta.Entity', 'GroupName') IS NULL ALTER TABLE meta.Entity ADD GroupName nvarchar(60) NULL;
+        IF COL_LENGTH('meta.Field', 'DefaultValue') IS NULL ALTER TABLE meta.Field ADD DefaultValue nvarchar(1000) NULL;
+        IF COL_LENGTH('meta.Field', 'Formula') IS NULL ALTER TABLE meta.Field ADD Formula nvarchar(1000) NULL;
+        IF COL_LENGTH('meta.Field', 'ResultType') IS NULL ALTER TABLE meta.Field ADD ResultType nvarchar(20) NULL;
+        IF COL_LENGTH('meta.Field', 'Prefix') IS NULL ALTER TABLE meta.Field ADD Prefix nvarchar(10) NULL;
+        IF COL_LENGTH('meta.Field', 'Padding') IS NULL ALTER TABLE meta.Field ADD Padding int NULL;
+        IF COL_LENGTH('meta.Field', 'ChildEntity') IS NULL ALTER TABLE meta.Field ADD ChildEntity nvarchar(50) NULL;
+
+        IF OBJECT_ID('meta.Sequence') IS NULL
+        CREATE TABLE meta.Sequence (
+            EntityName nvarchar(50) NOT NULL,
+            FieldName nvarchar(50) NOT NULL,
+            NextValue bigint NOT NULL,
+            PRIMARY KEY (EntityName, FieldName)
+        );
+
+        IF OBJECT_ID('meta.WorkflowHistory') IS NULL
+        CREATE TABLE meta.WorkflowHistory (
+            Id bigint IDENTITY PRIMARY KEY,
+            EntityName nvarchar(50) NOT NULL,
+            RecordId bigint NOT NULL,
+            FromState nvarchar(50) NULL,
+            ToState nvarchar(50) NOT NULL,
+            Transition nvarchar(50) NULL,
+            Comment nvarchar(1000) NULL,
+            UserId int NOT NULL REFERENCES meta.[User](Id),
+            At datetime2(3) NOT NULL DEFAULT SYSUTCDATETIME()
+        );
+        IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_WorkflowHistory_Record')
+            CREATE INDEX IX_WorkflowHistory_Record ON meta.WorkflowHistory (EntityName, RecordId, Id);
+
+        IF OBJECT_ID('meta.Module') IS NULL
+        CREATE TABLE meta.Module (
+            Id nvarchar(50) NOT NULL PRIMARY KEY,
+            Version nvarchar(20) NOT NULL,
+            InstalledAt datetime2(3) NOT NULL DEFAULT SYSUTCDATETIME(),
+            InstalledBy int NOT NULL REFERENCES meta.[User](Id)
+        );
+
         -- Constitución II.4: la auditoría es de solo inserción, incluso para la propia aplicación.
         IF OBJECT_ID('meta.TR_AuditLog_Immutable') IS NULL
             EXEC('CREATE TRIGGER meta.TR_AuditLog_Immutable ON meta.AuditLog INSTEAD OF UPDATE, DELETE AS

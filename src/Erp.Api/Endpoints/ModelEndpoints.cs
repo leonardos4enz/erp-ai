@@ -11,14 +11,16 @@ public static class ModelEndpoints
     {
         var g = app.MapGroup("/api/model").RequireAuthorization();
 
-        g.MapGet("/entities", async (HttpContext http, MetadataStore store, bool? includeArchived, CancellationToken ct) =>
+        g.MapGet("/entities", async (HttpContext http, MetadataStore store, bool? includeArchived, bool? includeChildren, CancellationToken ct) =>
         {
             var u = http.CurrentUser();
             var model = await store.GetAsync(ct);
             return model.Values
                 .Where(e => (includeArchived == true && u.CanManageModel) || !e.IsArchived)
+                // Las partidas no van en el menú: solo se piden para pintar el formulario de su documento.
+                .Where(e => includeChildren == true || !e.IsChild)
                 // Los modeladores ven todo el modelo; el resto, solo lo que puede leer o capturar.
-                .Where(e => u.CanManageModel || u.Access(e.Name).Read || u.Access(e.Name).Create)
+                .Where(e => u.CanManageModel || CanSee(u, e))
                 .OrderBy(e => e.LabelPlural)
                 .Select(e => ForUser(e, u))
                 .ToList();
@@ -28,7 +30,7 @@ public static class ModelEndpoints
         {
             var u = http.CurrentUser();
             var e = await store.GetActiveAsync(name, ct);
-            if (!u.CanManageModel && !u.Access(e.Name).Read && !u.Access(e.Name).Create) throw new Forbidden();
+            if (!u.CanManageModel && !CanSee(u, e)) throw new Forbidden();
             return ForUser(e, u);
         });
 
@@ -60,6 +62,13 @@ public static class ModelEndpoints
     private static void RequireModeler(HttpContext http)
     {
         if (!http.CurrentUser().CanManageModel) throw new Forbidden();
+    }
+
+    /// <summary>Las partidas heredan el permiso de su documento.</summary>
+    private static bool CanSee(UserContext u, EntityDef e)
+    {
+        var a = u.Access(e.IsChild ? e.ParentEntity! : e.Name);
+        return a.Read || a.Create;
     }
 
     /// <summary>Oculta los campos archivados a quien no modela.</summary>

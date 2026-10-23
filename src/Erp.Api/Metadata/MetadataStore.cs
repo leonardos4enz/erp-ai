@@ -42,17 +42,21 @@ public sealed class MetadataStore(Db db)
     internal static async Task<IReadOnlyDictionary<string, EntityDef>> LoadAsync(DbConnection cn, DbTransaction? tx)
     {
         var entities = await cn.QueryAsync<EntityRow>(
-            "SELECT Id, Name, Label, LabelPlural, Icon, Description, DisplayField, IsArchived FROM meta.Entity", transaction: tx);
+            "SELECT Id, Name, Label, LabelPlural, Icon, Description, DisplayField, IsArchived, WorkflowJson, RulesJson, GroupName FROM meta.Entity",
+            transaction: tx);
         var fields = (await cn.QueryAsync<FieldRow>("""
             SELECT EntityId, Name, Label, Type, IsRequired, IsUnique, MaxLength, [Precision], Scale, OptionsJson,
-                   ReferenceEntity, DisplayOrder, ShowInList, RequiredForRolesJson, IsArchived
+                   ReferenceEntity, DisplayOrder, ShowInList, RequiredForRolesJson, IsArchived,
+                   DefaultValue, Formula, ResultType, Prefix, Padding, ChildEntity
               FROM meta.Field
             """, transaction: tx)).ToLookup(f => f.EntityId);
 
         return entities.ToDictionary(e => e.Name, e => new EntityDef
         {
             Name = e.Name, Label = e.Label, LabelPlural = e.LabelPlural, Icon = e.Icon,
-            Description = e.Description, DisplayField = e.DisplayField, IsArchived = e.IsArchived,
+            Description = e.Description, DisplayField = e.DisplayField, IsArchived = e.IsArchived, Group = e.GroupName,
+            Workflow = e.WorkflowJson is null ? null : JsonSerializer.Deserialize<Workflow>(e.WorkflowJson, Json),
+            Rules = e.RulesJson is null ? null : JsonSerializer.Deserialize<List<BusinessRule>>(e.RulesJson, Json),
             Fields = fields[e.Id].OrderBy(f => f.DisplayOrder).Select(f => new FieldDef
             {
                 Name = f.Name, Label = f.Label, Type = f.Type, Required = f.IsRequired, Unique = f.IsUnique,
@@ -60,17 +64,23 @@ public sealed class MetadataStore(Db db)
                 Options = ParseList(f.OptionsJson), ReferenceEntity = f.ReferenceEntity,
                 DisplayOrder = f.DisplayOrder, ShowInList = f.ShowInList,
                 RequiredForRoles = ParseList(f.RequiredForRolesJson), IsArchived = f.IsArchived,
+                DefaultValue = f.DefaultValue, Formula = f.Formula, ResultType = f.ResultType,
+                Prefix = f.Prefix, Padding = f.Padding, ChildEntity = f.ChildEntity,
             }).ToList(),
         }, StringComparer.OrdinalIgnoreCase);
     }
+
+    /// <summary>Mismas opciones al guardar y leer el JSON de procesos y reglas.</summary>
+    internal static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
     private static List<string>? ParseList(string? json) =>
         string.IsNullOrEmpty(json) ? null : JsonSerializer.Deserialize<List<string>>(json);
 
     private sealed record EntityRow(int Id, string Name, string Label, string LabelPlural, string Icon,
-        string? Description, string? DisplayField, bool IsArchived);
+        string? Description, string? DisplayField, bool IsArchived, string? WorkflowJson, string? RulesJson, string? GroupName);
 
     private sealed record FieldRow(int EntityId, string Name, string Label, string Type, bool IsRequired, bool IsUnique,
         int? MaxLength, int? Precision, int? Scale, string? OptionsJson, string? ReferenceEntity, int DisplayOrder,
-        bool ShowInList, string? RequiredForRolesJson, bool IsArchived);
+        bool ShowInList, string? RequiredForRolesJson, bool IsArchived,
+        string? DefaultValue, string? Formula, string? ResultType, string? Prefix, int? Padding, string? ChildEntity);
 }

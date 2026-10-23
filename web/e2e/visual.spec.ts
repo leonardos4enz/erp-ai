@@ -56,11 +56,11 @@ test('móvil: el menú arranca cerrado, no tapa el contenido y se cierra al nave
 
   await page.getByRole('banner').getByRole('button', { name: 'Expandir menú' }).click();
   const nav = page.getByLabel('Navegación principal');
-  await nav.getByRole('link', { name: 'Almacenes' }).click();
-  await expect(page).toHaveURL(/\/c\/Almacen$/);
-  await expect(nav.getByRole('link', { name: 'Almacenes' })).not.toBeInViewport();
+  await nav.getByRole('link', { name: 'Camiones' }).click();
+  await expect(page).toHaveURL(/\/c\/Camion$/);
+  await expect(nav.getByRole('link', { name: 'Camiones' })).not.toBeInViewport();
 
   await page.getByRole('banner').getByRole('button', { name: 'Expandir menú' }).click();
   await page.keyboard.press('Escape');
-  await expect(nav.getByRole('link', { name: 'Almacenes' })).not.toBeInViewport();
+  await expect(nav.getByRole('link', { name: 'Camiones' })).not.toBeInViewport();
 });

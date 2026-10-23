@@ -3,11 +3,11 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ArrowDown, ArrowUp, ArrowUpDown, ChevronLeft, ChevronRight, Inbox, Plus, Search, SearchX } from 'lucide-react';
 import { ApiError } from '../api/client';
 import { dataApi } from '../api/endpoints';
-import type { Paged, Row } from '../api/types';
+import type { RowList, StateCount } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { resolveIcon } from '../components/DynamicIcon';
 import { Alert, Button, EmptyState, Input, LoadingBlock, PageHeader, Select, Spinner } from '../components/ui';
-import { activeFields, CellValue, useEntityDef } from '../lib/entity';
+import { activeFields, CellValue, isNumericField, stateTone, useEntityDef } from '../lib/entity';
 import { useAsync, useDebounced } from '../lib/hooks';
 import { formatDateTime } from '../lib/format';
 import { ForbiddenPage, NotFoundPage } from './StatusPages';
@@ -25,6 +25,7 @@ export function EntityListPage() {
   const pageSize = PAGE_SIZES.includes(Number(params.get('pageSize'))) ? Number(params.get('pageSize')) : 25;
   const sort = params.get('sort') ?? undefined;
   const dir = (params.get('dir') === 'desc' ? 'desc' : 'asc') as 'asc' | 'desc';
+  const state = params.get('state') ?? undefined;
   const [search, setSearch] = useState(params.get('search') ?? '');
   const debouncedSearch = useDebounced(search, 300);
 
@@ -45,14 +46,19 @@ export function EntityListPage() {
   }, [entity]);
 
   const p = perms(entity);
-  const { data, loading, error } = useAsync<Paged<Row> | undefined>(
-    (signal) => (def && p.read ? dataApi.list(def.name, { page, pageSize, search: params.get('search') ?? undefined, sort, dir }, signal) : Promise.resolve(undefined)),
-    [def?.name, page, pageSize, params.get('search'), sort, dir, p.read],
+  const { data, loading, error } = useAsync<RowList | undefined>(
+    (signal) => (def && p.read ? dataApi.list(def.name, { page, pageSize, search: params.get('search') ?? undefined, sort, dir, state }, signal) : Promise.resolve(undefined)),
+    [def?.name, page, pageSize, params.get('search'), sort, dir, state, p.read],
   );
+  // Los conteos por estado se conservan mientras carga para que los chips no parpadeen.
+  const [counts, setCounts] = useState<StateCount[] | undefined>();
+  useEffect(() => { if (data?.stateCounts) setCounts(data.stateCounts); }, [data]);
+  useEffect(() => { setCounts(undefined); }, [entity]);
 
   const columns = useMemo(() => {
     if (!def) return [];
-    const fs = activeFields(def);
+    // Partidas y documento padre no tienen sentido como columna de listado.
+    const fs = activeFields(def).filter((f) => f.type !== 'lines' && f.type !== 'parent');
     const shown = fs.filter((f) => f.showInList);
     return shown.length ? shown : fs.slice(0, 5);
   }, [def]);
@@ -81,6 +87,15 @@ export function EntityListPage() {
   return (
     <div className="page">
       <PageHeader icon={Icon} title={def.labelPlural} subtitle={def.description} actions={newBtn} />
+
+      {def.workflow && (
+        <StateFilter
+          states={def.workflow.states.map((s) => ({ state: s.name, label: s.label, color: s.color, count: counts?.find((c) => c.state === s.name)?.count ?? 0 }))}
+          known={!!counts}
+          value={state}
+          onChange={(v) => update({ state: v, page: undefined })}
+        />
+      )}
 
       <div className="toolbar">
         <Input
@@ -121,7 +136,7 @@ export function EntityListPage() {
                         const active = sort === c.name;
                         const SortIcon = active ? (dir === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown;
                         return (
-                          <th key={c.name} className={c.type === 'integer' || c.type === 'decimal' ? 'td-num' : undefined} aria-sort={active ? (dir === 'asc' ? 'ascending' : 'descending') : undefined}>
+                          <th key={c.name} className={isNumericField(c) ? 'td-num' : undefined} aria-sort={active ? (dir === 'asc' ? 'ascending' : 'descending') : undefined}>
                             <button className={`th-sort${active ? ' active' : ''}`} onClick={() => toggleSort(c.name)}>
                               {c.label}
                               <SortIcon size={12} aria-hidden style={{ opacity: active ? 1 : 0.5 }} />
@@ -145,8 +160,8 @@ export function EntityListPage() {
                           aria-label={`Abrir registro ${r.id}`}
                         >
                           {columns.map((c) => (
-                            <td key={c.name} className={c.type === 'integer' || c.type === 'decimal' ? 'td-num' : 'td-truncate'}>
-                              <CellValue field={c} row={r} />
+                            <td key={c.name} className={isNumericField(c) ? 'td-num' : 'td-truncate'}>
+                              <CellValue field={c} row={r} def={def} />
                             </td>
                           ))}
                           <td className="subtle" style={{ whiteSpace: 'nowrap', fontSize: 'var(--text-sm)' }}>
@@ -178,6 +193,41 @@ export function EntityListPage() {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+/** Filtro por estado del proceso: un grupo de opciones con conteos ("Todos" primero). */
+function StateFilter({ states, known, value, onChange }: {
+  states: StateCount[];
+  known: boolean;
+  value: string | undefined;
+  onChange: (state: string | undefined) => void;
+}) {
+  const total = states.reduce((n, s) => n + s.count, 0);
+  const items: { state?: string; label: string; count: number; tone: ReturnType<typeof stateTone> }[] = [
+    { state: undefined, label: 'Todos', count: total, tone: 'neutral' },
+    ...states.map((s) => ({ state: s.state, label: s.label, count: s.count, tone: stateTone(s.color) })),
+  ];
+  return (
+    <div className="state-filter" role="radiogroup" aria-label="Filtrar por estado">
+      {items.map((it) => {
+        const checked = (value ?? undefined) === it.state;
+        return (
+          <button
+            key={it.state ?? '__all'}
+            type="button"
+            role="radio"
+            aria-checked={checked}
+            className={`state-chip tone-${it.tone}${checked ? ' checked' : ''}`}
+            onClick={() => onChange(it.state)}
+          >
+            <span className="state-chip-dot" aria-hidden />
+            {it.label}
+            {known && <span className="state-chip-count">{it.count.toLocaleString('es-MX')}</span>}
+          </button>
+        );
+      })}
     </div>
   );
 }

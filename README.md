@@ -28,6 +28,15 @@ dotnet user-secrets --project src/Erp.Api set "Bootstrap:AdminPassword" "una-fra
 Para desarrollo del frontend con recarga en caliente, además ejecuta `npm --prefix web run dev`
 y abre http://localhost:5173 (proxy a la API).
 
+## Módulos
+Un módulo es un paquete de **metadatos** en [`modules/`](modules/): catálogos, documentos con partidas,
+fórmulas, reglas de negocio, procesos de aprobación, roles y datos iniciales. No contiene código.
+Se instala desde *Configuración › Módulos* (solo administradores), con vista previa y en una sola transacción.
+
+| Módulo | Contenido |
+|---|---|
+| [Compras](docs/sdd/specs/003-modulo-compras/spec.md) | Requisiciones, órdenes de compra con autorización por montos y control interno, recepciones; proveedores, productos y 6 catálogos base |
+
 ## Pruebas
 Unitarias (núcleo de seguridad):
 ```bash

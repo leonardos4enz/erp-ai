@@ -1,60 +1,44 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, RefreshCw, Save, Trash2 } from 'lucide-react';
 import { ApiError, fieldError } from '../api/client';
 import { dataApi } from '../api/endpoints';
-import type { FieldDef, Row } from '../api/types';
+import type { EntityDef, FieldDef, RecordTransition, RecordWorkflow, Row } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { ConfirmDialog } from '../components/Dialog';
 import { resolveIcon } from '../components/DynamicIcon';
-import { ReferenceSelect } from '../components/ReferenceSelect';
+import { FieldInput } from '../components/FieldInput';
+import { LinesEditor } from '../components/LinesEditor';
 import { useToast } from '../components/Toast';
-import { Alert, Button, Field, Input, LoadingBlock, PageHeader, Select, Switch, Textarea } from '../components/ui';
-import { activeFields, isRequiredFor, useEntityDef } from '../lib/entity';
-import { formatDateTime, toDateInput, toDateTimeInput } from '../lib/format';
+import { HistoryPanel, stateLabel, TransitionDialog, WorkflowBar } from '../components/Workflow';
+import { Alert, Button, LoadingBlock, PageHeader } from '../components/ui';
+import {
+  blankLine, buildPayload, draftFromRow, isEmptyValue, lineErrorKey, lineFields, mergeComputed, type Draft,
+} from '../lib/draft';
+import { activeFields, formatFormula, isEditableField, isRequiredFor, StateBadge, useChildDefs, useEntityDef } from '../lib/entity';
+import { formatDateTime } from '../lib/format';
 import { ForbiddenPage, NotFoundPage } from './StatusPages';
 
-type Values = Record<string, unknown>;
+const COMPUTE_DEBOUNCE_MS = 350;
+const EMPTY_DRAFT: Draft = { values: {}, touched: {}, lines: {} };
 
-function initialValues(fields: FieldDef[], row?: Row): Values {
-  const v: Values = {};
-  for (const f of fields) {
-    const raw = row ? row[f.name] : undefined;
-    switch (f.type) {
-      case 'boolean': v[f.name] = row ? !!raw : false; break;
-      case 'date': v[f.name] = toDateInput(raw); break;
-      case 'datetime': v[f.name] = toDateTimeInput(raw); break;
-      case 'integer':
-      case 'decimal': v[f.name] = raw == null ? '' : String(raw); break;
-      case 'reference':
-        v[f.name] = raw == null ? null : Number(raw);
-        v[`${f.name}__label`] = row?.[`${f.name}__label`] ?? null;
-        break;
-      default: v[f.name] = raw == null ? '' : String(raw);
-    }
-  }
-  return v;
+/** ¿La entidad (o sus partidas) tiene algo que calcule el servidor? */
+function needsCompute(def: EntityDef, children: Record<string, EntityDef>): boolean {
+  const calc = (f: FieldDef) => f.type === 'formula' || f.type === 'autonumber' || !!f.defaultValue;
+  return activeFields(def).some((f) => calc(f) || f.type === 'lines')
+    || Object.values(children).some((c) => activeFields(c).some(calc));
 }
 
-function toPayload(fields: FieldDef[], values: Values): Values {
-  const out: Values = {};
+/** Validación local: obligatorios (incluye "obligatorio para rol"), números y longitudes. */
+function validateFields(fields: FieldDef[], values: Record<string, unknown>, roles: string[], keyOf: (f: FieldDef) => string, out: Record<string, string>) {
   for (const f of fields) {
+    if (!isEditableField(f)) continue;
     const v = values[f.name];
-    switch (f.type) {
-      case 'boolean': out[f.name] = !!v; break;
-      case 'integer': out[f.name] = v === '' || v == null ? null : Number.parseInt(String(v), 10); break;
-      case 'decimal': out[f.name] = v === '' || v == null ? null : Number(String(v)); break;
-      case 'datetime': out[f.name] = v ? new Date(String(v)).toISOString() : null; break;
-      case 'reference': out[f.name] = v ?? null; break;
-      default: out[f.name] = v === '' ? null : v;
-    }
+    const key = keyOf(f);
+    if (isRequiredFor(f, roles) && isEmptyValue(f, v)) out[key] = 'Este campo es obligatorio';
+    else if ((f.type === 'integer' || f.type === 'decimal') && v !== '' && v != null && Number.isNaN(Number(v))) out[key] = 'Debe ser un número';
+    else if (f.maxLength && typeof v === 'string' && v.length > f.maxLength) out[key] = `Máximo ${f.maxLength} caracteres`;
   }
-  return out;
-}
-
-function isEmpty(f: FieldDef, v: unknown): boolean {
-  if (f.type === 'boolean') return false;
-  return v === null || v === undefined || (typeof v === 'string' && v.trim() === '');
 }
 
 export function EntityFormPage() {
@@ -64,11 +48,13 @@ export function EntityFormPage() {
   const toast = useToast();
   const { me, perms } = useAuth();
   const { def, loading: defLoading } = useEntityDef(entity);
+  const { children, loading: childrenLoading } = useChildDefs(def);
   const fields = useMemo(() => (def ? activeFields(def) : []), [def]);
   const p = perms(entity);
+  const roles = me?.roles ?? [];
 
   const [row, setRow] = useState<Row | undefined>();
-  const [values, setValues] = useState<Values>({});
+  const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
   const [loadError, setLoadError] = useState<ApiError | null>(null);
   const [loading, setLoading] = useState(!isNew);
   const [saving, setSaving] = useState(false);
@@ -77,17 +63,49 @@ export function EntityFormPage() {
   const [conflict, setConflict] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [transition, setTransition] = useState<RecordTransition | null>(null);
+  const [dirty, setDirty] = useState(false);
+  const [editTick, setEditTick] = useState(0);
+
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  const computeSeq = useRef(0);
+  const computeAbort = useRef<AbortController | null>(null);
+  const ready = !!def && !childrenLoading;
+  const calc = ready && needsCompute(def!, children);
+
+  /** Pide al servidor valores sugeridos y fórmulas del borrador actual. Ignora respuestas viejas. */
+  const runCompute = useCallback(async () => {
+    if (!def || !calc) return;
+    const seq = ++computeSeq.current;
+    computeAbort.current?.abort();
+    const ctrl = new AbortController();
+    computeAbort.current = ctrl;
+    try {
+      const r = await dataApi.compute(def.name, buildPayload(def, children, draftRef.current, isNew), id, ctrl.signal);
+      if (seq !== computeSeq.current || !r?.values) return;
+      setDraft((d) => mergeComputed(def, children, d, r.values));
+    } catch {
+      /* el cálculo en vivo es opcional: el servidor recalcula al guardar */
+    }
+  }, [def, children, calc, isNew, id]);
+
+  const applyRow = useCallback((r: Row) => {
+    if (!def) return;
+    setRow(r);
+    setDraft(draftFromRow(def, children, r));
+    setDirty(false);
+    setConflict(false);
+    setError(null);
+    setClientErrors({});
+  }, [def, children]);
 
   async function load() {
     if (!def || isNew || !id) return;
     setLoading(true);
     setLoadError(null);
     try {
-      const r = await dataApi.get(def.name, id);
-      setRow(r);
-      setValues(initialValues(fields, r));
-      setConflict(false);
-      setError(null);
+      applyRow(await dataApi.get(def.name, id));
     } catch (e) {
       setLoadError(e instanceof ApiError ? e : new ApiError(0, {}));
     } finally {
@@ -96,13 +114,27 @@ export function EntityFormPage() {
   }
 
   useEffect(() => {
-    if (!def) return;
-    if (isNew) { setValues(initialValues(fields)); setLoading(false); }
-    else void load();
+    if (!ready) return;
+    if (isNew) {
+      setRow(undefined);
+      setDraft(draftFromRow(def!, children));
+      setDirty(false);
+      setLoading(false);
+      // Valores por defecto del registro nuevo (fecha de hoy, moneda, folio…).
+      if (calc) queueMicrotask(() => void runCompute());
+    } else void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [def?.name, id]);
+  }, [ready, def?.name, id]);
 
-  if (defLoading) return <LoadingBlock />;
+  useEffect(() => {
+    if (!editTick || !calc) return;
+    const t = window.setTimeout(() => void runCompute(), COMPUTE_DEBOUNCE_MS);
+    return () => window.clearTimeout(t);
+  }, [editTick, calc, runCompute]);
+
+  useEffect(() => () => computeAbort.current?.abort(), []);
+
+  if (defLoading || (def && childrenLoading)) return <LoadingBlock />;
   if (!def) return <NotFoundPage />;
   if (!p.read || (isNew && !p.create)) return <ForbiddenPage />;
   if (loading) return <LoadingBlock />;
@@ -110,42 +142,104 @@ export function EntityFormPage() {
     <div className="page page-narrow"><Alert tone="danger" title={loadError.title}>{loadError.detail}</Alert></div>
   );
 
-  const readOnly = !isNew && !p.update;
-  const roles = me?.roles ?? [];
+  const wf = (!isNew ? (row?._workflow as RecordWorkflow | undefined) : undefined) ?? undefined;
+  const lockedByState = !!wf && wf.editable === false;
+  const readOnly = !isNew && (!p.update || lockedByState);
   const listPath = `/c/${encodeURIComponent(def.name)}`;
   const Icon = resolveIcon(def.icon);
+  const linesFields = fields.filter((f) => f.type === 'lines');
+  const isDocument = linesFields.length > 0;
+  const headerFields = fields.filter((f) => f.type !== 'lines' && f.type !== 'parent' && !(f.type === 'state' && def.workflow));
+  const totalFields = isDocument ? headerFields.filter((f) => f.type === 'formula') : [];
+  const mainFields = headerFields.filter((f) => !totalFields.includes(f));
+  const folioField = fields.find((f) => f.type === 'autonumber');
+  const folio = folioField && row?.[folioField.name] ? String(row[folioField.name]) : null;
 
-  function set(name: string, v: unknown) {
-    setValues((s) => ({ ...s, [name]: v }));
-    if (clientErrors[name]) setClientErrors((e) => { const n = { ...e }; delete n[name]; return n; });
+  /** Toda edición invalida cálculos en curso y programa uno nuevo. */
+  function edited() {
+    computeSeq.current++;
+    computeAbort.current?.abort();
+    setDirty(true);
+    setEditTick((t) => t + 1);
+  }
+
+  function clearError(key: string) {
+    if (clientErrors[key]) setClientErrors((e) => { const n = { ...e }; delete n[key]; return n; });
+  }
+
+  function setField(name: string, v: unknown, label?: string | null) {
+    setDraft((d) => ({
+      ...d,
+      values: { ...d.values, [name]: v, ...(label !== undefined ? { [`${name}__label`]: label } : {}) },
+      touched: { ...d.touched, [name]: true },
+    }));
+    clearError(name);
+    edited();
+  }
+
+  function setLineField(lf: string, index: number, name: string, v: unknown, label?: string | null) {
+    setDraft((d) => ({
+      ...d,
+      lines: {
+        ...d.lines,
+        [lf]: (d.lines[lf] ?? []).map((l, i) => (i !== index ? l : {
+          ...l,
+          values: { ...l.values, [name]: v, ...(label !== undefined ? { [`${name}__label`]: label } : {}) },
+          touched: { ...l.touched, [name]: true },
+        })),
+      },
+    }));
+    clearError(lineErrorKey(lf, index, name));
+    edited();
+  }
+
+  function addLine(lf: FieldDef) {
+    const child = lf.childEntity ? children[lf.childEntity] : undefined;
+    if (!child) return;
+    setDraft((d) => ({ ...d, lines: { ...d.lines, [lf.name]: [...(d.lines[lf.name] ?? []), blankLine(child)] } }));
+    edited();
+    // Enfoca la primera celda editable de la nueva partida.
+    const index = draftRef.current.lines[lf.name]?.length ?? 0;
+    const first = lineFields(child).find((f) => isEditableField(f) && f.showInList !== false);
+    if (first) window.setTimeout(() => document.getElementById(`f-${lf.name}-${index}-${first.name}`)?.focus(), 0);
+  }
+
+  function removeLine(lf: string, index: number) {
+    setDraft((d) => ({ ...d, lines: { ...d.lines, [lf]: (d.lines[lf] ?? []).filter((_, i) => i !== index) } }));
+    // Los errores por índice ya no corresponden a las mismas partidas.
+    setClientErrors((e) => Object.fromEntries(Object.entries(e).filter(([k]) => !k.startsWith(`${lf}[`))));
+    edited();
   }
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     if (!def || readOnly) return;
     const errs: Record<string, string> = {};
-    for (const f of fields) {
-      if (isRequiredFor(f, roles) && isEmpty(f, values[f.name])) errs[f.name] = 'Este campo es obligatorio';
-      if ((f.type === 'integer' || f.type === 'decimal') && values[f.name] !== '' && Number.isNaN(Number(values[f.name]))) errs[f.name] = 'Debe ser un número';
-      if (f.maxLength && typeof values[f.name] === 'string' && (values[f.name] as string).length > f.maxLength) errs[f.name] = `Máximo ${f.maxLength} caracteres`;
+    validateFields(mainFields, draft.values, roles, (f) => f.name, errs);
+    for (const lf of linesFields) {
+      const child = lf.childEntity ? children[lf.childEntity] : undefined;
+      if (!child) continue;
+      (draft.lines[lf.name] ?? []).forEach((l, i) => validateFields(lineFields(child), l.values, roles, (f) => lineErrorKey(lf.name, i, f.name), errs));
     }
     setClientErrors(errs);
-    if (Object.keys(errs).length) {
-      document.getElementById(`f-${Object.keys(errs)[0]}`)?.focus();
+    const firstKey = Object.keys(errs)[0];
+    if (firstKey) {
+      const m = /^(\w+)\[(\d+)\]\.(\w+)$/.exec(firstKey);
+      document.getElementById(m ? `f-${m[1]}-${m[2]}-${m[3]}` : `f-${firstKey}`)?.focus();
       return;
     }
     setSaving(true);
     setError(null);
     try {
-      const payload = toPayload(fields, values);
+      const payload = buildPayload(def, children, draft, isNew);
       if (isNew) {
         const created = await dataApi.create(def.name, payload);
         toast.success('Registro creado');
+        setDirty(false);
         navigate(`${listPath}/${created.id}`, { replace: true });
       } else {
         const updated = await dataApi.update(def.name, id!, { ...payload, _rowVersion: row?._rowVersion });
-        setRow(updated);
-        setValues(initialValues(fields, updated));
+        applyRow(updated);
         toast.success('Cambios guardados');
       }
     } catch (err) {
@@ -171,101 +265,91 @@ export function EntityFormPage() {
     }
   }
 
-  function renderInput(f: FieldDef) {
+  function renderField(f: FieldDef) {
     const fid = `f-${f.name}`;
     const required = isRequiredFor(f, roles);
-    const err = clientErrors[f.name] ?? fieldError(error, f.name);
-    const v = values[f.name];
-    const common = { id: fid, disabled: readOnly || saving };
-    const roleHint = !f.required && required ? 'Obligatorio para tu rol' : undefined;
-
-    switch (f.type) {
-      case 'longtext':
-        return <Textarea key={f.name} {...common} wrapClassName="span-2" label={f.label} required={required} error={err} hint={roleHint} value={String(v ?? '')} maxLength={f.maxLength} onChange={(e) => set(f.name, e.target.value)} />;
-      case 'boolean':
-        return (
-          <Field key={f.name} label={f.label} required={false} error={err} htmlFor={fid}>
-            <div style={{ height: 36, display: 'flex', alignItems: 'center' }}>
-              <Switch {...common} checked={!!v} onChange={(c) => set(f.name, c)} label={v ? 'Sí' : 'No'} />
-            </div>
-          </Field>
-        );
-      case 'integer':
-      case 'decimal':
-        return <Input key={f.name} {...common} label={f.label} required={required} error={err} hint={roleHint} type="number" inputMode={f.type === 'integer' ? 'numeric' : 'decimal'} step={f.type === 'integer' ? 1 : 'any'} value={String(v ?? '')} onChange={(e) => set(f.name, e.target.value)} />;
-      case 'date':
-        return <Input key={f.name} {...common} label={f.label} required={required} error={err} hint={roleHint} type="date" value={String(v ?? '')} onChange={(e) => set(f.name, e.target.value)} />;
-      case 'datetime':
-        return <Input key={f.name} {...common} label={f.label} required={required} error={err} hint={roleHint} type="datetime-local" value={String(v ?? '')} onChange={(e) => set(f.name, e.target.value)} />;
-      case 'choice':
-        return (
-          <Select key={f.name} {...common} label={f.label} required={required} error={err} hint={roleHint} value={String(v ?? '')} onChange={(e) => set(f.name, e.target.value)}>
-            <option value="">{required ? 'Selecciona…' : '— Ninguno —'}</option>
-            {(f.options ?? []).map((o) => <option key={o} value={o}>{o}</option>)}
-          </Select>
-        );
-      case 'reference':
-        return (
-          <Field key={f.name} label={f.label} required={required} error={err} hint={roleHint} htmlFor={fid}>
-            <ReferenceSelect
-              id={fid}
-              entity={f.referenceEntity ?? ''}
-              value={(v as number | null) ?? null}
-              label={(values[`${f.name}__label`] as string | null) ?? null}
-              invalid={!!err}
-              disabled={readOnly || saving}
-              describedBy={err ? `${fid}-err` : undefined}
-              onChange={(nid, nlabel) => { set(f.name, nid); set(`${f.name}__label`, nlabel); }}
-            />
-          </Field>
-        );
-      default:
-        return <Input key={f.name} {...common} label={f.label} required={required} error={err} hint={roleHint} value={String(v ?? '')} maxLength={f.maxLength} onChange={(e) => set(f.name, e.target.value)} />;
-    }
+    const roleHint = !f.required && required && isEditableField(f) ? 'Obligatorio para tu rol' : undefined;
+    return (
+      <FieldInput
+        key={f.name}
+        field={f}
+        def={def}
+        id={fid}
+        value={draft.values[f.name]}
+        refLabel={draft.values[`${f.name}__label`] as string | null}
+        onChange={(v, label) => setField(f.name, v, label)}
+        disabled={readOnly || saving || !isEditableField(f)}
+        required={required && isEditableField(f)}
+        error={clientErrors[f.name] ?? fieldError(error, f.name)}
+        hint={roleHint}
+        isNew={isNew}
+      />
+    );
   }
 
   const generalError = error && Object.keys(error.fieldErrors).length === 0 ? error : null;
+  const subtitle = !isNew && row
+    ? `Creado ${formatDateTime(row.createdAt)}${row.createdBy ? ` por ${row.createdBy}` : ''}${row.updatedAt ? ` · Actualizado ${formatDateTime(row.updatedAt)}${row.updatedBy ? ` por ${row.updatedBy}` : ''}` : ''}`
+    : def.description;
+  const canDelete = !isNew && p.delete && !lockedByState;
 
-  return (
-    <div className="page page-narrow">
-      <PageHeader
-        icon={Icon}
-        title={isNew ? `Nuevo ${def.label.toLowerCase()}` : `${def.label} #${id}`}
-        subtitle={!isNew && row ? `Creado ${formatDateTime(row.createdAt)}${row.createdBy ? ` por ${row.createdBy}` : ''}${row.updatedAt ? ` · Actualizado ${formatDateTime(row.updatedAt)}${row.updatedBy ? ` por ${row.updatedBy}` : ''}` : ''}` : def.description}
-        actions={<Button variant="ghost" icon={ArrowLeft} onClick={() => navigate(listPath)}>Volver</Button>}
-      />
+  const alerts: ReactNode = (
+    <>
+      {conflict && (
+        <Alert
+          tone="warning"
+          title="Otro usuario modificó este registro"
+          action={<Button size="sm" icon={RefreshCw} onClick={() => void load()}>Recargar</Button>}
+        >
+          Tus cambios no se guardaron. Recarga para ver la versión actual y vuelve a aplicar tus cambios.
+        </Alert>
+      )}
+      {generalError && <Alert tone="danger" title={generalError.title}>{generalError.detail}</Alert>}
+      {error && Object.keys(error.fieldErrors).length > 0 && (
+        <Alert tone="danger" title="Revisa los campos marcados" />
+      )}
+      {lockedByState && wf && (
+        <Alert tone="info" title="Documento cerrado a edición">
+          Este documento está en estado {wf.stateLabel} y ya no se puede editar.
+        </Alert>
+      )}
+      {!lockedByState && readOnly && <Alert tone="info" title="Solo lectura">Tu rol no tiene permiso para editar este catálogo.</Alert>}
+    </>
+  );
 
-      <form className="card" onSubmit={onSubmit} noValidate>
-        <div className="card-pad stack">
-          {conflict && (
-            <Alert
-              tone="warning"
-              title="Otro usuario modificó este registro"
-              action={<Button size="sm" icon={RefreshCw} onClick={() => void load()}>Recargar</Button>}
-            >
-              Tus cambios no se guardaron. Recarga para ver la versión actual y vuelve a aplicar tus cambios.
-            </Alert>
-          )}
-          {generalError && <Alert tone="danger" title={generalError.title}>{generalError.detail}</Alert>}
-          {error && Object.keys(error.fieldErrors).length > 0 && (
-            <Alert tone="danger" title="Revisa los campos marcados" />
-          )}
-          {readOnly && <Alert tone="info" title="Solo lectura">Tu rol no tiene permiso para editar este catálogo.</Alert>}
-          {fields.length === 0
-            ? <p className="muted">Este catálogo no tiene campos activos.</p>
-            : <div className="form-grid">{fields.map(renderInput)}</div>}
-        </div>
-        {!readOnly && (
-          <div className="dialog-footer">
-            {!isNew && p.delete && (
-              <Button variant="ghost" icon={Trash2} onClick={() => setConfirmDelete(true)} style={{ marginRight: 'auto', color: 'var(--danger)' }}>Eliminar</Button>
-            )}
-            <Button onClick={() => navigate(listPath)} disabled={saving}>Cancelar</Button>
-            <Button type="submit" variant="primary" icon={Save} loading={saving}>{isNew ? 'Crear' : 'Guardar cambios'}</Button>
-          </div>
-        )}
-      </form>
+  const actions = !readOnly && (
+    <div className="dialog-footer">
+      {canDelete && (
+        <Button variant="ghost" icon={Trash2} onClick={() => setConfirmDelete(true)} style={{ marginRight: 'auto', color: 'var(--danger)' }}>Eliminar</Button>
+      )}
+      <Button onClick={() => navigate(listPath)} disabled={saving}>Cancelar</Button>
+      <Button type="submit" variant="primary" icon={Save} loading={saving}>{isNew ? 'Crear' : 'Guardar cambios'}</Button>
+    </div>
+  );
 
+  const header = (
+    <PageHeader
+      icon={Icon}
+      // "Registrar …" evita errores de género ("Nuevo orden", "Nueva almacén") con etiquetas definidas por el usuario.
+      title={isNew ? `Registrar ${def.label.toLowerCase()}` : folio ? `${def.label} ${folio}` : `${def.label} #${id}`}
+      subtitle={subtitle}
+      actions={<Button variant="ghost" icon={ArrowLeft} onClick={() => navigate(listPath)}>Volver</Button>}
+    />
+  );
+
+  const workflowArea = wf && row ? (
+    <WorkflowBar workflow={wf} blockedReason={dirty ? 'Guarda los cambios antes de cambiar el estado.' : undefined} onTransition={setTransition} />
+  ) : isNew && def.workflow ? (
+    <div className="workflow-bar" role="group" aria-label="Proceso del documento">
+      <div className="row workflow-state">
+        <span className="subtle">Se creará en estado</span>
+        <StateBadge label={stateLabel(def, def.workflow.initial)} color={def.workflow.states.find((s) => s.name === def.workflow!.initial)?.color} />
+      </div>
+    </div>
+  ) : null;
+
+  const dialogs = (
+    <>
       <ConfirmDialog
         open={confirmDelete}
         danger
@@ -276,6 +360,89 @@ export function EntityFormPage() {
         onConfirm={onDelete}
         onCancel={() => setConfirmDelete(false)}
       />
+      {row && transition && (
+        <TransitionDialog
+          def={def}
+          row={row}
+          transition={transition}
+          onClose={() => setTransition(null)}
+          onDone={(r) => { setTransition(null); applyRow(r); }}
+          onConflict={() => setConflict(true)}
+        />
+      )}
+    </>
+  );
+
+  // Catálogo simple: mismo diseño de siempre (una tarjeta con el formulario).
+  if (!isDocument) {
+    return (
+      <div className="page page-narrow">
+        {header}
+        {workflowArea}
+        <form className="card" onSubmit={onSubmit} noValidate>
+          <div className="card-pad stack">
+            {alerts}
+            {mainFields.length === 0
+              ? <p className="muted">Este catálogo no tiene campos activos.</p>
+              : <div className="form-grid">{mainFields.map(renderField)}</div>}
+          </div>
+          {actions}
+        </form>
+        {wf && row && <div className="doc-section"><HistoryPanel entity={def.name} id={row.id} version={row._rowVersion} /></div>}
+        {dialogs}
+      </div>
+    );
+  }
+
+  // Documento: encabezado, partidas, totales e historial.
+  return (
+    <div className="page">
+      {header}
+      {workflowArea}
+      <form className="doc-form" onSubmit={onSubmit} noValidate>
+        <section className="card card-pad stack" aria-label="Encabezado">
+          {alerts}
+          <div className="form-grid">{mainFields.map(renderField)}</div>
+        </section>
+
+        {linesFields.map((lf) => {
+          const child = lf.childEntity ? children[lf.childEntity] : undefined;
+          if (!child) return <Alert key={lf.name} tone="warning" title={`No se encontró la definición de ${lf.label}`} />;
+          return (
+            <LinesEditor
+              key={lf.name}
+              field={lf}
+              child={child}
+              lines={draft.lines[lf.name] ?? []}
+              roles={roles}
+              readOnly={readOnly || saving}
+              serverError={error}
+              clientErrors={clientErrors}
+              onAdd={() => addLine(lf)}
+              onRemove={(i) => removeLine(lf.name, i)}
+              onChange={(i, name, v, label) => setLineField(lf.name, i, name, v, label)}
+            />
+          );
+        })}
+
+        {totalFields.length > 0 && (
+          <section className="card card-pad totals-card" aria-label="Totales">
+            <h2 className="section-title">Totales</h2>
+            <dl className="totals">
+              {totalFields.map((f, i) => (
+                <div key={f.name} className={`totals-row${i === totalFields.length - 1 ? ' totals-grand' : ''}`}>
+                  <dt>{f.label}</dt>
+                  <dd><output id={`f-${f.name}`} aria-label={f.label} aria-live="polite">{formatFormula(f, draft.values[f.name]) || '—'}</output></dd>
+                </div>
+              ))}
+            </dl>
+          </section>
+        )}
+
+        {actions && <div className="card doc-actions">{actions}</div>}
+      </form>
+      {wf && row && <div className="doc-section"><HistoryPanel entity={def.name} id={row.id} version={row._rowVersion} /></div>}
+      {dialogs}
     </div>
   );
 }

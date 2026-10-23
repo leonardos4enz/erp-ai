@@ -19,7 +19,19 @@ public static class DdlGenerator
         FieldTypes.Date => "date",
         FieldTypes.DateTime => "datetime2(0)",
         FieldTypes.Choice => $"nvarchar({FieldTypes.MaxChoiceLength})",
-        FieldTypes.Reference => "bigint",
+        FieldTypes.Reference or FieldTypes.Parent => "bigint",
+        FieldTypes.Autonumber => "nvarchar(30)",
+        FieldTypes.State => "nvarchar(50)",
+        FieldTypes.User => "int",
+        FieldTypes.Formula => f.ResultType switch
+        {
+            FieldTypes.Decimal => $"decimal({f.Precision ?? 18},{f.Scale ?? 2})",
+            FieldTypes.Integer => "bigint",
+            FieldTypes.Text => "nvarchar(400)",
+            FieldTypes.Boolean => "bit",
+            FieldTypes.Date => "date",
+            _ => throw new InvalidOperationException($"Tipo de resultado no soportado: {f.ResultType}"),
+        },
         _ => throw new InvalidOperationException($"Tipo de campo no soportado: {f.Type}"),
     };
 
@@ -27,9 +39,25 @@ public static class DdlGenerator
     private static string ColumnDefinition(string entity, FieldDef f)
     {
         var sb = new StringBuilder($"{Quote(f.Name)} {ColumnType(f)} NULL");
-        if (f.Type == FieldTypes.Reference)
+        if (f.Type is FieldTypes.Reference or FieldTypes.Parent)
             sb.Append($" CONSTRAINT {Constraint("FK", entity, f.Name)} REFERENCES {AppTable(f.ReferenceEntity!)} ([Id])");
+        else if (f.Type == FieldTypes.User)
+            sb.Append($" CONSTRAINT {Constraint("FK", entity, f.Name)} REFERENCES [meta].[User] ([Id])");
         return sb.ToString();
+    }
+
+    /// <summary>Columna de estado del proceso; los registros existentes quedan en el estado inicial.</summary>
+    public static IReadOnlyList<string> AddStateColumn(string entity, string initialState)
+    {
+        Quote(initialState); // nombre de estado validado como identificador: seguro como literal
+        var col = Quote(Workflow.StateField);
+        return
+        [
+            $"ALTER TABLE {AppTable(entity)} ADD {col} nvarchar(50) NULL;",
+            // Se ejecuta en lote aparte: SQL Server no ve la columna nueva en el mismo lote.
+            $"UPDATE {AppTable(entity)} SET {col} = N'{initialState}' WHERE {col} IS NULL;",
+            $"CREATE INDEX {Constraint("IX", entity, Workflow.StateField)} ON {AppTable(entity)} ({col}) WHERE [IsDeleted] = 0;",
+        ];
     }
 
     public static IReadOnlyList<string> CreateTable(string entity, IEnumerable<FieldDef> fields)
@@ -39,7 +67,7 @@ public static class DdlGenerator
         {
             $"[Id] bigint IDENTITY(1,1) NOT NULL CONSTRAINT {Constraint("PK", entity)} PRIMARY KEY",
         };
-        cols.AddRange(list.Select(f => ColumnDefinition(entity, f)));
+        cols.AddRange(list.Where(f => !FieldTypes.IsVirtual(f.Type)).Select(f => ColumnDefinition(entity, f)));
         cols.AddRange(
         [
             $"[CreatedAt] datetime2(3) NOT NULL CONSTRAINT {Constraint("DF", entity, "CreatedAt")} DEFAULT SYSUTCDATETIME()",
@@ -60,6 +88,7 @@ public static class DdlGenerator
 
     public static IReadOnlyList<string> AddColumn(string entity, FieldDef f)
     {
+        if (FieldTypes.IsVirtual(f.Type)) return [];
         var statements = new List<string> { $"ALTER TABLE {AppTable(entity)} ADD {ColumnDefinition(entity, f)};" };
         statements.AddRange(Indexes(entity, f));
         return statements;
@@ -67,10 +96,10 @@ public static class DdlGenerator
 
     private static IEnumerable<string> Indexes(string entity, FieldDef f)
     {
-        if (f.Unique)
+        if (f.Unique || f.Type == FieldTypes.Autonumber)
             yield return $"CREATE UNIQUE INDEX {Constraint("UX", entity, f.Name)} ON {AppTable(entity)} ({Quote(f.Name)}) " +
                          $"WHERE {Quote(f.Name)} IS NOT NULL AND [IsDeleted] = 0;";
-        else if (f.Type == FieldTypes.Reference)
+        else if (f.Type is FieldTypes.Reference or FieldTypes.Parent or FieldTypes.User)
             yield return $"CREATE INDEX {Constraint("IX", entity, f.Name)} ON {AppTable(entity)} ({Quote(f.Name)});";
     }
 }

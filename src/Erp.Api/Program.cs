@@ -40,6 +40,7 @@ builder.Services.AddSingleton<PasswordService>();
 builder.Services.AddSingleton<UserContextLoader>();
 builder.Services.AddScoped<PlanService>();
 builder.Services.AddScoped<RecordService>();
+builder.Services.AddScoped<ModuleService>();
 
 // ---------- Autenticación: cookie (ADR-0002) ----------
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)

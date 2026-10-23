@@ -31,6 +31,12 @@ public sealed class ProblemExceptionHandler(IProblemDetailsService problems, ILo
             pd = new ProblemDetails { Status = app.Status, Title = app.Message };
             if (app.Errors is not null) pd.Extensions["errors"] = app.Errors;
         }
+        else if (ex is Expressions.ExprException expr)
+        {
+            // Un error de fórmula es un problema del modelo: el mensaje es seguro y útil para el modelador.
+            log.LogWarning("Error al evaluar expresión en {Path}: {Message}", http.Request.Path, expr.Message);
+            pd = new ProblemDetails { Status = 400, Title = $"Error al calcular: {expr.Message}" };
+        }
         else if (ex is BadHttpRequestException or System.Text.Json.JsonException)
         {
             pd = new ProblemDetails { Status = 400, Title = "La petición no tiene un formato válido." };

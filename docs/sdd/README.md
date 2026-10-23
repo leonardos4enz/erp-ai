@@ -36,5 +36,6 @@ constitution.md  (principios fijos, se lee siempre)
 | # | Spec | Estado |
 |---|------|--------|
 | 001 | [Núcleo de metadatos, API genérica y UI dinámica](specs/001-nucleo-metadatos/spec.md) | Implementado (MVP) |
-| 002 | Asistente IA (MiniMax) sobre Planes de Cambios | Pendiente |
-| 003 | Motor de procesos (estados, aprobaciones) | Pendiente |
+| 002 | [Motor: documentos, fórmulas, reglas y procesos](specs/002-motor-procesos/spec.md) | Implementado |
+| 003 | [Módulo de Compras](specs/003-modulo-compras/spec.md) | Implementado |
+| 004 | Asistente IA (MiniMax) sobre Planes de Cambios | Pendiente |

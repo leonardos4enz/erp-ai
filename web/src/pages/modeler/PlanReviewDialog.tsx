@@ -44,8 +44,6 @@ export function PlanReviewDialog({ plan, onClose, onApplied }: PlanReviewDialogP
     }
   }
 
-  const generalErrors = preview?.errors.filter((e) => !preview.steps.some((s) => s.operation === e.operation)) ?? [];
-
   return (
     <Dialog
       open={!!plan}
@@ -67,45 +65,49 @@ export function PlanReviewDialog({ plan, onClose, onApplied }: PlanReviewDialogP
           {Object.entries(error.fieldErrors).map(([k, v]) => <div key={k}>{k}: {v.join(', ')}</div>)}
         </Alert>
       )}
-      {preview && (
-        <div className="stack">
-          {preview.valid ? (
-            <Alert tone="info" icon={CheckCircle2} title="El plan es válido">
-              Se aplicará en una sola transacción. Si un paso falla, no se aplica ninguno.
-            </Alert>
-          ) : (
-            <Alert tone="danger" title="El plan tiene errores">Corrige los puntos marcados y vuelve a revisar.</Alert>
-          )}
-          {generalErrors.map((e, i) => (
-            <Alert key={i} tone="danger" title={`Operación ${e.operation + 1}`}>{e.message}</Alert>
-          ))}
-          <ol className="plan-steps" style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-            {preview.steps.map((s, i) => {
-              const errs = preview.errors.filter((e) => e.operation === s.operation);
-              return (
-                <li key={i} className={`plan-step${errs.length ? ' has-error' : ''}`}>
-                  <div className="plan-step-head">
-                    <span className="plan-step-num">{i + 1}</span>
-                    <div className="grow">
-                      <div>{s.description}</div>
-                      {errs.map((e, j) => (
-                        <div key={j} className="field-error" style={{ marginTop: 4 }}><AlertCircle size={13} aria-hidden /> {e.message}</div>
-                      ))}
-                    </div>
-                  </div>
-                  {s.sql && (
-                    <details>
-                      <summary><Code2 size={14} aria-hidden /> Ver SQL</summary>
-                      {/* tabIndex: el bloque tiene scroll y debe poder recorrerse con teclado (WCAG 2.1.1) */}
-                      <pre className="code-block" tabIndex={0} aria-label={`SQL del paso ${i + 1}`}>{s.sql}</pre>
-                    </details>
-                  )}
-                </li>
-              );
-            })}
-          </ol>
-        </div>
-      )}
+      {preview && <PlanPreviewView preview={preview} />}
     </Dialog>
+  );
+}
+
+/** Resultado de validar un plan: estado general, errores y pasos con su SQL. Se reutiliza al instalar módulos. */
+export function PlanPreviewView({ preview, validText = 'Se aplicará en una sola transacción. Si un paso falla, no se aplica ninguno.' }: { preview: PlanPreview; validText?: string }) {
+  const generalErrors = preview.errors.filter((e) => !preview.steps.some((s) => s.operation === e.operation));
+  return (
+    <div className="stack">
+      {preview.valid ? (
+        <Alert tone="info" icon={CheckCircle2} title="El plan es válido">{validText}</Alert>
+      ) : (
+        <Alert tone="danger" title="El plan tiene errores">Corrige los puntos marcados y vuelve a revisar.</Alert>
+      )}
+      {generalErrors.map((e, i) => (
+        <Alert key={i} tone="danger" title={e.operation >= 0 ? `Operación ${e.operation + 1}` : 'Plan'}>{e.message}</Alert>
+      ))}
+      <ol className="plan-steps" style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+        {preview.steps.map((s, i) => {
+          const errs = preview.errors.filter((e) => e.operation === s.operation);
+          return (
+            <li key={i} className={`plan-step${errs.length ? ' has-error' : ''}`}>
+              <div className="plan-step-head">
+                <span className="plan-step-num">{i + 1}</span>
+                <div className="grow">
+                  <div>{s.description}</div>
+                  {errs.map((e, j) => (
+                    <div key={j} className="field-error" style={{ marginTop: 4 }}><AlertCircle size={13} aria-hidden /> {e.message}</div>
+                  ))}
+                </div>
+              </div>
+              {s.sql && (
+                <details>
+                  <summary><Code2 size={14} aria-hidden /> Ver SQL</summary>
+                  {/* tabIndex: el bloque tiene scroll y debe poder recorrerse con teclado (WCAG 2.1.1) */}
+                  <pre className="code-block" tabIndex={0} aria-label={`SQL del paso ${i + 1}`}>{s.sql}</pre>
+                </details>
+              )}
+            </li>
+          );
+        })}
+      </ol>
+    </div>
   );
 }

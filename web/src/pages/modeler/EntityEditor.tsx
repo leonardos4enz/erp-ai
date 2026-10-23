@@ -4,13 +4,42 @@ import {
 } from 'lucide-react';
 import { ApiError } from '../../api/client';
 import { adminApi } from '../../api/endpoints';
-import type { ChangePlan, EntityDef, FieldDef, FieldType, Operation } from '../../api/types';
+import type { ChangePlan, EntityDef, FieldDef, FieldType, FormulaResultType, Operation, Rule, Workflow } from '../../api/types';
 import { Dialog } from '../../components/Dialog';
 import { CURATED_ICONS, DynamicIcon } from '../../components/DynamicIcon';
 import { TagInput } from '../../components/TagInput';
 import { Alert, Button, Field, Input, Select, Switch, Textarea } from '../../components/ui';
-import { FIELD_TYPE_LABELS } from '../../lib/entity';
+import { FIELD_TYPE_LABELS, MODELER_FIELD_TYPES, supportsDefault } from '../../lib/entity';
 import { IDENTIFIER_RE, pluralize, toIdentifier } from '../../lib/format';
+
+const RESULT_TYPE_LABELS: Record<FormulaResultType, string> = {
+  decimal: 'Número decimal', integer: 'Número entero', text: 'Texto', boolean: 'Sí / No', date: 'Fecha',
+};
+
+/** Tipos cuyo valor no captura la persona: no aplican "obligatorio" ni "único". */
+const COMPUTED_TYPES: FieldType[] = ['formula', 'autonumber', 'lines', 'state'];
+
+type JsonResult<T> = { ok: true; value: T | null } | { ok: false; error: string };
+
+/** Vacío = sin definición. Valida forma mínima; el servidor valida el contenido en la vista previa. */
+function parseJson<T>(text: string, kind: 'array' | 'object'): JsonResult<T> {
+  if (!text.trim()) return { ok: true, value: null };
+  try {
+    const v: unknown = JSON.parse(text);
+    if (kind === 'array' && !Array.isArray(v)) return { ok: false, error: 'Debe ser una lista JSON: [ … ]' };
+    if (kind === 'object' && (typeof v !== 'object' || v === null || Array.isArray(v))) return { ok: false, error: 'Debe ser un objeto JSON: { … }' };
+    return { ok: true, value: v as T };
+  } catch (e) {
+    return { ok: false, error: `JSON inválido: ${(e as Error).message}` };
+  }
+}
+
+const canonical = (v: unknown) => JSON.stringify(v ?? null);
+
+function parseJsonError(text: string, kind: 'array' | 'object'): string | undefined {
+  const r = parseJson<unknown>(text, kind);
+  return r.ok ? undefined : r.error;
+}
 
 interface DraftField extends FieldDef {
   _key: string;
@@ -26,7 +55,10 @@ interface Draft {
   icon: string;
   description: string;
   displayField: string;
+  group: string;
   fields: DraftField[];
+  rulesJson: string;
+  workflowJson: string;
 }
 
 let keySeq = 0;
@@ -44,7 +76,7 @@ function draftFrom(def?: EntityDef): Draft {
   if (!def) {
     const f = blankField(0);
     f.label = 'Nombre'; f.name = 'Nombre'; f.required = true; f.maxLength = 150;
-    return { name: '', label: '', labelPlural: '', icon: 'package', description: '', displayField: '', fields: [f] };
+    return { name: '', label: '', labelPlural: '', icon: 'package', description: '', displayField: '', group: '', fields: [f], rulesJson: '', workflowJson: '' };
   }
   const fields = def.fields
     .slice()
@@ -52,7 +84,9 @@ function draftFrom(def?: EntityDef): Draft {
     .map((f): DraftField => ({ ...f, options: f.options ?? [], requiredForRoles: f.requiredForRoles ?? [], _key: newKey(), _isNew: false, _nameTouched: true, _original: f }));
   return {
     name: def.name, label: def.label, labelPlural: def.labelPlural, icon: def.icon || 'database',
-    description: def.description ?? '', displayField: def.displayField ?? '', fields,
+    description: def.description ?? '', displayField: def.displayField ?? '', group: def.group ?? '', fields,
+    rulesJson: def.rules?.length ? JSON.stringify(def.rules, null, 2) : '',
+    workflowJson: def.workflow ? JSON.stringify(def.workflow, null, 2) : '',
   };
 }
 
@@ -62,16 +96,35 @@ function sameList(a?: string[], b?: string[]) {
 }
 
 function cleanField(f: DraftField, order: number): FieldDef {
+  const computed = COMPUTED_TYPES.includes(f.type);
   const out: FieldDef = {
     name: f.name.trim(), label: f.label.trim(), type: f.type,
-    required: !!f.required, unique: !!f.unique, showInList: !!f.showInList, displayOrder: order,
+    required: !computed && !!f.required, unique: !computed && !!f.unique, showInList: !!f.showInList, displayOrder: order,
   };
-  if (f.requiredForRoles?.length) out.requiredForRoles = f.requiredForRoles;
+  if (!computed && f.requiredForRoles?.length) out.requiredForRoles = f.requiredForRoles;
   if (f.type === 'text' && f.maxLength) out.maxLength = f.maxLength;
   if (f.type === 'decimal') { out.precision = f.precision ?? 18; out.scale = f.scale ?? 2; }
   if (f.type === 'choice') out.options = f.options ?? [];
-  if (f.type === 'reference') out.referenceEntity = f.referenceEntity;
+  if (f.type === 'reference' || f.type === 'parent') out.referenceEntity = f.referenceEntity;
+  if (f.type === 'autonumber') { out.prefix = f.prefix?.trim() ?? ''; out.padding = f.padding ?? 6; }
+  if (f.type === 'formula') { out.formula = f.formula?.trim() ?? ''; out.resultType = f.resultType ?? 'decimal'; }
+  if (f.type === 'lines') out.childEntity = f.childEntity;
+  if (supportsDefault(f.type) && f.defaultValue?.trim()) out.defaultValue = f.defaultValue.trim();
   return out;
+}
+
+/** Operaciones setRules / setWorkflow cuando el JSON cambió respecto al original. */
+function behaviourOperations(entity: string, original: EntityDef | undefined, d: Draft): Operation[] {
+  const ops: Operation[] = [];
+  const rules = parseJson<Rule[]>(d.rulesJson, 'array');
+  const workflow = parseJson<Workflow>(d.workflowJson, 'object');
+  if (rules.ok && canonical(rules.value ?? []) !== canonical(original?.rules ?? [])) {
+    ops.push({ op: 'setRules', entity, rules: rules.value ?? [] });
+  }
+  if (workflow.ok && workflow.value && canonical(workflow.value) !== canonical(original?.workflow ?? null)) {
+    ops.push({ op: 'setWorkflow', entity, workflow: workflow.value });
+  }
+  return ops;
 }
 
 export function buildOperations(original: EntityDef | undefined, d: Draft): Operation[] {
@@ -81,8 +134,9 @@ export function buildOperations(original: EntityDef | undefined, d: Draft): Oper
       op: 'createEntity', name: d.name.trim(), label: d.label.trim(), labelPlural: d.labelPlural.trim(),
       icon: d.icon || undefined, description: d.description.trim() || undefined,
       displayField: d.displayField || undefined,
+      group: d.group.trim() || undefined,
       fields: active.filter((f) => !f.isArchived).map((f, i) => cleanField(f, i)),
-    }];
+    }, ...behaviourOperations(d.name.trim(), undefined, d)];
   }
   const ops: Operation[] = [];
   const meta: Extract<Operation, { op: 'updateEntity' }> = { op: 'updateEntity', entity: original.name };
@@ -92,6 +146,7 @@ export function buildOperations(original: EntityDef | undefined, d: Draft): Oper
   if (d.icon !== (original.icon || 'database')) { meta.icon = d.icon; metaChanged = true; }
   if (d.description.trim() !== (original.description ?? '')) { meta.description = d.description.trim(); metaChanged = true; }
   if (d.displayField !== (original.displayField ?? '')) { meta.displayField = d.displayField; metaChanged = true; }
+  if (d.group.trim() !== (original.group ?? '')) { meta.group = d.group.trim(); metaChanged = true; }
   if (metaChanged) ops.push(meta);
 
   d.fields.forEach((f, i) => {
@@ -110,9 +165,11 @@ export function buildOperations(original: EntityDef | undefined, d: Draft): Oper
     if (f.type === 'choice' && !sameList(f.options, o.options)) { u.options = f.options ?? []; changed = true; }
     if (!sameList(f.requiredForRoles, o.requiredForRoles)) { u.requiredForRoles = f.requiredForRoles ?? []; changed = true; }
     if (i !== (o.displayOrder ?? i)) { u.displayOrder = i; changed = true; }
+    if (supportsDefault(f.type) && (f.defaultValue ?? '').trim() !== (o.defaultValue ?? '')) { u.defaultValue = (f.defaultValue ?? '').trim(); changed = true; }
+    if (f.type === 'formula' && (f.formula ?? '').trim() !== (o.formula ?? '')) { u.formula = (f.formula ?? '').trim(); changed = true; }
     if (changed) ops.push(u);
   });
-  return ops;
+  return [...ops, ...behaviourOperations(original.name, original, d)];
 }
 
 function validate(d: Draft, isNew: boolean, existingNames: string[]): Record<string, string> {
@@ -131,9 +188,15 @@ function validate(d: Draft, isNew: boolean, existingNames: string[]): Record<str
     else if (seen.has(f.name.toLowerCase())) e[`${f._key}.name`] = 'Repetido';
     seen.add(f.name.toLowerCase());
     if (f.type === 'choice' && !(f.options?.length)) e[`${f._key}.options`] = 'Agrega al menos una opción';
-    if (f.type === 'reference' && !f.referenceEntity) e[`${f._key}.referenceEntity`] = 'Selecciona el catálogo';
+    if ((f.type === 'reference' || f.type === 'parent') && !f.referenceEntity) e[`${f._key}.referenceEntity`] = 'Selecciona el catálogo';
+    if (f.type === 'formula' && !f.formula?.trim()) e[`${f._key}.formula`] = 'Escribe la fórmula';
+    if (f.type === 'lines' && !f.childEntity) e[`${f._key}.childEntity`] = 'Selecciona el catálogo de partidas';
   });
   if (d.fields.filter((f) => !f.isArchived).length === 0) e.fields = 'Agrega al menos un campo';
+  const rules = parseJson<Rule[]>(d.rulesJson, 'array');
+  if (!rules.ok) e.rulesJson = rules.error;
+  const workflow = parseJson<Workflow>(d.workflowJson, 'object');
+  if (!workflow.ok) e.workflowJson = workflow.error;
   return e;
 }
 
@@ -190,6 +253,7 @@ interface FieldRowProps {
 function FieldRow({ f, index, count, errors, entities, roleNames, onChange, onMove, onRemove }: FieldRowProps) {
   const [expanded, setExpanded] = useState(f._isNew);
   const locked = !f._isNew;
+  const computed = COMPUTED_TYPES.includes(f.type);
   const err = (k: string) => errors[`${f._key}.${k}`];
   return (
     <div className={`field-row${f.isArchived ? ' archived' : ''}`}>
@@ -230,7 +294,7 @@ function FieldRow({ f, index, count, errors, entities, roleNames, onChange, onMo
           disabled={locked || f.isArchived}
           onChange={(e) => onChange({ type: e.target.value as FieldType })}
         >
-          {(Object.keys(FIELD_TYPE_LABELS) as FieldType[]).map((t) => <option key={t} value={t}>{FIELD_TYPE_LABELS[t]}</option>)}
+          {(f.type === 'state' ? [...MODELER_FIELD_TYPES, 'state' as FieldType] : MODELER_FIELD_TYPES).map((t) => <option key={t} value={t}>{FIELD_TYPE_LABELS[t]}</option>)}
         </Select>
         <div className="field-row-tools">
           {!f.isArchived && (
@@ -253,9 +317,62 @@ function FieldRow({ f, index, count, errors, entities, roleNames, onChange, onMo
       </div>
       {expanded && !f.isArchived && (
         <div className="field-row-body">
-          <Switch checked={!!f.required} onChange={(v) => onChange({ required: v })} label="Obligatorio" />
+          {!computed && <Switch checked={!!f.required} onChange={(v) => onChange({ required: v })} label="Obligatorio" />}
           <Switch checked={!!f.showInList} onChange={(v) => onChange({ showInList: v })} label="Mostrar en listado" />
-          <Switch checked={!!f.unique} disabled={locked || f.type === 'boolean' || f.type === 'longtext'} onChange={(v) => onChange({ unique: v })} label="Valor único" />
+          {!computed && f.type !== 'parent' && (
+            <Switch checked={!!f.unique} disabled={locked || f.type === 'boolean' || f.type === 'longtext' || f.type === 'user'} onChange={(v) => onChange({ unique: v })} label="Valor único" />
+          )}
+          {f.type === 'autonumber' && (
+            <>
+              <Input inputSize="sm" label="Prefijo" className="mono" placeholder="OC-" maxLength={10} disabled={locked} value={f.prefix ?? ''} onChange={(e) => onChange({ prefix: e.target.value })} />
+              <Input inputSize="sm" type="number" min={1} max={12} label="Dígitos" disabled={locked} value={f.padding ?? 6} onChange={(e) => onChange({ padding: Number(e.target.value) || undefined })} hint={`Ejemplo: ${(f.prefix ?? '')}${'1'.padStart(f.padding ?? 6, '0')}`} />
+            </>
+          )}
+          {f.type === 'formula' && (
+            <>
+              <Textarea
+                wrapClassName="span-all"
+                className="mono"
+                label="Fórmula"
+                rows={2}
+                maxLength={1000}
+                placeholder="Cantidad * PrecioUnitario"
+                hint="Usa nombres de campos y funciones como ROUND, IF, SUM(Partidas.Importe)."
+                error={err('formula')}
+                value={f.formula ?? ''}
+                onChange={(e) => onChange({ formula: e.target.value })}
+              />
+              <Select selectSize="sm" label="Tipo de resultado" disabled={locked} value={f.resultType ?? 'decimal'} onChange={(e) => onChange({ resultType: e.target.value as FormulaResultType })}>
+                {(Object.keys(RESULT_TYPE_LABELS) as FormulaResultType[]).map((t) => <option key={t} value={t}>{RESULT_TYPE_LABELS[t]}</option>)}
+              </Select>
+            </>
+          )}
+          {f.type === 'lines' && (
+            <Select selectSize="sm" label="Catálogo de partidas" disabled={locked} error={err('childEntity')} value={f.childEntity ?? ''} onChange={(e) => onChange({ childEntity: e.target.value || undefined })}
+              hint="Debe tener un campo de tipo Documento padre que apunte a este catálogo.">
+              <option value="">Selecciona…</option>
+              {entities.filter((x) => !x.isArchived).map((x) => <option key={x.name} value={x.name}>{x.labelPlural}</option>)}
+            </Select>
+          )}
+          {f.type === 'parent' && (
+            <Select selectSize="sm" label="Documento padre" disabled={locked} error={err('referenceEntity')} value={f.referenceEntity ?? ''} onChange={(e) => onChange({ referenceEntity: e.target.value || undefined })}>
+              <option value="">Selecciona…</option>
+              {entities.filter((x) => !x.isArchived && !x.isChild).map((x) => <option key={x.name} value={x.name}>{x.labelPlural}</option>)}
+            </Select>
+          )}
+          {supportsDefault(f.type) && (
+            <Input
+              inputSize="sm"
+              wrapClassName="span-all"
+              className="mono"
+              label="Valor por defecto"
+              placeholder="Sin valor por defecto"
+              maxLength={1000}
+              hint="Expresión, p. ej. TODAY() o Producto.CostoUltimo"
+              value={f.defaultValue ?? ''}
+              onChange={(e) => onChange({ defaultValue: e.target.value })}
+            />
+          )}
           {f.type === 'text' && (
             <Input inputSize="sm" type="number" min={1} max={4000} label="Longitud máxima" disabled={locked} value={f.maxLength ?? ''} onChange={(e) => onChange({ maxLength: e.target.value ? Number(e.target.value) : undefined })} />
           )}
@@ -276,9 +393,11 @@ function FieldRow({ f, index, count, errors, entities, roleNames, onChange, onMo
               <TagInput value={f.options ?? []} onChange={(v) => onChange({ options: v })} aria-label="Opciones de la lista" invalid={!!err('options')} />
             </Field>
           )}
-          <Field label="Obligatorio solo para roles" hint={roleNames ? 'El campo será obligatorio cuando lo capture alguien con estos roles' : 'Escribe el nombre exacto del rol'} className="span-all">
-            <TagInput value={f.requiredForRoles ?? []} onChange={(v) => onChange({ requiredForRoles: v })} suggestions={roleNames ?? undefined} placeholder="Agregar rol…" aria-label="Roles para los que es obligatorio" />
-          </Field>
+          {!computed && (
+            <Field label="Obligatorio solo para roles" hint={roleNames ? 'El campo será obligatorio cuando lo capture alguien con estos roles' : 'Escribe el nombre exacto del rol'} className="span-all">
+              <TagInput value={f.requiredForRoles ?? []} onChange={(v) => onChange({ requiredForRoles: v })} suggestions={roleNames ?? undefined} placeholder="Agregar rol…" aria-label="Roles para los que es obligatorio" />
+            </Field>
+          )}
         </div>
       )}
     </div>
@@ -366,6 +485,7 @@ export function EntityEditor({ original, entities, onCancel, onReview }: EntityE
           />
           <IconPicker value={d.icon} onChange={(icon) => setD((s) => ({ ...s, icon }))} />
           <Textarea wrapClassName="span-2" label="Descripción" placeholder="Para qué sirve este catálogo" rows={2} style={{ minHeight: 64 }} value={d.description} onChange={(e) => setD((s) => ({ ...s, description: e.target.value }))} maxLength={500} />
+          <Input label="Grupo del menú" hint="Sección del menú lateral, p. ej. Compras. Vacío: Catálogos." maxLength={60} value={d.group} onChange={(e) => setD((s) => ({ ...s, group: e.target.value }))} />
           <Select label="Campo para mostrar en referencias" hint="Se usa cuando otro catálogo apunta a este" value={d.displayField} onChange={(e) => setD((s) => ({ ...s, displayField: e.target.value }))}>
             <option value="">Automático</option>
             {textFields.map((f) => <option key={f._key} value={f.name}>{f.label || f.name}</option>)}
@@ -396,6 +516,37 @@ export function EntityEditor({ original, entities, onCancel, onReview }: EntityE
           ))}
         </div>
       </section>
+
+      <details className="card card-pad advanced-section" open={!!(original?.rules?.length || original?.workflow) || undefined}>
+        <summary className="advanced-summary">
+          <span className="section-title">Reglas y proceso</span>
+          <span className="subtle">Avanzado · validaciones de negocio y estados del documento</span>
+        </summary>
+        <div className="stack" style={{ marginTop: 'var(--space-4)' }}>
+          <Textarea
+            className="mono json-editor"
+            label="Reglas (JSON)"
+            rows={8}
+            spellCheck={false}
+            placeholder={'[\n  { "name": "FechaValida", "assert": "FechaEntrega >= Fecha", "message": "La entrega no puede ser antes de la fecha", "field": "FechaEntrega" }\n]'}
+            hint="Lista de reglas: name, assert, message y opcionalmente when y field. Se validan en la vista previa."
+            error={visibleErrors.rulesJson ?? (d.rulesJson ? parseJsonError(d.rulesJson, 'array') : undefined)}
+            value={d.rulesJson}
+            onChange={(e) => setD((s) => ({ ...s, rulesJson: e.target.value }))}
+          />
+          <Textarea
+            className="mono json-editor"
+            label="Proceso (JSON)"
+            rows={12}
+            spellCheck={false}
+            placeholder={'{\n  "initial": "Borrador",\n  "states": [{ "name": "Borrador", "label": "Borrador", "editable": true }],\n  "transitions": []\n}'}
+            hint="Estados y transiciones del documento. Déjalo vacío si el catálogo no tiene proceso."
+            error={visibleErrors.workflowJson ?? (d.workflowJson ? parseJsonError(d.workflowJson, 'object') : undefined)}
+            value={d.workflowJson}
+            onChange={(e) => setD((s) => ({ ...s, workflowJson: e.target.value }))}
+          />
+        </div>
+      </details>
 
       <div className="row" style={{ justifyContent: 'flex-end' }}>
         {showErrors && Object.keys(errors).length > 0 && <span className="field-error" style={{ marginRight: 'auto' }}>Corrige los campos marcados antes de continuar.</span>}

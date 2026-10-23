@@ -20,6 +20,7 @@ public static partial class PlanCompiler
     public const int MaxLabel = 100;
     public const int MaxDescription = 500;
     public const int MaxOptions = 200;
+    public const int MaxGroup = 60;
 
     [GeneratedRegex("^[a-z0-9]+(-[a-z0-9]+)*$", RegexOptions.CultureInvariant)]
     private static partial Regex IconPattern();
@@ -34,6 +35,7 @@ public static partial class PlanCompiler
         var steps = new List<PlanStep>();
         var sql = new List<string>();
         var touched = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var lastOp = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
         if (plan.Operations.Count == 0)
             errors.Add(new(-1, "El plan no contiene operaciones."));
@@ -54,6 +56,8 @@ public static partial class PlanCompiler
                 AddFieldOp op => AddField(ctx, op),
                 UpdateFieldOp op => UpdateField(ctx, op),
                 ArchiveFieldOp op => ArchiveField(ctx, op),
+                SetWorkflowOp op => SetWorkflow(ctx, op),
+                SetRulesOp op => SetRules(ctx, op),
                 _ => ctx.Fail("Operación desconocida."),
             };
             // Solo se registra el efecto si la operación fue válida; así las siguientes ven un modelo coherente.
@@ -61,12 +65,62 @@ public static partial class PlanCompiler
             {
                 working[result.Entity.Name] = result.Entity;
                 touched.Add(result.Entity.Name);
+                lastOp[result.Entity.Name] = i;
                 steps.Add(new(i, result.Description, result.Sql.Count > 0 ? string.Join("\n", result.Sql) : null));
                 sql.AddRange(result.Sql);
             }
         }
 
+        // Pasada final: expresiones y relaciones se validan contra el modelo completo, porque un plan
+        // puede crear la partida después del documento y luego el total que la suma.
+        foreach (var name in touched)
+            foreach (var message in ValidateFinal(working[name], working, knownRoles))
+                errors.Add(new(lastOp[name], message));
+
         return new CompiledPlan(new PlanPreview(errors.Count == 0, errors, steps), working, sql, touched);
+    }
+
+    private static IEnumerable<string> ValidateFinal(EntityDef e, IReadOnlyDictionary<string, EntityDef> model, IReadOnlySet<string> roles)
+    {
+        if (e.IsArchived) yield break;
+        var msgs = new List<string>();
+        void Check(string? expr, string where)
+        {
+            if (string.IsNullOrWhiteSpace(expr)) return;
+            foreach (var err in Expressions.ExprAnalyzer.Analyze(expr, e, model, roles).Errors)
+                msgs.Add($"{e.Name} › {where}: {err}");
+        }
+
+        var parents = e.ActiveFields.Count(f => f.Type == FieldTypes.Parent);
+        if (parents > 1) msgs.Add($"{e.Name} solo puede tener un campo de tipo documento padre.");
+        if (e.IsChild && e.Workflow is not null) msgs.Add($"{e.Name} es una partida: el proceso se define en su documento.");
+
+        foreach (var f in e.ActiveFields)
+        {
+            Check(f.DefaultValue, $"valor por defecto de {f.Name}");
+            Check(f.Formula, $"fórmula de {f.Name}");
+            if (f.Type == FieldTypes.Lines)
+            {
+                if (!model.TryGetValue(f.ChildEntity ?? "", out var child) || child.IsArchived)
+                    msgs.Add($"{e.Name}.{f.Name}: el catálogo de partidas '{f.ChildEntity}' no existe.");
+                else if (!string.Equals(child.ParentEntity, e.Name, StringComparison.OrdinalIgnoreCase))
+                    msgs.Add($"{e.Name}.{f.Name}: '{child.Name}' necesita un campo de tipo documento padre que apunte a {e.Name}.");
+            }
+        }
+        try { Expressions.FormulaGraph.Order(e); }
+        catch (Expressions.ExprException ex) { msgs.Add($"{e.Name}: {ex.Message}"); }
+
+        foreach (var r in e.Rules ?? [])
+        {
+            Check(r.When, $"regla {r.Name} (cuándo)");
+            Check(r.Assert, $"regla {r.Name}");
+        }
+        foreach (var t in e.Workflow?.Transitions ?? [])
+        {
+            Check(t.When, $"transición {t.Name}");
+            foreach (var s in t.Set ?? []) Check(s.Value, $"transición {t.Name} › {s.Field}");
+        }
+        foreach (var m in msgs) yield return m;
     }
 
     private sealed record OpResult(EntityDef Entity, string Description, IReadOnlyList<string> Sql);
@@ -113,10 +167,12 @@ public static partial class PlanCompiler
         }
         if (ctx.ErrorCount > start) return null;
 
+        if (op.Group?.Trim().Length > MaxGroup) { ctx.Error($"El grupo del menú admite máximo {MaxGroup} caracteres."); return null; }
         var entity = new EntityDef
         {
             Name = op.Name, Label = op.Label.Trim(), LabelPlural = op.LabelPlural.Trim(),
             Icon = op.Icon ?? "database", Description = op.Description?.Trim(), Fields = fields,
+            Group = string.IsNullOrWhiteSpace(op.Group) ? null : op.Group.Trim(),
         };
         if (!ValidateDisplayField(ctx, entity, op.DisplayField)) return null;
         entity = entity with { DisplayField = op.DisplayField };
@@ -134,6 +190,7 @@ public static partial class PlanCompiler
         if (op.Icon is not null) ValidateIcon(ctx, op.Icon);
         if (op.Description?.Length > MaxDescription) ctx.Error("La descripción es demasiado larga.");
         if (op.DisplayField is not null && !ValidateDisplayField(ctx, e, op.DisplayField)) return null;
+        if (op.Group?.Trim().Length > MaxGroup) { ctx.Error($"El grupo del menú admite máximo {MaxGroup} caracteres."); return null; }
 
         var updated = e with
         {
@@ -142,6 +199,7 @@ public static partial class PlanCompiler
             Icon = op.Icon ?? e.Icon,
             Description = op.Description?.Trim() ?? e.Description,
             DisplayField = op.DisplayField ?? e.DisplayField,
+            Group = op.Group is null ? e.Group : op.Group.Trim() is { Length: > 0 } g ? g : null,
         };
         return new(updated, $"Actualizar propiedades del catálogo '{updated.Label}'", []);
     }
@@ -152,7 +210,8 @@ public static partial class PlanCompiler
         if (e is null) return null;
         var referencedBy = ctx.Model.Values
             .Where(o => !o.IsArchived && !string.Equals(o.Name, e.Name, StringComparison.OrdinalIgnoreCase))
-            .SelectMany(o => o.ActiveFields.Where(f => string.Equals(f.ReferenceEntity, e.Name, StringComparison.OrdinalIgnoreCase))
+            .SelectMany(o => o.ActiveFields.Where(f => string.Equals(f.ReferenceEntity, e.Name, StringComparison.OrdinalIgnoreCase) ||
+                                                       string.Equals(f.ChildEntity, e.Name, StringComparison.OrdinalIgnoreCase))
                 .Select(f => $"{o.Name}.{f.Name}"))
             .ToList();
         if (referencedBy.Count > 0)
@@ -192,6 +251,12 @@ public static partial class PlanCompiler
             else ValidateOptions(ctx, op.Options);
         }
         if (op.RequiredForRoles is not null) ValidateRoles(ctx, op.RequiredForRoles);
+        if (op.DefaultValue is not null && (f.ReadOnly || f.Type == FieldTypes.Lines))
+            ctx.Error($"'{f.Name}' es calculado por el motor y no admite valor por defecto.");
+        if (op.Formula is not null && f.Type != FieldTypes.Formula)
+            ctx.Error($"'{f.Name}' no es un campo de fórmula.");
+        if (op.Formula is not null && string.IsNullOrWhiteSpace(op.Formula))
+            ctx.Error($"La fórmula de '{f.Name}' no puede quedar vacía.");
         if (ctx.ErrorCount > start) return null;
 
         var updated = f with
@@ -202,6 +267,8 @@ public static partial class PlanCompiler
             Options = op.Options?.Select(o => o.Trim()).ToList() ?? f.Options,
             RequiredForRoles = op.RequiredForRoles ?? f.RequiredForRoles,
             DisplayOrder = op.DisplayOrder ?? f.DisplayOrder,
+            DefaultValue = op.DefaultValue is null ? f.DefaultValue : op.DefaultValue.Trim() is { Length: > 0 } d ? d : null,
+            Formula = op.Formula?.Trim() ?? f.Formula,
         };
         return new(ReplaceField(e, updated), $"Actualizar campo '{updated.Label}' de '{e.Label}'", []);
     }
@@ -213,6 +280,8 @@ public static partial class PlanCompiler
         var f = e.FindField(op.Field);
         if (f is null || f.IsArchived) return ctx.Fail($"El campo '{op.Field}' no existe en '{e.Name}'.");
         if (e.ActiveFields.Count() == 1) return ctx.Fail("No se puede archivar el último campo activo.");
+        if (f.Type is FieldTypes.State or FieldTypes.Parent)
+            return ctx.Fail($"'{f.Name}' lo administra el motor y no se puede archivar.");
 
         var updated = ReplaceField(e, f with { IsArchived = true });
         if (string.Equals(updated.DisplayField, f.Name, StringComparison.OrdinalIgnoreCase))
@@ -220,22 +289,119 @@ public static partial class PlanCompiler
         return new(updated, $"Archivar campo '{f.Label}' de '{e.Label}' (la columna y sus datos se conservan)", []);
     }
 
+    private static readonly HashSet<string> StateColors = ["neutral", "accent", "success", "warning", "danger"];
+    private static readonly HashSet<string> Variants = ["primary", "secondary", "danger"];
+    public const int MaxRules = 50;
+    public const int MaxStates = 30;
+    public const int MaxTransitions = 60;
+
+    private static OpResult? SetWorkflow(Ctx ctx, SetWorkflowOp op)
+    {
+        var e = ctx.Active(op.Entity);
+        if (e is null) return null;
+        var start = ctx.ErrorCount;
+        var w = op.Workflow;
+        var existing = e.FindField(Workflow.StateField);
+        if (existing is not null && existing.Type != FieldTypes.State)
+            ctx.Error($"'{e.Name}' ya tiene un campo '{Workflow.StateField}' que no es de proceso.");
+        if (w.States.Count is 0 or > MaxStates) ctx.Error($"El proceso necesita de 1 a {MaxStates} estados.");
+        if (w.Transitions.Count > MaxTransitions) ctx.Error($"Máximo {MaxTransitions} transiciones.");
+
+        var states = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var s in w.States)
+        {
+            if (!Identifiers.IsValid(s.Name, out var err)) ctx.Error($"Estado: {err}");
+            else if (!states.Add(s.Name)) ctx.Error($"El estado '{s.Name}' está repetido.");
+            ValidateLabel(ctx, s.Label, $"La etiqueta del estado '{s.Name}'");
+            if (!StateColors.Contains(s.Color)) ctx.Error($"Color '{s.Color}' no válido en '{s.Name}' ({string.Join(", ", StateColors)}).");
+        }
+        if (!states.Contains(w.Initial ?? "")) ctx.Error($"El estado inicial '{w.Initial}' no está definido.");
+
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var t in w.Transitions)
+        {
+            var where = $"Transición '{t.Name}'";
+            if (!Identifiers.IsValid(t.Name, out var err)) ctx.Error($"{where}: {err}");
+            else if (!names.Add(t.Name)) ctx.Error($"{where} está repetida.");
+            ValidateLabel(ctx, t.Label, $"La etiqueta de {where}");
+            if (t.From.Count == 0) ctx.Error($"{where}: indica desde qué estados aplica.");
+            foreach (var f in t.From.Where(f => !states.Contains(f))) ctx.Error($"{where}: el estado '{f}' no existe.");
+            if (!states.Contains(t.To)) ctx.Error($"{where}: el estado destino '{t.To}' no existe.");
+            if (t.Roles is not null) ValidateRoles(ctx, t.Roles);
+            if (t.WhenMessage?.Length > 300) ctx.Error($"{where}: el mensaje es demasiado largo.");
+            if (t.Icon is not null) ValidateIcon(ctx, t.Icon);
+            if (t.Variant is not null && !Variants.Contains(t.Variant)) ctx.Error($"{where}: variante '{t.Variant}' no válida.");
+            foreach (var rf in t.RequiredFields ?? [])
+                if (e.FindField(rf) is not { IsArchived: false } fd || fd.ReadOnly || fd.Type == FieldTypes.Lines)
+                    ctx.Error($"{where}: '{rf}' no es un campo capturable de {e.Name}.");
+            foreach (var s in t.Set ?? [])
+                if (e.FindField(s.Field) is not { IsArchived: false } fd || fd.ReadOnly || fd.Type == FieldTypes.Lines)
+                    ctx.Error($"{where}: no se puede asignar '{s.Field}'.");
+        }
+        if (ctx.ErrorCount > start) return null;
+
+        var stateField = new FieldDef
+        {
+            Name = Workflow.StateField, Label = "Estado", Type = FieldTypes.State, ShowInList = true,
+            Options = w.States.Select(s => s.Name).ToList(), DisplayOrder = existing?.DisplayOrder ?? -1,
+        };
+        var updated = existing is null
+            ? e with { Workflow = w, Fields = [.. e.Fields, stateField] }
+            : ReplaceField(e with { Workflow = w }, stateField);
+        return new(updated,
+            $"{(existing is null ? "Definir" : "Actualizar")} proceso de '{e.Label}': {w.States.Count} estados, {w.Transitions.Count} transiciones",
+            existing is null ? DdlGenerator.AddStateColumn(e.Name, w.Initial!) : []);
+    }
+
+    private static OpResult? SetRules(Ctx ctx, SetRulesOp op)
+    {
+        var e = ctx.Active(op.Entity);
+        if (e is null) return null;
+        var start = ctx.ErrorCount;
+        if (op.Rules.Count > MaxRules) ctx.Error($"Máximo {MaxRules} reglas por catálogo.");
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var r in op.Rules)
+        {
+            if (!Identifiers.IsValid(r.Name, out var err)) ctx.Error($"Regla: {err}");
+            else if (!names.Add(r.Name)) ctx.Error($"La regla '{r.Name}' está repetida.");
+            if (string.IsNullOrWhiteSpace(r.Message) || r.Message.Length > 300) ctx.Error($"La regla '{r.Name}' necesita un mensaje (máx. 300).");
+            if (string.IsNullOrWhiteSpace(r.Assert)) ctx.Error($"La regla '{r.Name}' necesita una condición.");
+            if (r.Field is not null && e.FindField(r.Field) is not { IsArchived: false })
+                ctx.Error($"La regla '{r.Name}' apunta al campo '{r.Field}', que no existe.");
+        }
+        if (ctx.ErrorCount > start) return null;
+        return new(e with { Rules = op.Rules }, $"Definir {op.Rules.Count} regla(s) de negocio en '{e.Label}'", []);
+    }
+
     // ---------------- Validaciones ----------------
 
     private static FieldDef Normalize(FieldDef f, int order)
     {
         var type = f.Type?.Trim().ToLowerInvariant() ?? "";
+        var resultType = type == FieldTypes.Formula ? f.ResultType?.Trim().ToLowerInvariant() ?? FieldTypes.Decimal : null;
+        var isDecimal = type == FieldTypes.Decimal || resultType == FieldTypes.Decimal;
+        var computed = FieldTypes.ReadOnly.Contains(type) || type == FieldTypes.Lines;
         return f with
         {
             Label = f.Label?.Trim() ?? "",
             Type = type,
             MaxLength = type == FieldTypes.Text ? f.MaxLength ?? FieldTypes.DefaultTextLength : null,
-            Precision = type == FieldTypes.Decimal ? f.Precision ?? 18 : null,
-            Scale = type == FieldTypes.Decimal ? f.Scale ?? 2 : null,
+            Precision = isDecimal ? f.Precision ?? 18 : null,
+            Scale = isDecimal ? f.Scale ?? 2 : null,
             Options = type == FieldTypes.Choice ? f.Options?.Select(o => o.Trim()).ToList() : null,
-            ReferenceEntity = type == FieldTypes.Reference ? f.ReferenceEntity : null,
+            ReferenceEntity = type is FieldTypes.Reference or FieldTypes.Parent ? f.ReferenceEntity : null,
             DisplayOrder = f.DisplayOrder != 0 ? f.DisplayOrder : order,
             IsArchived = false,
+            // El motor calcula estos tipos: nunca son obligatorios ni únicos por captura.
+            Required = !computed && f.Required,
+            Unique = !computed && f.Unique,
+            DefaultValue = computed || string.IsNullOrWhiteSpace(f.DefaultValue) ? null : f.DefaultValue.Trim(),
+            Formula = type == FieldTypes.Formula ? f.Formula?.Trim() : null,
+            ResultType = resultType,
+            Prefix = type == FieldTypes.Autonumber ? f.Prefix ?? "" : null,
+            Padding = type == FieldTypes.Autonumber ? f.Padding ?? 6 : null,
+            ChildEntity = type == FieldTypes.Lines ? f.ChildEntity : null,
+            ShowInList = type != FieldTypes.Lines && f.ShowInList,
         };
     }
 
@@ -254,14 +420,30 @@ public static partial class PlanCompiler
             if (f.Options is null || f.Options.Count == 0) ctx.Error($"El campo de lista '{f.Name}' necesita opciones.");
             else ValidateOptions(ctx, f.Options);
         }
-        if (f.Type == FieldTypes.Reference)
+        if (f.Type is FieldTypes.Reference or FieldTypes.Parent)
         {
             var target = f.ReferenceEntity;
             var isSelf = string.Equals(target, selfEntity, StringComparison.OrdinalIgnoreCase);
             if (string.IsNullOrEmpty(target)) ctx.Error($"El campo '{f.Name}' debe indicar el catálogo al que hace referencia.");
+            else if (f.Type == FieldTypes.Parent && isSelf) ctx.Error($"'{f.Name}': una partida no puede ser su propio documento.");
             else if (!isSelf && (!ctx.Model.TryGetValue(target, out var t) || t.IsArchived))
                 ctx.Error($"El catálogo referenciado '{target}' no existe.");
         }
+        if (f.Type == FieldTypes.Autonumber)
+        {
+            if (f.Prefix is { Length: > 10 } || f.Prefix?.Any(c => !(char.IsAsciiLetterOrDigit(c) || c is '-' or '_' or '/')) == true)
+                ctx.Error($"El prefijo de '{f.Name}' admite hasta 10 letras, números, '-', '_' o '/'.");
+            if (f.Padding is < 1 or > 10) ctx.Error($"Los dígitos del folio '{f.Name}' deben ser de 1 a 10.");
+        }
+        if (f.Type == FieldTypes.Formula)
+        {
+            if (string.IsNullOrWhiteSpace(f.Formula)) ctx.Error($"El campo '{f.Name}' necesita una fórmula.");
+            if (!FieldTypes.FormulaResults.Contains(f.ResultType ?? "")) ctx.Error($"Tipo de resultado '{f.ResultType}' no soportado en '{f.Name}'.");
+            if (f.ResultType == FieldTypes.Decimal && (f.Precision is < 1 or > 38 || f.Scale < 0 || f.Scale > f.Precision))
+                ctx.Error($"Precisión/escala inválidas en '{f.Name}'.");
+        }
+        if (f.Type == FieldTypes.Lines && string.IsNullOrWhiteSpace(f.ChildEntity))
+            ctx.Error($"El campo de partidas '{f.Name}' debe indicar su catálogo de partidas.");
         if (f.Unique && !FieldTypes.Uniqueable.Contains(f.Type))
             ctx.Error($"El tipo '{f.Type}' no admite valores únicos ('{f.Name}').");
         if (f.RequiredForRoles is not null) ValidateRoles(ctx, f.RequiredForRoles);
@@ -298,9 +480,9 @@ public static partial class PlanCompiler
     {
         if (displayField is null) return true;
         var f = e.FindField(displayField);
-        if (f is null || f.IsArchived || f.Type is not (FieldTypes.Text or FieldTypes.Choice))
+        if (f is null || f.IsArchived || f.Type is not (FieldTypes.Text or FieldTypes.Choice or FieldTypes.Autonumber))
         {
-            ctx.Error($"El campo para mostrar '{displayField}' debe ser un campo de texto o lista activo.");
+            ctx.Error($"El campo para mostrar '{displayField}' debe ser un campo de texto, lista o folio activo.");
             return false;
         }
         return true;

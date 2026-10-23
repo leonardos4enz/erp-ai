@@ -89,7 +89,7 @@ public static class AuthEndpoints
     internal static async Task<MeResponse> BuildMe(UserContext u, MetadataStore store, CancellationToken ct)
     {
         var model = await store.GetAsync(ct);
-        var entities = model.Values.Where(e => !e.IsArchived)
+        var entities = model.Values.Where(e => !e.IsArchived && !e.IsChild)
             .Select(e => (e.Name, Access: u.Access(e.Name)))
             .Where(x => x.Access.Read || x.Access.Create)
             .ToDictionary(x => x.Name, x => x.Access);

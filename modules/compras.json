@@ -1,0 +1,369 @@
+{
+  "id": "compras",
+  "name": "Compras",
+  "version": "1.0.0",
+  "icon": "shopping-cart",
+  "description": "Requisiciones, órdenes de compra con autorización por montos y recepción de mercancía. Incluye proveedores, productos y catálogos base.",
+  "plan": {
+    "description": "Módulo de Compras 1.0.0",
+    "operations": [
+      { "op": "createEntity", "group": "Compras", "name": "Moneda", "label": "Moneda", "labelPlural": "Monedas", "icon": "coins", "displayField": "Clave",
+        "description": "Monedas para órdenes de compra.",
+        "fields": [
+          { "name": "Clave", "label": "Clave", "type": "text", "maxLength": 3, "required": true, "unique": true },
+          { "name": "Nombre", "label": "Nombre", "type": "text", "maxLength": 60, "required": true },
+          { "name": "Simbolo", "label": "Símbolo", "type": "text", "maxLength": 5 }
+        ] },
+      { "op": "createEntity", "group": "Compras", "name": "UnidadMedida", "label": "Unidad de medida", "labelPlural": "Unidades de medida", "icon": "ruler", "displayField": "Clave",
+        "fields": [
+          { "name": "Clave", "label": "Clave", "type": "text", "maxLength": 10, "required": true, "unique": true },
+          { "name": "Nombre", "label": "Nombre", "type": "text", "maxLength": 60, "required": true }
+        ] },
+      { "op": "createEntity", "group": "Compras", "name": "CondicionPago", "label": "Condición de pago", "labelPlural": "Condiciones de pago", "icon": "calendar-clock",
+        "fields": [
+          { "name": "Nombre", "label": "Nombre", "type": "text", "maxLength": 60, "required": true, "unique": true },
+          { "name": "Dias", "label": "Días de crédito", "type": "integer", "required": true, "defaultValue": "0" }
+        ] },
+      { "op": "createEntity", "group": "Compras", "name": "CategoriaProducto", "label": "Categoría de producto", "labelPlural": "Categorías de producto", "icon": "tags",
+        "fields": [ { "name": "Nombre", "label": "Nombre", "type": "text", "maxLength": 80, "required": true, "unique": true } ] },
+      { "op": "createEntity", "group": "Compras", "name": "Departamento", "label": "Departamento", "labelPlural": "Departamentos", "icon": "building-2",
+        "fields": [ { "name": "Nombre", "label": "Nombre", "type": "text", "maxLength": 80, "required": true, "unique": true } ] },
+      { "op": "createEntity", "group": "Compras", "name": "Almacen", "label": "Almacén", "labelPlural": "Almacenes", "icon": "warehouse", "displayField": "Nombre",
+        "fields": [
+          { "name": "Clave", "label": "Clave", "type": "text", "maxLength": 10, "required": true, "unique": true },
+          { "name": "Nombre", "label": "Nombre", "type": "text", "maxLength": 80, "required": true },
+          { "name": "Direccion", "label": "Dirección", "type": "longtext", "showInList": false }
+        ] },
+
+      { "op": "createEntity", "group": "Compras", "name": "Proveedor", "label": "Proveedor", "labelPlural": "Proveedores", "icon": "truck", "displayField": "RazonSocial",
+        "description": "Padrón de proveedores.",
+        "fields": [
+          { "name": "Folio", "label": "Folio", "type": "autonumber", "prefix": "PRV-", "padding": 4 },
+          { "name": "RFC", "label": "RFC", "type": "text", "maxLength": 13, "required": true, "unique": true },
+          { "name": "RazonSocial", "label": "Razón social", "type": "text", "maxLength": 200, "required": true },
+          { "name": "NombreComercial", "label": "Nombre comercial", "type": "text", "maxLength": 120 },
+          { "name": "Contacto", "label": "Contacto", "type": "text", "maxLength": 120, "showInList": false },
+          { "name": "Correo", "label": "Correo", "type": "text", "maxLength": 120 },
+          { "name": "Telefono", "label": "Teléfono", "type": "text", "maxLength": 20, "showInList": false },
+          { "name": "CondicionPago", "label": "Condición de pago", "type": "reference", "referenceEntity": "CondicionPago", "showInList": false },
+          { "name": "Moneda", "label": "Moneda", "type": "reference", "referenceEntity": "Moneda", "showInList": false },
+          { "name": "LimiteCredito", "label": "Límite de crédito", "type": "decimal", "precision": 18, "scale": 2, "showInList": false },
+          { "name": "Categoria", "label": "Categoría", "type": "reference", "referenceEntity": "CategoriaProducto" },
+          { "name": "Activo", "label": "Activo", "type": "boolean", "defaultValue": "TRUE" },
+          { "name": "Notas", "label": "Notas", "type": "longtext", "showInList": false }
+        ] },
+      { "op": "setRules", "entity": "Proveedor", "rules": [
+          { "name": "RfcLongitud", "field": "RFC", "assert": "LEN(RFC) >= 12 AND LEN(RFC) <= 13", "message": "El RFC debe tener 12 (persona moral) o 13 caracteres (persona física)." },
+          { "name": "CorreoValido", "field": "Correo", "when": "NOT ISBLANK(Correo)", "assert": "ISEMAIL(Correo)", "message": "El correo no tiene un formato válido." },
+          { "name": "LimiteNoNegativo", "field": "LimiteCredito", "assert": "LimiteCredito >= 0", "message": "El límite de crédito no puede ser negativo." }
+        ] },
+
+      { "op": "createEntity", "group": "Compras", "name": "Producto", "label": "Producto", "labelPlural": "Productos", "icon": "package", "displayField": "Descripcion",
+        "fields": [
+          { "name": "Clave", "label": "Clave", "type": "text", "maxLength": 30, "required": true, "unique": true },
+          { "name": "Descripcion", "label": "Descripción", "type": "text", "maxLength": 200, "required": true },
+          { "name": "Categoria", "label": "Categoría", "type": "reference", "referenceEntity": "CategoriaProducto" },
+          { "name": "Unidad", "label": "Unidad", "type": "reference", "referenceEntity": "UnidadMedida", "required": true },
+          { "name": "CostoUltimo", "label": "Costo último", "type": "decimal", "precision": 18, "scale": 2, "defaultValue": "0" },
+          { "name": "IVA", "label": "IVA %", "type": "decimal", "precision": 5, "scale": 2, "defaultValue": "16" },
+          { "name": "ProveedorPreferido", "label": "Proveedor preferido", "type": "reference", "referenceEntity": "Proveedor", "showInList": false },
+          { "name": "StockMinimo", "label": "Stock mínimo", "type": "decimal", "precision": 18, "scale": 2, "showInList": false },
+          { "name": "Activo", "label": "Activo", "type": "boolean", "defaultValue": "TRUE" }
+        ] },
+      { "op": "setRules", "entity": "Producto", "rules": [
+          { "name": "CostoNoNegativo", "field": "CostoUltimo", "assert": "CostoUltimo >= 0", "message": "El costo no puede ser negativo." },
+          { "name": "IvaRango", "field": "IVA", "assert": "IVA >= 0 AND IVA <= 100", "message": "El IVA debe estar entre 0 y 100." }
+        ] },
+
+      { "op": "createEntity", "group": "Compras", "name": "Requisicion", "label": "Requisición", "labelPlural": "Requisiciones", "icon": "clipboard-list", "displayField": "Folio",
+        "description": "Solicitudes internas de compra.",
+        "fields": [
+          { "name": "Folio", "label": "Folio", "type": "autonumber", "prefix": "REQ-", "padding": 6 },
+          { "name": "Solicitante", "label": "Solicitante", "type": "user", "required": true, "defaultValue": "CURRENTUSER()" },
+          { "name": "Departamento", "label": "Departamento", "type": "reference", "referenceEntity": "Departamento", "required": true },
+          { "name": "Fecha", "label": "Fecha", "type": "date", "required": true, "defaultValue": "TODAY()" },
+          { "name": "FechaRequerida", "label": "Fecha requerida", "type": "date", "required": true, "defaultValue": "ADDDAYS(TODAY(), 7)" },
+          { "name": "Prioridad", "label": "Prioridad", "type": "choice", "options": ["Baja", "Normal", "Alta", "Urgente"], "defaultValue": "'Normal'" },
+          { "name": "Justificacion", "label": "Justificación", "type": "longtext", "required": true, "showInList": false },
+          { "name": "MotivoRechazo", "label": "Motivo de rechazo", "type": "longtext", "showInList": false }
+        ] },
+      { "op": "createEntity", "group": "Compras", "name": "RequisicionPartida", "label": "Partida de requisición", "labelPlural": "Partidas de requisición", "icon": "list",
+        "fields": [
+          { "name": "Requisicion", "label": "Requisición", "type": "parent", "referenceEntity": "Requisicion" },
+          { "name": "Producto", "label": "Producto", "type": "reference", "referenceEntity": "Producto", "required": true },
+          { "name": "Cantidad", "label": "Cantidad", "type": "decimal", "precision": 18, "scale": 2, "required": true },
+          { "name": "Unidad", "label": "Unidad", "type": "reference", "referenceEntity": "UnidadMedida", "defaultValue": "Producto.Unidad" },
+          { "name": "CostoEstimado", "label": "Costo estimado", "type": "decimal", "precision": 18, "scale": 2, "defaultValue": "Producto.CostoUltimo" },
+          { "name": "Importe", "label": "Importe", "type": "formula", "resultType": "decimal", "precision": 18, "scale": 2, "formula": "Cantidad * CostoEstimado" }
+        ] },
+      { "op": "setRules", "entity": "RequisicionPartida", "rules": [
+          { "name": "CantidadPositiva", "field": "Cantidad", "assert": "Cantidad > 0", "message": "La cantidad debe ser mayor a cero." }
+        ] },
+      { "op": "addField", "entity": "Requisicion", "field": { "name": "Partidas", "label": "Partidas", "type": "lines", "childEntity": "RequisicionPartida" } },
+      { "op": "addField", "entity": "Requisicion", "field": { "name": "TotalEstimado", "label": "Total estimado", "type": "formula", "resultType": "decimal", "precision": 18, "scale": 2, "formula": "SUM(Partidas.Importe)" } },
+      { "op": "setRules", "entity": "Requisicion", "rules": [
+          { "name": "FechaRequeridaValida", "field": "FechaRequerida", "assert": "FechaRequerida >= Fecha", "message": "La fecha requerida no puede ser anterior a la fecha de la requisición." }
+        ] },
+      { "op": "setWorkflow", "entity": "Requisicion", "workflow": {
+          "initial": "Borrador",
+          "states": [
+            { "name": "Borrador", "label": "Borrador", "color": "neutral", "editable": true },
+            { "name": "PorAprobar", "label": "Por aprobar", "color": "warning", "editable": false },
+            { "name": "Aprobada", "label": "Aprobada", "color": "success", "editable": false },
+            { "name": "Rechazada", "label": "Rechazada", "color": "danger", "editable": false },
+            { "name": "Atendida", "label": "Atendida", "color": "accent", "editable": false }
+          ],
+          "transitions": [
+            { "name": "enviar", "label": "Enviar a aprobación", "from": ["Borrador"], "to": "PorAprobar", "icon": "send", "variant": "primary",
+              "when": "COUNT(Partidas) > 0", "whenMessage": "Agrega al menos una partida." },
+            { "name": "aprobar", "label": "Aprobar", "from": ["PorAprobar"], "to": "Aprobada", "icon": "check", "variant": "primary",
+              "roles": ["Gerente de compras", "Director"],
+              "when": "NOT ISCREATOR() OR HASROLE('Director')", "whenMessage": "No puedes aprobar una requisición que tú creaste (control interno)." },
+            { "name": "devolver", "label": "Devolver", "from": ["PorAprobar"], "to": "Borrador", "icon": "undo-2",
+              "roles": ["Gerente de compras", "Director"], "requireComment": true },
+            { "name": "rechazar", "label": "Rechazar", "from": ["PorAprobar"], "to": "Rechazada", "icon": "x", "variant": "danger",
+              "roles": ["Gerente de compras", "Director"], "requiredFields": ["MotivoRechazo"] },
+            { "name": "atender", "label": "Marcar como atendida", "from": ["Aprobada"], "to": "Atendida", "icon": "check-check",
+              "roles": ["Comprador", "Gerente de compras"] }
+          ]
+        } },
+
+      { "op": "createEntity", "group": "Compras", "name": "OrdenCompra", "label": "Orden de compra", "labelPlural": "Órdenes de compra", "icon": "shopping-cart", "displayField": "Folio",
+        "description": "Órdenes de compra a proveedores con autorización por montos.",
+        "fields": [
+          { "name": "Folio", "label": "Folio", "type": "autonumber", "prefix": "OC-", "padding": 6 },
+          { "name": "Proveedor", "label": "Proveedor", "type": "reference", "referenceEntity": "Proveedor", "required": true },
+          { "name": "Requisicion", "label": "Requisición", "type": "reference", "referenceEntity": "Requisicion", "showInList": false },
+          { "name": "Fecha", "label": "Fecha", "type": "date", "required": true, "defaultValue": "TODAY()" },
+          { "name": "FechaEntrega", "label": "Fecha de entrega", "type": "date", "required": true, "defaultValue": "ADDDAYS(TODAY(), 7)" },
+          { "name": "Almacen", "label": "Almacén destino", "type": "reference", "referenceEntity": "Almacen", "required": true, "showInList": false },
+          { "name": "Moneda", "label": "Moneda", "type": "reference", "referenceEntity": "Moneda", "required": true, "defaultValue": "Proveedor.Moneda" },
+          { "name": "TipoCambio", "label": "Tipo de cambio", "type": "decimal", "precision": 18, "scale": 4, "required": true, "defaultValue": "1", "showInList": false },
+          { "name": "CondicionPago", "label": "Condición de pago", "type": "reference", "referenceEntity": "CondicionPago", "defaultValue": "Proveedor.CondicionPago", "showInList": false },
+          { "name": "Comprador", "label": "Comprador", "type": "user", "defaultValue": "CURRENTUSER()", "showInList": false },
+          { "name": "Notas", "label": "Notas", "type": "longtext", "showInList": false },
+          { "name": "AutorizadoPor", "label": "Autorizado por", "type": "user", "showInList": false },
+          { "name": "FechaAutorizacion", "label": "Fecha de autorización", "type": "datetime", "showInList": false },
+          { "name": "MotivoRechazo", "label": "Motivo de rechazo", "type": "longtext", "showInList": false },
+          { "name": "MotivoCancelacion", "label": "Motivo de cancelación", "type": "longtext", "showInList": false }
+        ] },
+      { "op": "createEntity", "group": "Compras", "name": "OrdenCompraPartida", "label": "Partida de orden de compra", "labelPlural": "Partidas de orden de compra", "icon": "list",
+        "fields": [
+          { "name": "Orden", "label": "Orden", "type": "parent", "referenceEntity": "OrdenCompra" },
+          { "name": "Producto", "label": "Producto", "type": "reference", "referenceEntity": "Producto", "required": true },
+          { "name": "Cantidad", "label": "Cantidad", "type": "decimal", "precision": 18, "scale": 2, "required": true },
+          { "name": "Unidad", "label": "Unidad", "type": "reference", "referenceEntity": "UnidadMedida", "defaultValue": "Producto.Unidad" },
+          { "name": "PrecioUnitario", "label": "Precio unitario", "type": "decimal", "precision": 18, "scale": 2, "required": true, "defaultValue": "Producto.CostoUltimo" },
+          { "name": "DescuentoPct", "label": "Desc. %", "type": "decimal", "precision": 5, "scale": 2, "defaultValue": "0" },
+          { "name": "IvaPct", "label": "IVA %", "type": "decimal", "precision": 5, "scale": 2, "defaultValue": "Producto.IVA" },
+          { "name": "Importe", "label": "Importe", "type": "formula", "resultType": "decimal", "precision": 18, "scale": 2, "formula": "Cantidad * PrecioUnitario" },
+          { "name": "DescuentoImporte", "label": "Descuento", "type": "formula", "resultType": "decimal", "precision": 18, "scale": 2, "formula": "ROUND(Importe * DescuentoPct / 100, 2)" },
+          { "name": "IvaImporte", "label": "IVA", "type": "formula", "resultType": "decimal", "precision": 18, "scale": 2, "formula": "ROUND((Importe - DescuentoImporte) * IvaPct / 100, 2)" },
+          { "name": "Total", "label": "Total", "type": "formula", "resultType": "decimal", "precision": 18, "scale": 2, "formula": "Importe - DescuentoImporte + IvaImporte" }
+        ] },
+      { "op": "setRules", "entity": "OrdenCompraPartida", "rules": [
+          { "name": "CantidadPositiva", "field": "Cantidad", "assert": "Cantidad > 0", "message": "La cantidad debe ser mayor a cero." },
+          { "name": "PrecioNoNegativo", "field": "PrecioUnitario", "assert": "PrecioUnitario >= 0", "message": "El precio no puede ser negativo." },
+          { "name": "DescuentoRango", "field": "DescuentoPct", "assert": "DescuentoPct >= 0 AND DescuentoPct <= 100", "message": "El descuento debe estar entre 0 y 100%." },
+          { "name": "IvaRango", "field": "IvaPct", "assert": "IvaPct >= 0 AND IvaPct <= 100", "message": "El IVA debe estar entre 0 y 100%." }
+        ] },
+      { "op": "addField", "entity": "OrdenCompra", "field": { "name": "Partidas", "label": "Partidas", "type": "lines", "childEntity": "OrdenCompraPartida" } },
+      { "op": "addField", "entity": "OrdenCompra", "field": { "name": "Subtotal", "label": "Subtotal", "type": "formula", "resultType": "decimal", "precision": 18, "scale": 2, "formula": "SUM(Partidas.Importe)", "showInList": false } },
+      { "op": "addField", "entity": "OrdenCompra", "field": { "name": "Descuento", "label": "Descuento", "type": "formula", "resultType": "decimal", "precision": 18, "scale": 2, "formula": "SUM(Partidas.DescuentoImporte)", "showInList": false } },
+      { "op": "addField", "entity": "OrdenCompra", "field": { "name": "IVA", "label": "IVA", "type": "formula", "resultType": "decimal", "precision": 18, "scale": 2, "formula": "SUM(Partidas.IvaImporte)", "showInList": false } },
+      { "op": "addField", "entity": "OrdenCompra", "field": { "name": "Total", "label": "Total", "type": "formula", "resultType": "decimal", "precision": 18, "scale": 2, "formula": "Subtotal - Descuento + IVA" } },
+      { "op": "addField", "entity": "OrdenCompra", "field": { "name": "TotalMXN", "label": "Total MXN", "type": "formula", "resultType": "decimal", "precision": 18, "scale": 2, "formula": "ROUND(Total * TipoCambio, 2)" } },
+      { "op": "setRules", "entity": "OrdenCompra", "rules": [
+          { "name": "EntregaPosterior", "field": "FechaEntrega", "assert": "FechaEntrega >= Fecha", "message": "La fecha de entrega no puede ser anterior a la fecha de la orden." },
+          { "name": "ProveedorActivo", "field": "Proveedor", "assert": "Proveedor.Activo = TRUE", "message": "El proveedor está inactivo; no se le pueden hacer órdenes." },
+          { "name": "TipoCambioPositivo", "field": "TipoCambio", "assert": "TipoCambio > 0", "message": "El tipo de cambio debe ser mayor a cero." },
+          { "name": "PesosSinTipoCambio", "field": "TipoCambio", "when": "Moneda.Clave = 'MXN'", "assert": "TipoCambio = 1", "message": "Para pesos mexicanos el tipo de cambio debe ser 1." }
+        ] },
+      { "op": "setWorkflow", "entity": "OrdenCompra", "workflow": {
+          "initial": "Borrador",
+          "states": [
+            { "name": "Borrador", "label": "Borrador", "color": "neutral", "editable": true },
+            { "name": "PorAutorizar", "label": "Por autorizar", "color": "warning", "editable": false },
+            { "name": "Autorizada", "label": "Autorizada", "color": "success", "editable": false },
+            { "name": "Rechazada", "label": "Rechazada", "color": "danger", "editable": false },
+            { "name": "Enviada", "label": "Enviada al proveedor", "color": "accent", "editable": false },
+            { "name": "RecibidaParcial", "label": "Recibida parcial", "color": "warning", "editable": false },
+            { "name": "Recibida", "label": "Recibida", "color": "success", "editable": false },
+            { "name": "Cerrada", "label": "Cerrada", "color": "neutral", "editable": false },
+            { "name": "Cancelada", "label": "Cancelada", "color": "danger", "editable": false }
+          ],
+          "transitions": [
+            { "name": "enviar", "label": "Enviar a autorización", "from": ["Borrador"], "to": "PorAutorizar", "icon": "send", "variant": "primary",
+              "roles": ["Comprador", "Gerente de compras", "Director"],
+              "when": "COUNT(Partidas) > 0", "whenMessage": "Agrega al menos una partida." },
+            { "name": "autorizar", "label": "Autorizar", "from": ["PorAutorizar"], "to": "Autorizada", "icon": "shield-check", "variant": "primary",
+              "roles": ["Gerente de compras", "Director"],
+              "when": "HASROLE('Director') OR (TotalMXN <= 50000 AND NOT ISCREATOR())",
+              "whenMessage": "Requiere al Director: la orden supera $50,000 MXN o la creaste tú (control interno).",
+              "set": [ { "field": "AutorizadoPor", "value": "CURRENTUSER()" }, { "field": "FechaAutorizacion", "value": "NOW()" } ] },
+            { "name": "devolver", "label": "Devolver", "from": ["PorAutorizar"], "to": "Borrador", "icon": "undo-2",
+              "roles": ["Gerente de compras", "Director"], "requireComment": true },
+            { "name": "rechazar", "label": "Rechazar", "from": ["PorAutorizar"], "to": "Rechazada", "icon": "x", "variant": "danger",
+              "roles": ["Gerente de compras", "Director"], "requiredFields": ["MotivoRechazo"] },
+            { "name": "enviarProveedor", "label": "Enviar al proveedor", "from": ["Autorizada"], "to": "Enviada", "icon": "mail", "variant": "primary",
+              "roles": ["Comprador", "Gerente de compras", "Director"] },
+            { "name": "recibirParcial", "label": "Recibida parcial", "from": ["Enviada"], "to": "RecibidaParcial", "icon": "package-open",
+              "roles": ["Almacenista", "Gerente de compras"] },
+            { "name": "recibir", "label": "Marcar recibida", "from": ["Enviada", "RecibidaParcial"], "to": "Recibida", "icon": "package-check", "variant": "primary",
+              "roles": ["Almacenista", "Gerente de compras"] },
+            { "name": "cerrar", "label": "Cerrar", "from": ["Recibida"], "to": "Cerrada", "icon": "lock",
+              "roles": ["Gerente de compras", "Director"] },
+            { "name": "cancelar", "label": "Cancelar", "from": ["Borrador", "PorAutorizar", "Autorizada", "Enviada"], "to": "Cancelada", "icon": "ban", "variant": "danger",
+              "roles": ["Comprador", "Gerente de compras", "Director"], "requiredFields": ["MotivoCancelacion"] }
+          ]
+        } },
+
+      { "op": "createEntity", "group": "Compras", "name": "Recepcion", "label": "Recepción", "labelPlural": "Recepciones", "icon": "package-check", "displayField": "Folio",
+        "description": "Entrada de mercancía contra orden de compra.",
+        "fields": [
+          { "name": "Folio", "label": "Folio", "type": "autonumber", "prefix": "REC-", "padding": 6 },
+          { "name": "OrdenCompra", "label": "Orden de compra", "type": "reference", "referenceEntity": "OrdenCompra", "required": true },
+          { "name": "Almacen", "label": "Almacén", "type": "reference", "referenceEntity": "Almacen", "required": true, "defaultValue": "OrdenCompra.Almacen" },
+          { "name": "Fecha", "label": "Fecha", "type": "date", "required": true, "defaultValue": "TODAY()" },
+          { "name": "Factura", "label": "Factura del proveedor", "type": "text", "maxLength": 40 },
+          { "name": "Recibio", "label": "Recibió", "type": "user", "defaultValue": "CURRENTUSER()" },
+          { "name": "Notas", "label": "Notas", "type": "longtext", "showInList": false }
+        ] },
+      { "op": "createEntity", "group": "Compras", "name": "RecepcionPartida", "label": "Partida de recepción", "labelPlural": "Partidas de recepción", "icon": "list",
+        "fields": [
+          { "name": "Recepcion", "label": "Recepción", "type": "parent", "referenceEntity": "Recepcion" },
+          { "name": "Producto", "label": "Producto", "type": "reference", "referenceEntity": "Producto", "required": true },
+          { "name": "Cantidad", "label": "Cantidad recibida", "type": "decimal", "precision": 18, "scale": 2, "required": true },
+          { "name": "Observaciones", "label": "Observaciones", "type": "text", "maxLength": 200 }
+        ] },
+      { "op": "setRules", "entity": "RecepcionPartida", "rules": [
+          { "name": "CantidadPositiva", "field": "Cantidad", "assert": "Cantidad > 0", "message": "La cantidad recibida debe ser mayor a cero." }
+        ] },
+      { "op": "addField", "entity": "Recepcion", "field": { "name": "Partidas", "label": "Partidas", "type": "lines", "childEntity": "RecepcionPartida" } },
+      { "op": "addField", "entity": "Recepcion", "field": { "name": "TotalPiezas", "label": "Total recibido", "type": "formula", "resultType": "decimal", "precision": 18, "scale": 2, "formula": "SUM(Partidas.Cantidad)" } },
+      { "op": "setWorkflow", "entity": "Recepcion", "workflow": {
+          "initial": "Borrador",
+          "states": [
+            { "name": "Borrador", "label": "Borrador", "color": "neutral", "editable": true },
+            { "name": "Confirmada", "label": "Confirmada", "color": "success", "editable": false },
+            { "name": "Cancelada", "label": "Cancelada", "color": "danger", "editable": false }
+          ],
+          "transitions": [
+            { "name": "confirmar", "label": "Confirmar recepción", "from": ["Borrador"], "to": "Confirmada", "icon": "check", "variant": "primary",
+              "roles": ["Almacenista", "Gerente de compras"],
+              "when": "OrdenCompra.Estado IN ('Enviada', 'RecibidaParcial') AND COUNT(Partidas) > 0 AND NOT ISBLANK(Factura)",
+              "whenMessage": "Para confirmar: la orden debe estar enviada al proveedor y la recepción necesita partidas y número de factura." },
+            { "name": "cancelar", "label": "Cancelar", "from": ["Borrador"], "to": "Cancelada", "icon": "ban", "variant": "danger",
+              "roles": ["Almacenista", "Gerente de compras"], "requireComment": true }
+          ]
+        } }
+    ]
+  },
+  "roles": [
+    { "name": "Solicitante", "description": "Crea y envía requisiciones de compra.", "canManageModel": false, "canManageUsers": false, "canViewAudit": false,
+      "permissions": [
+        { "entity": "Requisicion", "canRead": true, "canCreate": true, "canUpdate": true, "canDelete": true },
+        { "entity": "Producto", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false },
+        { "entity": "Departamento", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false },
+        { "entity": "UnidadMedida", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false }
+      ] },
+    { "name": "Comprador", "description": "Administra proveedores, productos y órdenes de compra.", "canManageModel": false, "canManageUsers": false, "canViewAudit": false,
+      "permissions": [
+        { "entity": "Proveedor", "canRead": true, "canCreate": true, "canUpdate": true, "canDelete": true },
+        { "entity": "Producto", "canRead": true, "canCreate": true, "canUpdate": true, "canDelete": true },
+        { "entity": "OrdenCompra", "canRead": true, "canCreate": true, "canUpdate": true, "canDelete": true },
+        { "entity": "Requisicion", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false },
+        { "entity": "Recepcion", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false },
+        { "entity": "Moneda", "canRead": true, "canCreate": true, "canUpdate": true, "canDelete": false },
+        { "entity": "UnidadMedida", "canRead": true, "canCreate": true, "canUpdate": true, "canDelete": false },
+        { "entity": "CondicionPago", "canRead": true, "canCreate": true, "canUpdate": true, "canDelete": false },
+        { "entity": "CategoriaProducto", "canRead": true, "canCreate": true, "canUpdate": true, "canDelete": false },
+        { "entity": "Departamento", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false },
+        { "entity": "Almacen", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false }
+      ] },
+    { "name": "Gerente de compras", "description": "Aprueba requisiciones y autoriza órdenes hasta $50,000 MXN.", "canManageModel": false, "canManageUsers": false, "canViewAudit": true,
+      "permissions": [
+        { "entity": "Proveedor", "canRead": true, "canCreate": true, "canUpdate": true, "canDelete": true },
+        { "entity": "Producto", "canRead": true, "canCreate": true, "canUpdate": true, "canDelete": true },
+        { "entity": "OrdenCompra", "canRead": true, "canCreate": true, "canUpdate": true, "canDelete": true },
+        { "entity": "Requisicion", "canRead": true, "canCreate": true, "canUpdate": true, "canDelete": true },
+        { "entity": "Recepcion", "canRead": true, "canCreate": true, "canUpdate": true, "canDelete": true },
+        { "entity": "Moneda", "canRead": true, "canCreate": true, "canUpdate": true, "canDelete": true },
+        { "entity": "UnidadMedida", "canRead": true, "canCreate": true, "canUpdate": true, "canDelete": true },
+        { "entity": "CondicionPago", "canRead": true, "canCreate": true, "canUpdate": true, "canDelete": true },
+        { "entity": "CategoriaProducto", "canRead": true, "canCreate": true, "canUpdate": true, "canDelete": true },
+        { "entity": "Departamento", "canRead": true, "canCreate": true, "canUpdate": true, "canDelete": true },
+        { "entity": "Almacen", "canRead": true, "canCreate": true, "canUpdate": true, "canDelete": true }
+      ] },
+    { "name": "Director", "description": "Autoriza cualquier orden de compra.", "canManageModel": false, "canManageUsers": false, "canViewAudit": true,
+      "permissions": [
+        { "entity": "OrdenCompra", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false },
+        { "entity": "Requisicion", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false },
+        { "entity": "Recepcion", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false },
+        { "entity": "Proveedor", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false },
+        { "entity": "Producto", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false }
+      ] },
+    { "name": "Almacenista", "description": "Registra recepciones de mercancía.", "canManageModel": false, "canManageUsers": false, "canViewAudit": false,
+      "permissions": [
+        { "entity": "Recepcion", "canRead": true, "canCreate": true, "canUpdate": true, "canDelete": true },
+        { "entity": "OrdenCompra", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false },
+        { "entity": "Producto", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false },
+        { "entity": "Almacen", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false },
+        { "entity": "UnidadMedida", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false }
+      ] }
+  ],
+  "seed": [
+    { "entity": "Moneda", "key": "Clave", "records": [
+        { "Clave": "MXN", "Nombre": "Peso mexicano", "Simbolo": "$" },
+        { "Clave": "USD", "Nombre": "Dólar estadounidense", "Simbolo": "US$" },
+        { "Clave": "EUR", "Nombre": "Euro", "Simbolo": "€" }
+      ] },
+    { "entity": "UnidadMedida", "key": "Clave", "records": [
+        { "Clave": "PZA", "Nombre": "Pieza" }, { "Clave": "KG", "Nombre": "Kilogramo" }, { "Clave": "LT", "Nombre": "Litro" },
+        { "Clave": "M", "Nombre": "Metro" }, { "Clave": "CAJA", "Nombre": "Caja" }, { "Clave": "SERV", "Nombre": "Servicio" }
+      ] },
+    { "entity": "CondicionPago", "key": "Nombre", "records": [
+        { "Nombre": "Contado", "Dias": 0 }, { "Nombre": "Crédito 15 días", "Dias": 15 },
+        { "Nombre": "Crédito 30 días", "Dias": 30 }, { "Nombre": "Crédito 60 días", "Dias": 60 }
+      ] },
+    { "entity": "CategoriaProducto", "key": "Nombre", "records": [
+        { "Nombre": "Materia prima" }, { "Nombre": "Empaque" }, { "Nombre": "Refacciones" }, { "Nombre": "Oficina" }, { "Nombre": "Servicios" }
+      ] },
+    { "entity": "Departamento", "key": "Nombre", "records": [
+        { "Nombre": "Producción" }, { "Nombre": "Almacén" }, { "Nombre": "Administración" }, { "Nombre": "Mantenimiento" }
+      ] },
+    { "entity": "Almacen", "key": "Clave", "records": [
+        { "Clave": "ALM-01", "Nombre": "Almacén general", "Direccion": "Planta principal" }
+      ] },
+    { "entity": "Proveedor", "key": "RFC", "records": [
+        { "RFC": "CNO850101AB1", "RazonSocial": "Cartones del Norte, S.A. de C.V.", "NombreComercial": "Cartones del Norte",
+          "Contacto": "Laura Méndez", "Correo": "ventas@cartonesnorte.example", "Telefono": "8112345678",
+          "CondicionPago": { "$ref": "CondicionPago", "Nombre": "Crédito 30 días" }, "Moneda": { "$ref": "Moneda", "Clave": "MXN" },
+          "LimiteCredito": 250000, "Categoria": { "$ref": "CategoriaProducto", "Nombre": "Empaque" } },
+        { "RFC": "PEM920315KJ2", "RazonSocial": "Plásticos y Envases de México, S.A. de C.V.", "NombreComercial": "PlastiEnvases",
+          "Contacto": "Jorge Ruiz", "Correo": "contacto@plastienvases.example",
+          "CondicionPago": { "$ref": "CondicionPago", "Nombre": "Crédito 15 días" }, "Moneda": { "$ref": "Moneda", "Clave": "MXN" },
+          "LimiteCredito": 120000, "Categoria": { "$ref": "CategoriaProducto", "Nombre": "Materia prima" } },
+        { "RFC": "ISU010203XY9", "RazonSocial": "Industrial Supply Corp.", "NombreComercial": "Industrial Supply",
+          "Correo": "orders@industrialsupply.example",
+          "CondicionPago": { "$ref": "CondicionPago", "Nombre": "Contado" }, "Moneda": { "$ref": "Moneda", "Clave": "USD" },
+          "Categoria": { "$ref": "CategoriaProducto", "Nombre": "Refacciones" } }
+      ] },
+    { "entity": "Producto", "key": "Clave", "records": [
+        { "Clave": "CAJ-30", "Descripcion": "Caja corrugada 30×30×30 cm", "Categoria": { "$ref": "CategoriaProducto", "Nombre": "Empaque" },
+          "Unidad": { "$ref": "UnidadMedida", "Clave": "PZA" }, "CostoUltimo": 18.50, "IVA": 16, "StockMinimo": 500,
+          "ProveedorPreferido": { "$ref": "Proveedor", "RFC": "CNO850101AB1" } },
+        { "Clave": "PEL-ST", "Descripcion": "Película estirable 18\" calibre 80", "Categoria": { "$ref": "CategoriaProducto", "Nombre": "Empaque" },
+          "Unidad": { "$ref": "UnidadMedida", "Clave": "PZA" }, "CostoUltimo": 245.00, "IVA": 16,
+          "ProveedorPreferido": { "$ref": "Proveedor", "RFC": "PEM920315KJ2" } },
+        { "Clave": "RES-PET", "Descripcion": "Resina PET grado botella", "Categoria": { "$ref": "CategoriaProducto", "Nombre": "Materia prima" },
+          "Unidad": { "$ref": "UnidadMedida", "Clave": "KG" }, "CostoUltimo": 32.80, "IVA": 16,
+          "ProveedorPreferido": { "$ref": "Proveedor", "RFC": "PEM920315KJ2" } },
+        { "Clave": "ROD-6204", "Descripcion": "Rodamiento 6204-2RS", "Categoria": { "$ref": "CategoriaProducto", "Nombre": "Refacciones" },
+          "Unidad": { "$ref": "UnidadMedida", "Clave": "PZA" }, "CostoUltimo": 6.40, "IVA": 16,
+          "ProveedorPreferido": { "$ref": "Proveedor", "RFC": "ISU010203XY9" } },
+        { "Clave": "PAP-CAR", "Descripcion": "Papel bond carta (paquete 500 hojas)", "Categoria": { "$ref": "CategoriaProducto", "Nombre": "Oficina" },
+          "Unidad": { "$ref": "UnidadMedida", "Clave": "PZA" }, "CostoUltimo": 95.00, "IVA": 16 }
+      ] }
+  ]
+}

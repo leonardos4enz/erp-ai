@@ -12,6 +12,8 @@ interface AuthState {
   entities: EntityDef[];
   entitiesLoading: boolean;
   reloadEntities: () => Promise<void>;
+  /** Vuelve a leer permisos y catálogos (p. ej. después de instalar un módulo). */
+  refresh: () => Promise<void>;
   perms: (entity: string) => EntityPerms;
 }
 
@@ -70,16 +72,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setMe(null);
   }, []);
 
+  // setMe con un objeto nuevo dispara la recarga de catálogos (efecto de arriba).
+  const refresh = useCallback(async () => {
+    try { setMe(await authApi.me()); } catch (e) { if (!(e instanceof ApiError)) throw e; }
+  }, []);
+
   const visible = useMemo(
     () => entities
-      .filter((e) => !e.isArchived && (me?.isSuperuser || perms(e.name).read))
+      .filter((e) => !e.isArchived && !e.isChild && (me?.isSuperuser || perms(e.name).read))
       .sort((a, b) => a.labelPlural.localeCompare(b.labelPlural, 'es')),
     [entities, me, perms],
   );
 
   const value = useMemo<AuthState>(() => ({
-    me, loading, login, logout, entities: visible, entitiesLoading, reloadEntities, perms,
-  }), [me, loading, login, logout, visible, entitiesLoading, reloadEntities, perms]);
+    me, loading, login, logout, entities: visible, entitiesLoading, reloadEntities, refresh, perms,
+  }), [me, loading, login, logout, visible, entitiesLoading, reloadEntities, refresh, perms]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

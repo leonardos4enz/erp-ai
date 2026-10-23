@@ -8,9 +8,9 @@ test('H1: crear un catálogo desde el modelador y capturar datos sin programar',
   await page.getByRole('button', { name: 'Nuevo catálogo' }).first().click();
 
   // El identificador y el plural se sugieren a partir del nombre.
-  await page.getByLabel('Nombre (singular)').fill('Almacén');
-  await expect(page.getByLabel(/^Identificador(?! del campo)/)).toHaveValue('Almacen');
-  await expect(page.getByLabel('Nombre (plural)')).toHaveValue('Almacenes');
+  await page.getByLabel('Nombre (singular)').fill('Camión');
+  await expect(page.getByLabel(/^Identificador(?! del campo)/)).toHaveValue('Camion');
+  await expect(page.getByLabel('Nombre (plural)')).toHaveValue('Camiones');
 
   // Segundo campo: lista de opciones.
   await page.getByRole('button', { name: 'Agregar campo' }).click();
@@ -23,13 +23,13 @@ test('H1: crear un catálogo desde el modelador y capturar datos sin programar',
   const dialog = page.getByRole('dialog');
   await expect(dialog.getByText('El plan es válido')).toBeVisible();
   await dialog.getByText('Ver SQL').click();
-  await expect(dialog.getByText('CREATE TABLE [app].[Almacen]')).toBeVisible();
+  await expect(dialog.getByText('CREATE TABLE [app].[Camion]')).toBeVisible();
   await expectAccessible(page);
   await dialog.getByRole('button', { name: 'Aplicar cambios' }).click();
 
   await expect(page.getByText('Cambios aplicados')).toBeVisible();
   const nav = page.getByLabel('Navegación principal');
-  await nav.getByRole('link', { name: 'Almacenes' }).click();
+  await nav.getByRole('link', { name: 'Camiones' }).click();
 
   // CA1: el catálogo nuevo ya permite capturar información.
   await page.getByRole('button', { name: 'Nuevo', exact: true }).first().click();
@@ -37,7 +37,7 @@ test('H1: crear un catálogo desde el modelador y capturar datos sin programar',
   await page.getByLabel('Tipo').selectOption('Refrigerado');
   await page.getByRole('button', { name: 'Crear' }).click();
   await expect(page.getByText('Registro creado')).toBeVisible();
-  await nav.getByRole('link', { name: 'Almacenes' }).click();
+  await nav.getByRole('link', { name: 'Camiones' }).click();
   await expect(page.getByRole('cell', { name: 'Central' })).toBeVisible();
   await expect(page.getByText('Refrigerado')).toBeVisible();
 });
@@ -61,7 +61,7 @@ test('H1 CA3: identificadores inválidos o reservados se rechazan con mensaje cl
 
 test('H2: agregar un campo a un catálogo con datos conserva la información', async ({ page }) => {
   await page.goto('/admin/model');
-  await page.getByRole('row', { name: /Almacenes/ }).getByRole('button', { name: 'Editar' }).click();
+  await page.getByRole('row', { name: /Camiones/ }).getByRole('button', { name: 'Editar' }).click();
   await page.getByRole('button', { name: 'Agregar campo' }).click();
   await page.getByLabel('Etiqueta del campo').last().fill('Capacidad');
   await page.getByLabel('Tipo de campo').last().selectOption({ label: 'Entero' });
@@ -71,7 +71,7 @@ test('H2: agregar un campo a un catálogo con datos conserva la información', a
   await dialog.getByRole('button', { name: 'Aplicar cambios' }).click();
   await expect(page.getByText('Cambios aplicados')).toBeVisible();
 
-  await page.goto('/c/Almacen');
+  await page.goto('/c/Camion');
   await expect(page.getByRole('cell', { name: 'Central' })).toBeVisible();
   await expect(page.getByRole('columnheader', { name: /Capacidad/ })).toBeVisible();
 });

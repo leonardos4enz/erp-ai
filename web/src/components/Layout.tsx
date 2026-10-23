@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
-  ChevronRight, History, LayoutDashboard, LogOut, Moon, PanelLeftClose, PanelLeftOpen,
+  Blocks, ChevronRight, History, LayoutDashboard, LogOut, Moon, PanelLeftClose, PanelLeftOpen,
   ShieldCheck, Sun, Workflow,
 } from 'lucide-react';
+import type { EntityDef } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { useTheme } from '../lib/theme';
 import { initials } from '../lib/format';
@@ -50,7 +51,7 @@ function useBreadcrumb(): { label: string; to?: string }[] {
     else if (parts[2]) crumbs.push({ label: `#${decodeURIComponent(parts[2])}` });
   } else if (parts[0] === 'admin') {
     crumbs.push({ label: 'Configuración' });
-    const map: Record<string, string> = { model: 'Modelador', security: 'Usuarios y roles', audit: 'Auditoría' };
+    const map: Record<string, string> = { model: 'Modelador', security: 'Usuarios y roles', audit: 'Auditoría', modules: 'Módulos' };
     if (parts[1]) crumbs.push({ label: map[parts[1]] ?? parts[1] });
   }
   return crumbs;
@@ -96,6 +97,35 @@ function UserMenu() {
   );
 }
 
+function EntityLink({ e }: { e: EntityDef }) {
+  return (
+    <NavLink to={`/c/${encodeURIComponent(e.name)}`} className="nav-link" title={e.labelPlural}>
+      <DynamicIcon name={e.icon} size={17} /><span>{e.labelPlural}</span>
+    </NavLink>
+  );
+}
+
+/** Sección plegable de un módulo. Recuerda si estaba abierta y se abre sola si contiene la página actual. */
+function NavGroup({ name, entities, sidebarCollapsed }: { name: string; entities: readonly EntityDef[]; sidebarCollapsed: boolean }) {
+  const key = `erp.nav.${name}`;
+  const { pathname } = useLocation();
+  const active = entities.some((e) => pathname.startsWith(`/c/${encodeURIComponent(e.name)}`));
+  const [open, setOpen] = useState(() => safeStorageGet(key) !== '0');
+  useEffect(() => { if (active) setOpen(true); }, [active]);
+  const toggleOpen = () => { safeStorageSet(key, open ? '0' : '1'); setOpen(!open); };
+  const id = `nav-group-${name.replace(/\W+/g, '-')}`;
+  const expanded = open || sidebarCollapsed; // con el menú contraído solo hay iconos: siempre visibles
+  return (
+    <div className="nav-section">
+      <button type="button" className="nav-section-title nav-group-toggle" aria-expanded={expanded} aria-controls={id} onClick={toggleOpen}>
+        <ChevronRight size={13} aria-hidden className={expanded ? 'rot-90' : undefined} />
+        <span>{name}</span>
+      </button>
+      {expanded && <div id={id}>{entities.map((e) => <EntityLink key={e.name} e={e} />)}</div>}
+    </div>
+  );
+}
+
 export function Layout() {
   const { me, entities, entitiesLoading } = useAuth();
   const { theme, toggle } = useTheme();
@@ -115,6 +145,14 @@ export function Layout() {
     return () => window.removeEventListener('keydown', onKey);
   }, [narrow, collapsed]);
 
+  // Catálogos agrupados por módulo (metadato `group`); los documentos con proceso van primero.
+  const ungrouped = entities.filter((e) => !e.group);
+  const groups = Object.entries(
+    entities.filter((e) => e.group).reduce<Record<string, EntityDef[]>>((acc, e) => ((acc[e.group!] ??= []).push(e), acc), {}),
+  )
+    .sort(([a], [b]) => a.localeCompare(b, 'es'))
+    .map(([g, list]) => [g, list.slice().sort((a, b) => Number(!!b.workflow) - Number(!!a.workflow) || a.labelPlural.localeCompare(b.labelPlural, 'es'))] as const);
+
   const canModel = !!(me?.canManageModel || me?.isSuperuser);
   const canUsers = !!(me?.canManageUsers || me?.isSuperuser);
   const canAudit = !!(me?.canViewAudit || me?.isSuperuser);
@@ -132,15 +170,16 @@ export function Layout() {
               <LayoutDashboard size={17} aria-hidden /><span>Inicio</span>
             </NavLink>
           </div>
-          <div className="nav-section">
-            <div className="nav-section-title">Catálogos</div>
-            {entities.map((e) => (
-              <NavLink key={e.name} to={`/c/${encodeURIComponent(e.name)}`} className="nav-link" title={e.labelPlural}>
-                <DynamicIcon name={e.icon} size={17} /><span>{e.labelPlural}</span>
-              </NavLink>
-            ))}
-            {!entitiesLoading && entities.length === 0 && <div className="nav-empty">Aún no hay catálogos</div>}
-          </div>
+          {(ungrouped.length > 0 || groups.length === 0) && (
+            <div className="nav-section">
+              <div className="nav-section-title">Catálogos</div>
+              {ungrouped.map((e) => <EntityLink key={e.name} e={e} />)}
+              {!entitiesLoading && entities.length === 0 && <div className="nav-empty">Aún no hay catálogos</div>}
+            </div>
+          )}
+          {groups.map(([group, list]) => (
+            <NavGroup key={group} name={group} entities={list} sidebarCollapsed={collapsed} />
+          ))}
           {(canModel || canUsers || canAudit) && (
             <div className="nav-section">
               <div className="nav-section-title">Configuración</div>
@@ -152,6 +191,11 @@ export function Layout() {
               {canUsers && (
                 <NavLink to="/admin/security" className="nav-link" title="Usuarios y roles">
                   <ShieldCheck size={17} aria-hidden /><span>Usuarios y roles</span>
+                </NavLink>
+              )}
+              {me?.isSuperuser && (
+                <NavLink to="/admin/modules" className="nav-link" title="Módulos">
+                  <Blocks size={17} aria-hidden /><span>Módulos</span>
                 </NavLink>
               )}
               {canAudit && (

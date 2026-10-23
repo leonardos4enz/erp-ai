@@ -47,7 +47,7 @@ export function ModelerPage() {
   const { reloadEntities } = useAuth();
   const [params, setParams] = useSearchParams();
   const [tab, setTab] = useState<Tab>('entities');
-  const { data: entities, loading, error, reload } = useAsync<EntityDef[]>(() => modelApi.entities(true), []);
+  const { data: entities, loading, error, reload } = useAsync<EntityDef[]>(() => modelApi.entities(true, true), []);
   const [plan, setPlan] = useState<ChangePlan | null>(null);
 
   const editing = params.get('edit');
@@ -129,7 +129,13 @@ export function ModelerPage() {
                     </td>
                     <td className="mono muted">{e.name}</td>
                     <td className="td-num">{e.fields.filter((f) => !f.isArchived).length}</td>
-                    <td>{e.isArchived ? <Badge tone="warning">Archivado</Badge> : <Badge tone="success">Activo</Badge>}</td>
+                    <td>
+                      <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+                        {e.isArchived ? <Badge tone="warning">Archivado</Badge> : <Badge tone="success">Activo</Badge>}
+                        {e.isChild && <Badge>Detalle de {list.find((x) => x.name === e.parentEntity)?.label ?? e.parentEntity}</Badge>}
+                        {e.workflow && <Badge tone="accent">Con proceso</Badge>}
+                      </div>
+                    </td>
                     <td className="td-actions">
                       {!e.isArchived && (
                         <div className="row" style={{ justifyContent: 'flex-end', gap: 2 }}>

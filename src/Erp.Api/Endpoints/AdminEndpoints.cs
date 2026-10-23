@@ -44,6 +44,20 @@ public static partial class AdminEndpoints
             await using var cn = await db.OpenAsync();
             return await LoadRolesAsync(cn);
         });
+        // Módulos (spec 002 H7): solo superusuario, porque instalan roles y permisos.
+        g.MapGet("/modules", async (HttpContext http, ModuleService modules) =>
+        {
+            if (!http.CurrentUser().IsSuperuser) throw new Forbidden();
+            return await modules.ListAsync();
+        });
+        g.MapPost("/modules/{id}/preview", async (string id, HttpContext http, ModuleService modules, CancellationToken ct) =>
+        {
+            if (!http.CurrentUser().IsSuperuser) throw new Forbidden();
+            return await modules.PreviewAsync(id, ct);
+        });
+        g.MapPost("/modules/{id}/install", async (string id, HttpContext http, ModuleService modules, CancellationToken ct) =>
+            new { changeSetId = await modules.InstallAsync(id, http, ct) });
+
         g.MapPost("/roles", (RoleRequest req, HttpContext http, Db db, MetadataStore store, CancellationToken ct) => SaveRole(null, req, http, db, store, ct));
         g.MapPut("/roles/{id:int}", (int id, RoleRequest req, HttpContext http, Db db, MetadataStore store, CancellationToken ct) => SaveRole(id, req, http, db, store, ct));
     }

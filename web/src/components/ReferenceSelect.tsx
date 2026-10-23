@@ -14,10 +14,16 @@ export interface ReferenceSelectProps {
   invalid?: boolean;
   disabled?: boolean;
   describedBy?: string;
+  /** Nombre accesible cuando no hay <label> visible (p. ej. celdas de partidas). */
+  ariaLabel?: string;
+  /** Tamaño reducido para tablas. */
+  compact?: boolean;
+  /** Fuente alternativa de opciones (p. ej. usuarios). Por defecto: GET /data/{entity}/lookup. */
+  lookup?: (search: string, signal: AbortSignal) => Promise<LookupItem[]>;
 }
 
 /** Accessible async combobox backed by GET /data/{entity}/lookup. */
-export function ReferenceSelect({ entity, value, label, onChange, id, invalid, disabled, describedBy }: ReferenceSelectProps) {
+export function ReferenceSelect({ entity, value, label, onChange, id, invalid, disabled, describedBy, ariaLabel, compact, lookup }: ReferenceSelectProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [items, setItems] = useState<LookupItem[]>([]);
@@ -31,11 +37,12 @@ export function ReferenceSelect({ entity, value, label, onChange, id, invalid, d
     if (!open) return;
     const ctrl = new AbortController();
     setLoading(true);
-    dataApi.lookup(entity, debounced, ctrl.signal)
+    (lookup ? lookup(debounced, ctrl.signal) : dataApi.lookup(entity, debounced, ctrl.signal))
       .then((r) => { setItems(r); setActive(0); })
       .catch(() => { if (!ctrl.signal.aborted) setItems([]); })
       .finally(() => { if (!ctrl.signal.aborted) setLoading(false); });
     return () => ctrl.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entity, debounced, open]);
 
   useEffect(() => {
@@ -61,7 +68,8 @@ export function ReferenceSelect({ entity, value, label, onChange, id, invalid, d
         <Search size={15} aria-hidden />
         <input
           id={id}
-          className="input"
+          className={compact ? 'input input-sm' : 'input'}
+          aria-label={ariaLabel}
           role="combobox"
           aria-expanded={open}
           aria-controls={listId}
@@ -69,7 +77,7 @@ export function ReferenceSelect({ entity, value, label, onChange, id, invalid, d
           aria-invalid={invalid || undefined}
           aria-describedby={describedBy}
           aria-activedescendant={open && items[active] ? `${listId}-${items[active].id}` : undefined}
-          placeholder="Buscar…"
+          placeholder={disabled ? '—' : 'Buscar…'}
           value={display}
           disabled={disabled}
           style={{ paddingRight: value != null ? 36 : undefined }}

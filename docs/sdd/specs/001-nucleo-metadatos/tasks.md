@@ -37,7 +37,8 @@
 - [x] F5 Revisión exploratoria: 9 hallazgos resueltos, cada uno con prueba
 
 ## Pendiente (siguientes specs)
-- [ ] Spec 002: asistente IA (MiniMax) que genera `ChangePlan` → vista previa → confirmación humana
-- [ ] Spec 003: motor de procesos (estados, aprobaciones, tareas)
+- [x] Spec 002: motor de procesos (estados, aprobaciones), fórmulas, reglas, módulos
+- [x] Spec 003: módulo de Compras
+- [ ] Spec 004: asistente IA (MiniMax) que genera `ChangePlan` → vista previa → confirmación humana
 - [ ] Prueba automática de zona horaria para campos fecha-hora (F-02)
 - [ ] 2FA (TOTP) para roles con permisos de modelo/usuarios
