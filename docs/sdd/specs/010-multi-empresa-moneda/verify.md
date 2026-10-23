@@ -30,6 +30,7 @@
 |---|---|---|---|
 | F-01 | Baja | (exploratoria, `ErpAi`) La tarjeta «Registrar tipo de cambio» no tenía relleno: el título y el texto tocaban el borde | Corregido (`card-pad`); regresión en `multiempresa › H4 CA1`, **verificada fallando con el código anterior** (relleno 0) |
 | F-02 | Media | (exploratoria, 375 px) Con el selector de empresa en la barra, las migas de pan se encimaban («InicioConfiguracióEm…») | Corregido (en ≤ 600 px solo se muestra la miga actual); regresión en `multiempresa › Empresas y selector sin desbordes…`, **verificada fallando con el código anterior** (a 320 px, «Inicio» y «Notas ME» recortadas) |
+| F-03 | Baja | (reporte del usuario tras cerrar) Con el menú lateral contraído aparecía una barra de desplazamiento horizontal: los títulos de sección ocultos (`visibility: hidden`) conservaban su ancho (112 px de contenido en 48). Venía de antes de esta spec | Corregido (títulos recortados con `overflow: hidden` y `overflow-x: hidden` en el menú); regresión `visual › el menú contraído no se desplaza horizontalmente`, **verificada fallando con el código anterior** (105 px de desborde). E2E 146/146 en dos corridas limpias |
 
 Durante la implementación (revisión de código, antes de la exploratoria) se encontró que los datos iniciales de un módulo
 resolvían `$ref` y su clave sin la empresa: se corrigió `ModuleService` para buscarlos en la empresa de quien instala.

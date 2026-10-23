@@ -64,3 +64,17 @@ test('móvil: el menú arranca cerrado, no tapa el contenido y se cierra al nave
   await page.keyboard.press('Escape');
   await expect(nav.getByRole('link', { name: 'Camiones' })).not.toBeInViewport();
 });
+
+// Regresión (reporte del usuario tras la spec 010): con el menú contraído, los títulos de grupo ocultos conservaban su ancho
+// y la barra lateral mostraba desplazamiento horizontal.
+test('el menú contraído no se desplaza horizontalmente', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('banner').getByRole('button', { name: 'Contraer menú' }).click();
+  const nav = page.locator('.sidebar-nav');
+  await expect(page.getByLabel('Navegación principal')).toHaveClass(/collapsed/);
+  // La barra se contrae con una transición: se mide con el ancho final.
+  await expect.poll(() => nav.evaluate((n) => n.getBoundingClientRect().width)).toBeLessThan(80);
+  await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished.catch(() => undefined))));
+  expect(await nav.evaluate((n) => n.scrollWidth - n.clientWidth)).toBeLessThanOrEqual(0);
+  await page.getByRole('banner').getByRole('button', { name: 'Expandir menú' }).click();
+});
