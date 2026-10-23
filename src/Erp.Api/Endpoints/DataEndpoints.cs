@@ -12,16 +12,19 @@ public static class DataEndpoints
     {
         var g = app.MapGroup("/api/data/{entity}").RequireAuthorization();
 
-        g.MapGet("/", (string entity, int? page, int? pageSize, string? search, string? sort, string? dir, string? state,
+        g.MapGet("/", (string entity, int? page, int? pageSize, string? search, string? sort, string? dir, string? state, string? filters,
                 HttpContext http, RecordService records, CancellationToken ct) =>
-            records.ListAsync(entity, new ListQuery(page ?? 1, pageSize ?? 25, search, sort, dir, state), http.CurrentUser(), ct));
+            records.ListAsync(entity, new ListQuery(page ?? 1, pageSize ?? 25, search, sort, dir, state, FilterSql.Parse(filters)), http.CurrentUser(), ct));
 
         g.MapGet("/lookup", (string entity, string? search, string? filterField, string? filterValue, HttpContext http, RecordService records, CancellationToken ct) =>
             records.LookupAsync(entity, search, http.CurrentUser(), ct, filterField, filterValue));
 
-        // Contrato (plan 002): la respuesta envuelve los valores en { values }.
+        // Contrato (plan 002): la respuesta envuelve los valores en { values }; spec 007 agrega { layout }.
         g.MapPost("/compute", async (string entity, ComputeRequest req, HttpContext http, RecordService records, CancellationToken ct) =>
-            new { values = await records.ComputeAsync(entity, req.Id, req.Values, http.CurrentUser(), ct) });
+        {
+            var (values, layout) = await records.ComputeAsync(entity, req.Id, req.Values, http.CurrentUser(), ct);
+            return new { values, layout };
+        });
 
         g.MapGet("/{id:long}", (string entity, long id, HttpContext http, RecordService records, CancellationToken ct) =>
             records.GetAsync(entity, id, http.CurrentUser(), ct));

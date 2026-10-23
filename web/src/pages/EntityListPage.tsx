@@ -1,18 +1,47 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { ArrowDown, ArrowUp, ArrowUpDown, ChevronLeft, ChevronRight, Inbox, Plus, Search, SearchX } from 'lucide-react';
-import { ApiError } from '../api/client';
-import { dataApi } from '../api/endpoints';
-import type { RowList, StateCount } from '../api/types';
+import { ArrowDown, ArrowUp, ArrowUpDown, BookmarkPlus, ChevronLeft, ChevronRight, Columns3, Filter, Inbox, Plus, Search, SearchX, Trash2 } from 'lucide-react';
+import { ApiError, fieldError } from '../api/client';
+import { dataApi, viewsApi } from '../api/endpoints';
+import type { EntityDef, RowList, SavedView, StateCount, ViewFilter, ViewList } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
+import { ConfirmDialog, Dialog } from '../components/Dialog';
 import { resolveIcon } from '../components/DynamicIcon';
-import { Alert, Button, EmptyState, Input, LoadingBlock, PageHeader, Select, Spinner } from '../components/ui';
+import { FilterChips, FilterDialog, filterableFields } from '../components/FilterBuilder';
+import { useToast } from '../components/Toast';
+import { Alert, Button, Checkbox, EmptyState, Input, LoadingBlock, PageHeader, Select, Spinner } from '../components/ui';
 import { activeFields, CellValue, isNumericField, stateTone, useEntityDef } from '../lib/entity';
 import { useAsync, useDebounced } from '../lib/hooks';
 import { formatDateTime } from '../lib/format';
 import { ForbiddenPage, NotFoundPage } from './StatusPages';
 
 const PAGE_SIZES = [10, 25, 50, 100];
+/** Valor de `view` que significa «sin vista» (evita que se vuelva a aplicar la predeterminada). */
+const NO_VIEW = 'todos';
+
+function parseFilters(raw: string | null): ViewFilter[] {
+  if (!raw) return [];
+  try {
+    const v: unknown = JSON.parse(raw);
+    return Array.isArray(v) ? (v as ViewFilter[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Parámetros de la URL que representan una vista (columnas, filtros, orden y estado). */
+function viewParams(v: SavedView): Record<string, string | undefined> {
+  return {
+    view: v.name,
+    cols: v.columns?.length ? v.columns.join(',') : undefined,
+    filters: v.filters?.length ? JSON.stringify(v.filters) : undefined,
+    sort: v.sort ?? undefined,
+    dir: v.sort ? v.dir ?? 'asc' : undefined,
+    state: v.state ?? undefined,
+    page: undefined,
+    search: undefined,
+  };
+}
 
 export function EntityListPage() {
   const { entity = '' } = useParams();
@@ -26,7 +55,16 @@ export function EntityListPage() {
   const sort = params.get('sort') ?? undefined;
   const dir = (params.get('dir') === 'desc' ? 'desc' : 'asc') as 'asc' | 'desc';
   const state = params.get('state') ?? undefined;
+  const filtersRaw = params.get('filters');
+  const filters = useMemo(() => parseFilters(filtersRaw), [filtersRaw]);
+  const viewName = params.get('view') ?? undefined;
+  const colsParam = params.get('cols');
   const [search, setSearch] = useState(params.get('search') ?? '');
+  const toast = useToast();
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [columnsOpen, setColumnsOpen] = useState(false);
+  const [saveOpen, setSaveOpen] = useState(false);
+  const [confirmDeleteView, setConfirmDeleteView] = useState(false);
   const debouncedSearch = useDebounced(search, 300);
 
   function update(next: Record<string, string | undefined>) {
@@ -47,9 +85,27 @@ export function EntityListPage() {
 
   const p = perms(entity);
   const { data, loading, error } = useAsync<RowList | undefined>(
-    (signal) => (def && p.read ? dataApi.list(def.name, { page, pageSize, search: params.get('search') ?? undefined, sort, dir, state }, signal) : Promise.resolve(undefined)),
-    [def?.name, page, pageSize, params.get('search'), sort, dir, state, p.read],
+    (signal) => (def && p.read ? dataApi.list(def.name, { page, pageSize, search: params.get('search') ?? undefined, sort, dir, state, filters }, signal) : Promise.resolve(undefined)),
+    [def?.name, page, pageSize, params.get('search'), sort, dir, state, filtersRaw, p.read],
   );
+
+  // Spec 007: vistas compartidas (por rol) y personales.
+  const [viewsTick, setViewsTick] = useState(0);
+  const { data: views } = useAsync<ViewList | undefined>(
+    (signal) => (def && p.read && !def.isChild ? viewsApi.list(def.name, signal) : Promise.resolve(undefined)),
+    [def?.name, p.read, viewsTick],
+  );
+  const allViews = useMemo(() => [...(views?.shared ?? []), ...(views?.personal ?? [])], [views]);
+  const currentView = allViews.find((v) => v.name === viewName);
+  // La vista predeterminada se aplica una vez al abrir el listado sin parámetros.
+  const defaultApplied = useRef<string | null>(null);
+  useEffect(() => {
+    if (!views || !def || defaultApplied.current === def.name) return;
+    defaultApplied.current = def.name;
+    const dv = views.shared.find((v) => v.default);
+    if (dv && [...params.keys()].length === 0) update(viewParams(dv));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [views, def?.name]);
   // Los conteos por estado se conservan mientras carga para que los chips no parpadeen.
   const [counts, setCounts] = useState<StateCount[] | undefined>();
   useEffect(() => { if (data?.stateCounts) setCounts(data.stateCounts); }, [data]);
@@ -59,9 +115,14 @@ export function EntityListPage() {
     if (!def) return [];
     // Partidas y documento padre no tienen sentido como columna de listado.
     const fs = activeFields(def).filter((f) => f.type !== 'lines' && f.type !== 'parent');
+    // Spec 007: columnas elegidas (las que el usuario no ve simplemente no están en `fs`).
+    if (colsParam) {
+      const chosen = colsParam.split(',').map((c) => fs.find((f) => f.name.toLowerCase() === c.toLowerCase())).filter((f): f is NonNullable<typeof f> => !!f);
+      if (chosen.length) return chosen;
+    }
     const shown = fs.filter((f) => f.showInList);
     return shown.length ? shown : fs.slice(0, 5);
-  }, [def]);
+  }, [def, colsParam]);
 
   if (defLoading) return <LoadingBlock />;
   if (defError instanceof ApiError && defError.status === 403) return <ForbiddenPage />;
@@ -72,7 +133,18 @@ export function EntityListPage() {
   const total = data?.total ?? 0;
   const pages = Math.max(1, Math.ceil(total / pageSize));
   const rows = data?.items ?? [];
-  const searching = !!params.get('search');
+  const searching = !!params.get('search') || filters.length > 0;
+  const customized = !!(colsParam || filtersRaw || sort || state);
+
+  function chooseView(name: string) {
+    const v = allViews.find((x) => x.name === name);
+    if (v) update(viewParams(v));
+    else update({ view: NO_VIEW, cols: undefined, filters: undefined, sort: undefined, dir: undefined, state: undefined, page: undefined, search: undefined });
+  }
+
+  function setFilters(next: ViewFilter[]) {
+    update({ filters: next.length ? JSON.stringify(next) : undefined, page: undefined });
+  }
 
   function toggleSort(field: string) {
     if (sort !== field) update({ sort: field, dir: 'asc', page: undefined });
@@ -99,6 +171,33 @@ export function EntityListPage() {
         />
       )}
 
+      {!def.isChild && (
+        <div className="toolbar view-bar" role="group" aria-label="Vista del listado">
+          <Select selectSize="sm" aria-label="Vista" value={currentView?.name ?? NO_VIEW} onChange={(e) => chooseView(e.target.value)}>
+            <option value={NO_VIEW}>Todos los registros</option>
+            {!!views?.shared.length && (
+              <optgroup label="Compartidas">
+                {views.shared.map((v) => <option key={v.name} value={v.name}>{v.label}</option>)}
+              </optgroup>
+            )}
+            {!!views?.personal.length && (
+              <optgroup label="Mis vistas">
+                {views.personal.map((v) => <option key={v.name} value={v.name}>{v.label}</option>)}
+              </optgroup>
+            )}
+          </Select>
+          <Button size="sm" icon={Filter} onClick={() => setFiltersOpen(true)} aria-haspopup="dialog">
+            Filtros{filters.length ? ` (${filters.length})` : ''}
+          </Button>
+          <Button size="sm" icon={Columns3} onClick={() => setColumnsOpen(true)} aria-haspopup="dialog">Columnas</Button>
+          <Button size="sm" icon={BookmarkPlus} onClick={() => setSaveOpen(true)} aria-haspopup="dialog" disabled={!customized && !currentView?.personal}>Guardar vista</Button>
+          {currentView?.personal && (
+            <Button size="sm" variant="ghost" icon={Trash2} onClick={() => setConfirmDeleteView(true)}>Eliminar vista</Button>
+          )}
+        </div>
+      )}
+      <FilterChips def={def} filters={filters} onRemove={(i) => setFilters(filters.filter((_, j) => j !== i))} />
+
       <div className="toolbar">
         <Input
           icon={Search}
@@ -124,7 +223,8 @@ export function EntityListPage() {
             <LoadingBlock />
           ) : rows.length === 0 ? (
             searching ? (
-              <EmptyState icon={SearchX} title="Sin coincidencias" description="Prueba con otros términos de búsqueda." action={<Button onClick={() => setSearch('')}>Limpiar búsqueda</Button>} />
+              <EmptyState icon={SearchX} title="Sin coincidencias" description={filters.length ? 'Ningún registro cumple los filtros.' : 'Prueba con otros términos de búsqueda.'}
+                action={<Button onClick={() => { setSearch(''); if (filters.length) setFilters([]); }}>{filters.length ? 'Quitar filtros' : 'Limpiar búsqueda'}</Button>} />
             ) : (
               <EmptyState icon={Inbox} title={`No hay ${def.labelPlural.toLowerCase()}`} description={canCreate ? 'Crea el primer registro para empezar.' : def.systemManaged ? 'Los registra el sistema automáticamente.' : 'Todavía no hay registros capturados.'} action={newBtn || undefined} />
             )
@@ -195,7 +295,113 @@ export function EntityListPage() {
           )}
         </div>
       )}
+
+      <FilterDialog open={filtersOpen} def={def} filters={filters} onClose={() => setFiltersOpen(false)}
+        onApply={(f) => { setFiltersOpen(false); setFilters(f); }} />
+      <ColumnsDialog open={columnsOpen} def={def} current={columns.map((c) => c.name)} onClose={() => setColumnsOpen(false)}
+        onApply={(cols) => { setColumnsOpen(false); update({ cols: cols?.join(',') }); }} />
+      <SaveViewDialog
+        open={saveOpen}
+        def={def}
+        current={currentView?.personal ? currentView : undefined}
+        query={{ columns: colsParam ? columns.map((c) => c.name) : undefined, filters, sort, dir: sort ? dir : undefined, state }}
+        onClose={() => setSaveOpen(false)}
+        onSaved={(v) => { setSaveOpen(false); toast.success('Vista guardada'); setViewsTick((t) => t + 1); update({ view: v.name }); }}
+      />
+      <ConfirmDialog
+        open={confirmDeleteView}
+        danger
+        title="Eliminar vista"
+        message={<>La vista <strong>{currentView?.label}</strong> dejará de aparecer en tus vistas.</>}
+        confirmLabel="Eliminar"
+        onCancel={() => setConfirmDeleteView(false)}
+        onConfirm={async () => {
+          if (!currentView?.id) return;
+          try {
+            await viewsApi.remove(def.name, currentView.id);
+            toast.success('Vista eliminada');
+            setViewsTick((t) => t + 1);
+            chooseView(NO_VIEW);
+          } catch (e) {
+            toast.fromError(e);
+          } finally {
+            setConfirmDeleteView(false);
+          }
+        }}
+      />
     </div>
+  );
+}
+
+/** Elegir columnas del listado (solo campos que la persona puede ver). */
+function ColumnsDialog({ open, def, current, onClose, onApply }: {
+  open: boolean; def: EntityDef; current: string[]; onClose: () => void; onApply: (cols: string[] | undefined) => void;
+}) {
+  const fields = filterableFields(def);
+  const [chosen, setChosen] = useState<string[]>(current);
+  useEffect(() => { if (open) setChosen(current); }, [open, current]);
+  return (
+    <Dialog open={open} onClose={onClose} title="Columnas" description="Elige qué campos se muestran en el listado, en el orden del catálogo."
+      footer={
+        <>
+          <Button onClick={() => onApply(undefined)} style={{ marginRight: 'auto' }}>Restablecer</Button>
+          <Button onClick={onClose}>Cancelar</Button>
+          <Button variant="primary" disabled={chosen.length === 0} onClick={() => onApply(fields.filter((f) => chosen.includes(f.name)).map((f) => f.name))}>Aplicar</Button>
+        </>
+      }
+    >
+      <div className="column-list">
+        {fields.map((f) => (
+          <Checkbox key={f.name} label={f.label} checked={chosen.includes(f.name)}
+            onChange={(c) => setChosen((s) => (c ? [...s, f.name] : s.filter((x) => x !== f.name)))} />
+        ))}
+      </div>
+    </Dialog>
+  );
+}
+
+/** Guarda la consulta actual como vista personal (o actualiza la vista personal elegida si conserva su nombre). */
+function SaveViewDialog({ open, def, current, query, onClose, onSaved }: {
+  open: boolean; def: EntityDef; current?: SavedView;
+  query: { columns?: string[]; filters: ViewFilter[]; sort?: string; dir?: 'asc' | 'desc'; state?: string };
+  onClose: () => void; onSaved: (v: SavedView) => void;
+}) {
+  const [label, setLabel] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<ApiError | null>(null);
+  useEffect(() => { if (open) { setLabel(current?.label ?? ''); setError(null); } }, [open, current]);
+  const replacing = !!current && label.trim() === current.label;
+
+  async function save() {
+    setSaving(true);
+    setError(null);
+    try {
+      const input = { label: label.trim(), ...query, filters: query.filters.length ? query.filters : undefined };
+      const v = replacing && current?.id ? await viewsApi.update(def.name, current.id, input) : await viewsApi.create(def.name, input);
+      onSaved(v);
+    } catch (e) {
+      setError(e instanceof ApiError ? e : new ApiError(0, {}));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const general = error && !fieldError(error, 'label') ? (fieldError(error, 'view') ?? error.detail ?? error.title) : undefined;
+  return (
+    <Dialog open={open} onClose={onClose} title="Guardar vista" description="Solo tú verás esta vista. Guarda las columnas, los filtros y el orden actuales."
+      footer={
+        <>
+          <Button onClick={onClose} disabled={saving}>Cancelar</Button>
+          <Button variant="primary" loading={saving} disabled={!label.trim()} onClick={() => void save()}>{replacing ? 'Actualizar vista' : 'Guardar'}</Button>
+        </>
+      }
+    >
+      <div className="stack">
+        {general && <Alert tone="danger" title="No se guardó la vista">{general}</Alert>}
+        <Input label="Nombre de la vista" required maxLength={100} value={label} error={fieldError(error, 'label')}
+          onChange={(e) => setLabel(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && label.trim()) void save(); }} />
+      </div>
+    </Dialog>
   );
 }
 

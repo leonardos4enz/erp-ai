@@ -11,6 +11,19 @@ public sealed record SqlPredicate(string Sql, IReadOnlyList<(string Name, object
 {
     public static readonly SqlPredicate None = new("1 = 0", []);
 
+    /// <summary>
+    /// Spec 007: renombra los parámetros (<c>@sec0</c> → <c>@{prefix}0</c>) para combinar varios predicados en un
+    /// mismo comando (reportes con catálogos relacionados).
+    /// </summary>
+    public SqlPredicate Prefixed(string prefix)
+    {
+        string Rename(string n) => "@" + prefix + n["@sec".Length..];
+        // De mayor a menor para que @sec1 no reemplace el inicio de @sec10.
+        var sql = Parameters.OrderByDescending(p => p.Name.Length).ThenByDescending(p => p.Name, StringComparer.Ordinal)
+            .Aggregate(Sql, (acc, p) => acc.Replace(p.Name, Rename(p.Name), StringComparison.Ordinal));
+        return new(sql, Parameters.Select(p => (Rename(p.Name), p.Value)).ToList());
+    }
+
     /// <summary>Un SqlParameter solo puede pertenecer a un comando: se crean nuevos cada vez.</summary>
     public void AddTo(SqlParameterCollection target)
     {
@@ -92,13 +105,13 @@ public static class RecordFilter
         catch (ExprException ex) { return ex.Message; }
     }
 
-    public sealed class ParamBag
+    public sealed class ParamBag(string prefix = "@sec")
     {
         private readonly List<(string, object)> _items = [];
         public IReadOnlyList<(string Name, object Value)> Items => _items;
         public string Add(object? value)
         {
-            var name = $"@sec{_items.Count}";
+            var name = $"{prefix}{_items.Count}";
             _items.Add((name, value ?? DBNull.Value));
             return name;
         }
@@ -115,7 +128,8 @@ public static class RecordFilter
             Binary b when Comparisons.Contains(b.Op) => $"{Value(b.Left)} {b.Op} {Value(b.Right)}",
             InList i => $"{Value(i.Value)} IN ({string.Join(", ", i.Items.Select(Value))})",
             Literal { Value: bool v } => v ? "1 = 1" : "1 = 0",
-            PathRef { Tail: null } p when Column(p) is var (col, f) && f.Type == FieldTypes.Boolean => $"{col} = 1",
+            // Regresión (spec 007): una fórmula sí/no guardada (p. ej. «Bajo mínimo») también es una condición.
+            PathRef { Tail: null } p when Column(p) is var (col, f) && (f.Type == FieldTypes.Boolean || f is { Type: FieldTypes.Formula, ResultType: FieldTypes.Boolean }) => $"{col} = 1",
             Call c => BoolCall(c),
             _ => throw new ExprException("Una regla de acceso debe ser una condición (verdadero o falso)."),
         };

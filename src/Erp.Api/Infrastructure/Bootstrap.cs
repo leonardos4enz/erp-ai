@@ -201,6 +201,32 @@ public static class Bootstrap
         -- Spec 006
         IF COL_LENGTH('meta.Entity', 'SecurityJson') IS NULL ALTER TABLE meta.Entity ADD SecurityJson nvarchar(max) NULL;
         IF COL_LENGTH('meta.[User]', 'Unit') IS NULL ALTER TABLE meta.[User] ADD Unit nvarchar(100) NULL;
+        -- Spec 007
+        IF COL_LENGTH('meta.Entity', 'LayoutJson') IS NULL ALTER TABLE meta.Entity ADD LayoutJson nvarchar(max) NULL;
+        IF COL_LENGTH('meta.Entity', 'ViewsJson') IS NULL ALTER TABLE meta.Entity ADD ViewsJson nvarchar(max) NULL;
+        IF COL_LENGTH('meta.Entity', 'ReportsJson') IS NULL ALTER TABLE meta.Entity ADD ReportsJson nvarchar(max) NULL;
+
+        IF OBJECT_ID('meta.Dashboard') IS NULL
+        CREATE TABLE meta.Dashboard (
+            Name nvarchar(50) NOT NULL PRIMARY KEY,
+            Label nvarchar(100) NOT NULL,
+            DefinitionJson nvarchar(max) NOT NULL,
+            IsArchived bit NOT NULL DEFAULT 0,
+            UpdatedAt datetime2(3) NOT NULL DEFAULT SYSUTCDATETIME()
+        );
+
+        IF OBJECT_ID('meta.SavedView') IS NULL
+        CREATE TABLE meta.SavedView (
+            Id int IDENTITY PRIMARY KEY,
+            UserId int NOT NULL REFERENCES meta.[User](Id),
+            EntityName nvarchar(50) NOT NULL,
+            Label nvarchar(100) NOT NULL,
+            DefinitionJson nvarchar(max) NOT NULL,
+            CreatedAt datetime2(3) NOT NULL DEFAULT SYSUTCDATETIME(),
+            UpdatedAt datetime2(3) NULL
+        );
+        IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_SavedView_User')
+            CREATE INDEX IX_SavedView_User ON meta.SavedView (UserId, EntityName);
 
         IF OBJECT_ID('meta.Sequence') IS NULL
         CREATE TABLE meta.Sequence (

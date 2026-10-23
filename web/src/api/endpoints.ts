@@ -1,7 +1,7 @@
 import { api } from './client';
 import type {
-  AuditEntry, ChangePlan, ChangeSetSummary, EntityDef, HistoryEntry, LookupItem, Me, ModuleInfo,
-  ModulePreview, Paged, PlanPreview, Role, Row, RowList, User,
+  AuditEntry, ChangePlan, ChangeSetSummary, DashboardResult, DashboardSummary, EntityDef, HistoryEntry, LayoutState, LookupItem, Me,
+  ModuleInfo, ModulePreview, Paged, PlanPreview, ReportResult, ReportSummary, Role, Row, RowList, SavedView, User, ViewFilter, ViewList,
 } from './types';
 
 const enc = encodeURIComponent;
@@ -31,7 +31,11 @@ export interface ListQuery {
   sort?: string;
   dir?: 'asc' | 'desc';
   state?: string;
+  /** Spec 007: filtros por campo (se envían como JSON). */
+  filters?: ViewFilter[];
 }
+
+const filtersParam = (f?: ViewFilter[]) => (f && f.length ? JSON.stringify(f) : undefined);
 
 export interface TransitionInput {
   transition: string;
@@ -42,7 +46,7 @@ export interface TransitionInput {
 
 export const dataApi = {
   list: (entity: string, q: ListQuery, signal?: AbortSignal) =>
-    api<RowList>(`/data/${enc(entity)}`, { query: { ...q }, signal }),
+    api<RowList>(`/data/${enc(entity)}`, { query: { ...q, filters: filtersParam(q.filters) }, signal }),
   get: (entity: string, id: number | string) => api<Row>(`/data/${enc(entity)}/${enc(String(id))}`),
   lookup: (entity: string, search: string, signal?: AbortSignal, filter?: { field: string; value: unknown }) =>
     api<LookupItem[]>(`/data/${enc(entity)}/lookup`, {
@@ -56,13 +60,47 @@ export const dataApi = {
     api<void>(`/data/${enc(entity)}/${enc(String(id))}`, { method: 'DELETE' }),
   /** Calcula valores por defecto y fórmulas de un borrador sin guardarlo. */
   compute: (entity: string, values: Record<string, unknown>, id?: number | string, signal?: AbortSignal) =>
-    api<{ values: Record<string, unknown> }>(`/data/${enc(entity)}/compute`, {
+    api<{ values: Record<string, unknown>; layout?: LayoutState | null }>(`/data/${enc(entity)}/compute`, {
       method: 'POST', body: { id: id != null ? Number(id) : undefined, values }, signal,
     }),
   transition: (entity: string, id: number | string, input: TransitionInput) =>
     api<Row>(`/data/${enc(entity)}/${enc(String(id))}/transition`, { method: 'POST', body: input }),
   history: (entity: string, id: number | string, signal?: AbortSignal) =>
     api<HistoryEntry[]>(`/data/${enc(entity)}/${enc(String(id))}/history`, { signal }),
+};
+
+export interface ViewInput {
+  label: string;
+  columns?: string[];
+  filters?: ViewFilter[];
+  sort?: string;
+  dir?: 'asc' | 'desc';
+  state?: string;
+}
+
+export const viewsApi = {
+  list: (entity: string, signal?: AbortSignal) => api<ViewList>(`/views/${enc(entity)}`, { signal }),
+  create: (entity: string, v: ViewInput) => api<SavedView>(`/views/${enc(entity)}`, { method: 'POST', body: v }),
+  update: (entity: string, id: number, v: ViewInput) => api<SavedView>(`/views/${enc(entity)}/${id}`, { method: 'PUT', body: v }),
+  remove: (entity: string, id: number) => api<void>(`/views/${enc(entity)}/${id}`, { method: 'DELETE' }),
+};
+
+export const reportsApi = {
+  list: (signal?: AbortSignal) => api<ReportSummary[]>('/reports', { signal }),
+  run: (entity: string, name: string, filters?: ViewFilter[], signal?: AbortSignal) =>
+    api<ReportResult>(`/reports/${enc(entity)}/${enc(name)}`, { query: { filters: filtersParam(filters) }, signal }),
+  /** URL de descarga (misma sesión por cookie; GET no necesita cabecera CSRF). */
+  exportUrl: (entity: string, name: string, format: 'csv' | 'xlsx', filters?: ViewFilter[]) => {
+    const qs = new URLSearchParams({ format });
+    const f = filtersParam(filters);
+    if (f) qs.set('filters', f);
+    return `/api/reports/${enc(entity)}/${enc(name)}/export?${qs.toString()}`;
+  },
+};
+
+export const dashboardsApi = {
+  list: (signal?: AbortSignal) => api<DashboardSummary[]>('/dashboards', { signal }),
+  get: (name: string, signal?: AbortSignal) => api<DashboardResult>(`/dashboards/${enc(name)}`, { signal }),
 };
 
 export const usersApi = {

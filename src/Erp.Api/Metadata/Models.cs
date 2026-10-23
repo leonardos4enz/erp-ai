@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace Erp.Api.Metadata;
@@ -236,6 +237,149 @@ public sealed record SecurityPolicy
         Fields?.FirstOrDefault(f => string.Equals(f.Field, field, StringComparison.OrdinalIgnoreCase));
 }
 
+// ---------- Spec 007: metadatos de interfaz ----------
+
+/// <summary>Campo dentro de una sección. En JSON se acepta el nombre solo (<c>"Proveedor"</c>) o el objeto.</summary>
+[JsonConverter(typeof(LayoutItemConverter))]
+public sealed record LayoutItem
+{
+    public required string Field { get; init; }
+    public string? VisibleWhen { get; init; }
+    /// <summary>Ocupa el ancho completo de la sección.</summary>
+    public bool Wide { get; init; }
+}
+
+public sealed class LayoutItemConverter : JsonConverter<LayoutItem>
+{
+    public override LayoutItem? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        if (reader.TokenType == JsonTokenType.String) return new LayoutItem { Field = reader.GetString()! };
+        if (reader.TokenType != JsonTokenType.StartObject) throw new JsonException("Cada campo del layout es un nombre o un objeto { field }.");
+        string? field = null, when = null;
+        var wide = false;
+        while (reader.Read() && reader.TokenType != JsonTokenType.EndObject)
+        {
+            var name = reader.GetString();
+            reader.Read();
+            switch (name?.ToLowerInvariant())
+            {
+                case "field": field = reader.TokenType == JsonTokenType.String ? reader.GetString() : null; break;
+                case "visiblewhen": when = reader.TokenType == JsonTokenType.String ? reader.GetString() : null; break;
+                case "wide": wide = reader.TokenType == JsonTokenType.True; break;
+                default: reader.Skip(); break;
+            }
+        }
+        return new LayoutItem { Field = field ?? "", VisibleWhen = when, Wide = wide };
+    }
+
+    public override void Write(Utf8JsonWriter writer, LayoutItem value, JsonSerializerOptions options)
+    {
+        if (value.VisibleWhen is null && !value.Wide) { writer.WriteStringValue(value.Field); return; }
+        writer.WriteStartObject();
+        writer.WriteString("field", value.Field);
+        if (value.VisibleWhen is not null) writer.WriteString("visibleWhen", value.VisibleWhen);
+        if (value.Wide) writer.WriteBoolean("wide", true);
+        writer.WriteEndObject();
+    }
+}
+
+public sealed record LayoutSection
+{
+    public required string Name { get; init; }
+    public required string Label { get; init; }
+    public string? Description { get; init; }
+    /// <summary>Etiqueta de la pestaña; las secciones con la misma etiqueta van juntas.</summary>
+    public string? Tab { get; init; }
+    public int? Columns { get; init; }
+    public string? VisibleWhen { get; init; }
+    public IReadOnlyList<LayoutItem> Fields { get; init; } = [];
+}
+
+public sealed record Layout
+{
+    public IReadOnlyList<LayoutSection> Sections { get; init; } = [];
+}
+
+public static class FilterOps
+{
+    public static readonly IReadOnlySet<string> All = new HashSet<string>
+        { "eq", "ne", "gt", "gte", "lt", "lte", "contains", "in", "blank", "notBlank" };
+    public static readonly IReadOnlySet<string> NoValue = new HashSet<string> { "blank", "notBlank" };
+}
+
+/// <summary>Condición sobre un campo del catálogo. <c>Value</c> admite <c>$me</c> y <c>$today</c>.</summary>
+public sealed record ViewFilter
+{
+    public required string Field { get; init; }
+    public required string Op { get; init; }
+    public JsonElement? Value { get; init; }
+    /// <summary>Solo presentación: etiqueta del valor (p. ej. el nombre del proveedor elegido).</summary>
+    public string? Label { get; init; }
+}
+
+public sealed record ViewDef
+{
+    public required string Name { get; init; }
+    public required string Label { get; init; }
+    public IReadOnlyList<string>? Roles { get; init; }
+    public IReadOnlyList<string>? Columns { get; init; }
+    public IReadOnlyList<ViewFilter>? Filters { get; init; }
+    public string? Sort { get; init; }
+    public string? Dir { get; init; }
+    public string? State { get; init; }
+    public bool Default { get; init; }
+}
+
+public sealed record ReportGroup
+{
+    public required string Field { get; init; }
+    public string? Period { get; init; }
+    public string? Label { get; init; }
+}
+
+public sealed record ReportMeasure
+{
+    public required string Fn { get; init; }
+    public string? Field { get; init; }
+    public string? Label { get; init; }
+}
+
+public sealed record ReportDef
+{
+    public required string Name { get; init; }
+    public required string Label { get; init; }
+    public string? Description { get; init; }
+    public IReadOnlyList<string>? Roles { get; init; }
+    public IReadOnlyList<ReportGroup>? GroupBy { get; init; }
+    public IReadOnlyList<ReportMeasure> Measures { get; init; } = [];
+    public string? Filter { get; init; }
+    public string? OrderBy { get; init; }
+    public string? Dir { get; init; }
+    public int? Limit { get; init; }
+    public string? Chart { get; init; }
+}
+
+public sealed record DashboardWidget
+{
+    public required string Type { get; init; }
+    public string? Label { get; init; }
+    public required string Entity { get; init; }
+    public required string Report { get; init; }
+    public int? Measure { get; init; }
+    public bool Wide { get; init; }
+}
+
+public sealed record DashboardDef
+{
+    public required string Name { get; init; }
+    public required string Label { get; init; }
+    public string? Icon { get; init; }
+    public string? Description { get; init; }
+    public IReadOnlyList<string>? Roles { get; init; }
+    public IReadOnlyList<DashboardWidget> Widgets { get; init; } = [];
+    public bool IsArchived { get; init; }
+}
+
 public sealed record EntityDef
 {
     public required string Name { get; init; }
@@ -252,6 +396,12 @@ public sealed record EntityDef
     public IReadOnlyList<BusinessRule>? Rules { get; init; }
     public IReadOnlyList<Automation>? Automations { get; init; }
     public SecurityPolicy? Security { get; init; }
+    /// <summary>Spec 007: secciones y pestañas del formulario.</summary>
+    public Layout? Layout { get; init; }
+    /// <summary>Spec 007: vistas compartidas del listado (solo se envían a modeladores).</summary>
+    public IReadOnlyList<ViewDef>? Views { get; init; }
+    /// <summary>Spec 007: reportes (solo se envían a modeladores; los usuarios los consultan por /api/reports).</summary>
+    public IReadOnlyList<ReportDef>? Reports { get; init; }
 
     public bool SystemManaged => Security?.SystemManaged == true;
 
@@ -291,7 +441,45 @@ public sealed record ChangePlan
 [JsonDerivedType(typeof(SetRulesOp), "setRules")]
 [JsonDerivedType(typeof(SetAutomationsOp), "setAutomations")]
 [JsonDerivedType(typeof(SetSecurityOp), "setSecurity")]
+[JsonDerivedType(typeof(SetLayoutOp), "setLayout")]
+[JsonDerivedType(typeof(SetViewsOp), "setViews")]
+[JsonDerivedType(typeof(SetReportsOp), "setReports")]
+[JsonDerivedType(typeof(SetDashboardOp), "setDashboard")]
+[JsonDerivedType(typeof(ArchiveDashboardOp), "archiveDashboard")]
 public abstract record Operation;
+
+/// <summary>Spec 007. <c>null</c> elimina el layout (formulario derivado del orden de los campos).</summary>
+public sealed record SetLayoutOp : Operation
+{
+    public required string Entity { get; init; }
+    public Layout? Layout { get; init; }
+}
+
+/// <summary>Spec 007. Reemplaza las vistas compartidas del catálogo.</summary>
+public sealed record SetViewsOp : Operation
+{
+    public required string Entity { get; init; }
+    public IReadOnlyList<ViewDef> Views { get; init; } = [];
+}
+
+/// <summary>Spec 007. Reemplaza los reportes del catálogo.</summary>
+public sealed record SetReportsOp : Operation
+{
+    public required string Entity { get; init; }
+    public IReadOnlyList<ReportDef> Reports { get; init; } = [];
+}
+
+/// <summary>Spec 007. Crea o reemplaza un tablero.</summary>
+public sealed record SetDashboardOp : Operation
+{
+    public required DashboardDef Dashboard { get; init; }
+}
+
+/// <summary>Spec 007. El tablero deja de ofrecerse; la definición se conserva.</summary>
+public sealed record ArchiveDashboardOp : Operation
+{
+    public required string Name { get; init; }
+}
 
 /// <summary>Spec 006. Define la política completa del catálogo; <c>null</c> la elimina.</summary>
 public sealed record SetSecurityOp : Operation

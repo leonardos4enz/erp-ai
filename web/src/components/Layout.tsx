@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
-  Blocks, ChevronRight, History, LayoutDashboard, LogOut, Moon, PanelLeftClose, PanelLeftOpen,
+  BarChart3, Blocks, ChevronRight, Gauge, History, LayoutDashboard, LogOut, Moon, PanelLeftClose, PanelLeftOpen,
   ShieldCheck, Sun, Workflow,
 } from 'lucide-react';
+import { dashboardsApi, reportsApi } from '../api/endpoints';
 import type { EntityDef } from '../api/types';
+import { useAsync } from '../lib/hooks';
 import { useAuth } from '../auth/AuthContext';
 import { useTheme } from '../lib/theme';
 import { initials } from '../lib/format';
@@ -49,6 +51,10 @@ function useBreadcrumb(): { label: string; to?: string }[] {
     crumbs.push({ label: def?.labelPlural ?? name, to: `/c/${encodeURIComponent(name)}` });
     if (parts[2] === 'new') crumbs.push({ label: 'Nuevo' });
     else if (parts[2]) crumbs.push({ label: `#${decodeURIComponent(parts[2])}` });
+  } else if (parts[0] === 'reports' || parts[0] === 'dashboards') {
+    const reports = parts[0] === 'reports';
+    crumbs.push({ label: reports ? 'Reportes' : 'Tableros', to: reports ? '/reports' : '/dashboards' });
+    if (parts[1]) crumbs.push({ label: reports ? 'Reporte' : decodeURIComponent(parts[1]) });
   } else if (parts[0] === 'admin') {
     crumbs.push({ label: 'Configuración' });
     const map: Record<string, string> = { model: 'Modelador', security: 'Usuarios y roles', audit: 'Auditoría', modules: 'Módulos' };
@@ -154,6 +160,9 @@ export function Layout() {
     .map(([g, list]) => [g, list.slice().sort((a, b) => Number(!!b.workflow) - Number(!!a.workflow) || a.labelPlural.localeCompare(b.labelPlural, 'es'))] as const);
 
   const canModel = !!(me?.canManageModel || me?.isSuperuser);
+  // Spec 007: «Análisis» solo aparece si hay tableros o reportes para el usuario (se recalcula al cambiar el modelo).
+  const { data: boards } = useAsync((s) => (me ? dashboardsApi.list(s) : Promise.resolve([])), [me?.id, entities]);
+  const { data: reports } = useAsync((s) => (me ? reportsApi.list(s) : Promise.resolve([])), [me?.id, entities]);
   const canUsers = !!(me?.canManageUsers || me?.isSuperuser);
   const canAudit = !!(me?.canViewAudit || me?.isSuperuser);
 
@@ -201,6 +210,22 @@ export function Layout() {
               {canAudit && (
                 <NavLink to="/admin/audit" className="nav-link" title="Auditoría">
                   <History size={17} aria-hidden /><span>Auditoría</span>
+                </NavLink>
+              )}
+            </div>
+          )}
+          {/* Al final: no empuja «Configuración» fuera de la pantalla (regresión de la revisión exploratoria 003). */}
+          {(!!boards?.length || !!reports?.length || canModel) && (
+            <div className="nav-section">
+              <div className="nav-section-title">Análisis</div>
+              {(!!boards?.length || canModel) && (
+                <NavLink to="/dashboards" className="nav-link" title="Tableros">
+                  <Gauge size={17} aria-hidden /><span>Tableros</span>
+                </NavLink>
+              )}
+              {!!reports?.length && (
+                <NavLink to="/reports" className="nav-link" title="Reportes">
+                  <BarChart3 size={17} aria-hidden /><span>Reportes</span>
                 </NavLink>
               )}
             </div>

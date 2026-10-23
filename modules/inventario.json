@@ -1,7 +1,7 @@
 {
   "id": "inventario",
   "name": "Inventario",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "icon": "boxes",
   "description": "Existencias por almacén y producto, y movimientos de entrada, salida, ajuste y traspaso. Las recepciones confirmadas de Compras generan sus entradas solas.",
   "requires": ["compras"],
@@ -124,6 +124,31 @@
       "description": "Las existencias las administra el sistema: no se ofrecen ni se aceptan altas, cambios o bajas a mano, ni siquiera del administrador.",
       "plan": { "description": "Inventario 1.1.0", "operations": [
         { "op": "setSecurity", "entity": "Existencia", "security": { "systemManaged": true } }
+      ] } },
+    { "version": "1.2.0",
+      "description": "Reportes de existencias y movimientos, vista «Bajo mínimo» y el tablero «Inventario».",
+      "plan": { "description": "Inventario 1.2.0", "operations": [
+        { "op": "setViews", "entity": "Existencia", "views": [
+            { "name": "BajoMinimo", "label": "Bajo mínimo", "filters": [{ "field": "BajoMinimo", "op": "eq", "value": true }], "sort": "Cantidad", "dir": "asc" }
+          ] },
+        { "op": "setReports", "entity": "Existencia", "reports": [
+            { "name": "PorAlmacen", "label": "Existencias por almacén", "groupBy": [{ "field": "Almacen" }],
+              "measures": [{ "fn": "sum", "field": "Cantidad", "label": "Unidades" }, { "fn": "count", "label": "Productos" }], "chart": "bar" },
+            { "name": "BajoMinimo", "label": "Productos bajo mínimo", "measures": [{ "fn": "count", "label": "Productos" }], "filter": "BajoMinimo" }
+          ] },
+        { "op": "setReports", "entity": "MovimientoInventario", "reports": [
+            { "name": "PorTipo", "label": "Movimientos por tipo", "groupBy": [{ "field": "Tipo" }], "measures": [{ "fn": "count", "label": "Movimientos" }], "chart": "pie" },
+            { "name": "PorMes", "label": "Movimientos por mes", "groupBy": [{ "field": "Fecha", "period": "month", "label": "Mes" }, { "field": "Tipo" }],
+              "measures": [{ "fn": "count", "label": "Movimientos" }, { "fn": "sum", "field": "Efecto", "label": "Efecto en existencia" }] }
+          ] },
+        { "op": "setDashboard", "dashboard": { "name": "Inventario", "label": "Inventario", "icon": "warehouse",
+            "description": "Existencias por almacén, productos bajo mínimo y movimientos.",
+            "widgets": [
+              { "type": "kpi", "entity": "Existencia", "report": "BajoMinimo" },
+              { "type": "chart", "entity": "MovimientoInventario", "report": "PorTipo" },
+              { "type": "chart", "entity": "Existencia", "report": "PorAlmacen", "wide": true },
+              { "type": "table", "entity": "MovimientoInventario", "report": "PorMes", "wide": true }
+            ] } }
       ] } }
   ],
   "roles": [

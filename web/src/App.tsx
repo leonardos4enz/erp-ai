@@ -11,6 +11,8 @@ import { ModelerPage } from './pages/ModelerPage';
 import { SecurityPage } from './pages/SecurityPage';
 import { AuditPage } from './pages/AuditPage';
 import { ModulesPage } from './pages/ModulesPage';
+import { ReportPage, ReportsPage } from './pages/ReportsPage';
+import { DashboardPage, DashboardsPage } from './pages/DashboardsPage';
 import { NotFoundPage, ForbiddenPage } from './pages/StatusPages';
 
 function RequireAuth({ children }: { children: ReactNode }) {
@@ -41,6 +43,10 @@ export function App() {
         <Route path="c/:entity" element={<EntityListPage />} />
         <Route path="c/:entity/new" element={<EntityFormPage />} />
         <Route path="c/:entity/:id" element={<EntityFormPage />} />
+        <Route path="reports" element={<ReportsPage />} />
+        <Route path="reports/:entity/:name" element={<ReportPage />} />
+        <Route path="dashboards" element={<DashboardsPage />} />
+        <Route path="dashboards/:name" element={<DashboardPage />} />
         <Route path="admin/model" element={<Guard allow={!!(me?.canManageModel || me?.isSuperuser)}><ModelerPage /></Guard>} />
         <Route path="admin/security" element={<Guard allow={!!(me?.canManageUsers || me?.isSuperuser)}><SecurityPage /></Guard>} />
         <Route path="admin/modules" element={<Guard allow={!!me?.isSuperuser}><ModulesPage /></Guard>} />

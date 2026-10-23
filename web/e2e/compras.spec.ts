@@ -109,7 +109,8 @@ test('CA2 · R1 · R3 · R9: el comprador captura una orden con totales en vivo 
   const page = await pageAs(browser, 'comprador');
   await page.goto('/c/OrdenCompra/new');
   await expect(page.getByRole('heading', { name: 'Registrar orden de compra' })).toBeVisible();
-  await expect(page.getByLabel(/^Tipo de cambio/)).toHaveValue('1'); // valor por defecto
+  // Compras 1.4.0 (spec 007): con la moneda en pesos el tipo de cambio no se muestra (su valor por defecto es 1).
+  await expect(page.getByLabel(/^Tipo de cambio/)).toHaveCount(0);
 
   await pick(page, /^Proveedor/, 'Cartones', /Cartones del Norte/);
   await expect(page.getByLabel(/^Moneda/)).toHaveValue('MXN'); // sugerido desde el proveedor
@@ -166,6 +167,8 @@ test('R8: el gerente autoriza y quedan registrados quién y cuándo', async ({ b
   await page.getByRole('button', { name: 'Autorizar' }).click();
   await page.getByRole('dialog').getByRole('button', { name: 'Autorizar' }).click();
   await expect(page.getByText('Estado: Autorizada')).toBeVisible();
+  // Compras 1.4.0: la autorización está en la pestaña «Seguimiento».
+  await page.getByRole('tab', { name: 'Seguimiento' }).click();
   await expect(page.getByLabel(/^Autorizado por/)).toHaveValue('Gerente E2E');
   await expect(page.getByLabel(/^Fecha de autorización/)).not.toHaveValue('');
   // Historial visible con el cambio de estado.

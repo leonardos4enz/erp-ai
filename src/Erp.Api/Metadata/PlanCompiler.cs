@@ -7,7 +7,9 @@ public sealed record CompiledPlan(
     PlanPreview Preview,
     IReadOnlyDictionary<string, EntityDef> ResultingModel,
     IReadOnlyList<string> Sql,
-    IReadOnlySet<string> TouchedEntities);
+    IReadOnlySet<string> TouchedEntities,
+    IReadOnlyDictionary<string, DashboardDef>? Dashboards = null,
+    IReadOnlySet<string>? TouchedDashboards = null);
 
 /// <summary>
 /// Valida un <see cref="ChangePlan"/> contra el modelo actual simulando cada operación en orden.
@@ -28,9 +30,13 @@ public static partial class PlanCompiler
     public static CompiledPlan Compile(
         ChangePlan plan,
         IReadOnlyDictionary<string, EntityDef> model,
-        IReadOnlySet<string> knownRoles)
+        IReadOnlySet<string> knownRoles,
+        IReadOnlyDictionary<string, DashboardDef>? dashboards = null)
     {
         var working = new Dictionary<string, EntityDef>(model, StringComparer.OrdinalIgnoreCase);
+        var boards = new Dictionary<string, DashboardDef>(dashboards ?? new Dictionary<string, DashboardDef>(), StringComparer.OrdinalIgnoreCase);
+        var touchedBoards = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var lastBoardOp = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var errors = new List<PlanError>();
         var steps = new List<PlanStep>();
         var sql = new List<string>();
@@ -48,6 +54,18 @@ public static partial class PlanCompiler
         {
             var ctx = new Ctx(i, working, knownRoles, errors);
             var before = errors.Count;
+            // Spec 007: los tableros no pertenecen a un catálogo.
+            if (plan.Operations[i] is SetDashboardOp or ArchiveDashboardOp)
+            {
+                if (DashboardOp(ctx, plan.Operations[i], boards) is { } board && errors.Count == before)
+                {
+                    boards[board.Def.Name] = board.Def;
+                    touchedBoards.Add(board.Def.Name);
+                    lastBoardOp[board.Def.Name] = i;
+                    steps.Add(new(i, board.Description, null));
+                }
+                continue;
+            }
             var result = plan.Operations[i] switch
             {
                 CreateEntityOp op => CreateEntity(ctx, op),
@@ -60,6 +78,9 @@ public static partial class PlanCompiler
                 SetRulesOp op => SetRules(ctx, op),
                 SetAutomationsOp op => SetAutomations(ctx, op),
                 SetSecurityOp op => SetSecurity(ctx, op),
+                SetLayoutOp op => SetLayout(ctx, op),
+                SetViewsOp op => SetViews(ctx, op),
+                SetReportsOp op => SetReports(ctx, op),
                 _ => ctx.Fail("Operación desconocida."),
             };
             // Solo se registra el efecto si la operación fue válida; así las siguientes ven un modelo coherente.
@@ -96,7 +117,26 @@ public static partial class PlanCompiler
                     errors.Add(new(lastOp.GetValueOrDefault(e.Name, -1), $"{e.Label} › seguridad: {message}"));
         }
 
-        return new CompiledPlan(new PlanPreview(errors.Count == 0, errors, steps), working, sql, touched);
+        // Spec 007: layouts, vistas y reportes usan campos de otros catálogos (Relacion.Campo) y los tableros, reportes:
+        // se revisan todos para que un cambio en otro lado no los rompa en silencio.
+        if (touched.Count > 0 || touchedBoards.Count > 0)
+        {
+            foreach (var e in working.Values.Where(e => !e.IsArchived))
+            {
+                var at = lastOp.GetValueOrDefault(e.Name, -1);
+                if (e.Layout is { } layout)
+                    foreach (var m in InterfaceRules.ValidateLayout(e, layout, working, knownRoles)) errors.Add(new(at, $"{e.Label} › layout: {m}"));
+                if (e.Views is { } views)
+                    foreach (var m in InterfaceRules.ValidateViews(e, views, knownRoles)) errors.Add(new(at, $"{e.Label} › {m}"));
+                if (e.Reports is { } reports)
+                    foreach (var m in InterfaceRules.ValidateReports(e, reports, working, knownRoles)) errors.Add(new(at, $"{e.Label} › {m}"));
+            }
+            foreach (var d in boards.Values.Where(d => !d.IsArchived))
+                foreach (var m in InterfaceRules.ValidateDashboard(d, working, knownRoles))
+                    errors.Add(new(lastBoardOp.GetValueOrDefault(d.Name, -1), $"Tablero '{d.Label}': {m}"));
+        }
+
+        return new CompiledPlan(new PlanPreview(errors.Count == 0, errors, steps), working, sql, touched, boards, touchedBoards);
     }
 
     private static IEnumerable<string> ValidateFinal(EntityDef e, IReadOnlyDictionary<string, EntityDef> model, IReadOnlySet<string> roles)
@@ -333,6 +373,7 @@ public static partial class PlanCompiler
         var updated = ReplaceField(e, f with { IsArchived = true });
         if (string.Equals(updated.DisplayField, f.Name, StringComparison.OrdinalIgnoreCase))
             updated = updated with { DisplayField = null };
+        updated = WithoutField(updated, f.Name);
         return new(updated, $"Archivar campo '{f.Label}' de '{e.Label}' (la columna y sus datos se conservan)", []);
     }
 
@@ -463,6 +504,71 @@ public static partial class PlanCompiler
         var verb = op.Merge ? "Agregar o actualizar" : "Definir";
         return new(e with { Automations = list.Count == 0 ? null : list },
             $"{verb} {op.Automations.Count} automatización(es) en '{e.Label}': {string.Join(", ", op.Automations.Select(a => a.Label))}", []);
+    }
+
+    // ---------------- Spec 007: metadatos de interfaz ----------------
+    // La forma completa se valida en la pasada final: un plan puede agregar los campos después del layout o del reporte.
+
+    private static OpResult? SetLayout(Ctx ctx, SetLayoutOp op)
+    {
+        var e = ctx.Active(op.Entity);
+        if (e is null) return null;
+        if (op.Layout is null) return new(e with { Layout = null }, $"Quitar el layout del formulario de '{e.Label}'", []);
+        var tabs = op.Layout.Sections.Select(s => s.Tab).OfType<string>().Distinct().Count();
+        var detail = tabs > 0 ? $" en {tabs} pestaña(s)" : "";
+        return new(e with { Layout = op.Layout }, $"Definir el formulario de '{e.Label}': {op.Layout.Sections.Count} sección(es){detail}", []);
+    }
+
+    private static OpResult? SetViews(Ctx ctx, SetViewsOp op)
+    {
+        var e = ctx.Active(op.Entity);
+        if (e is null) return null;
+        var text = op.Views.Count == 0 ? $"Quitar las vistas compartidas de '{e.Label}'"
+            : $"Definir {op.Views.Count} vista(s) compartida(s) en '{e.Label}': {string.Join(", ", op.Views.Select(v => v.Label))}";
+        return new(e with { Views = op.Views.Count == 0 ? null : op.Views }, text, []);
+    }
+
+    private static OpResult? SetReports(Ctx ctx, SetReportsOp op)
+    {
+        var e = ctx.Active(op.Entity);
+        if (e is null) return null;
+        var text = op.Reports.Count == 0 ? $"Quitar los reportes de '{e.Label}'"
+            : $"Definir {op.Reports.Count} reporte(s) en '{e.Label}': {string.Join(", ", op.Reports.Select(r => r.Label))}";
+        return new(e with { Reports = op.Reports.Count == 0 ? null : op.Reports }, text, []);
+    }
+
+    private sealed record BoardResult(DashboardDef Def, string Description);
+
+    private static BoardResult? DashboardOp(Ctx ctx, Operation op, Dictionary<string, DashboardDef> boards)
+    {
+        if (op is ArchiveDashboardOp a)
+        {
+            if (!boards.TryGetValue(a.Name ?? "", out var existing) || existing.IsArchived) { ctx.Error($"El tablero '{a.Name}' no existe."); return null; }
+            return new(existing with { IsArchived = true }, $"Archivar el tablero '{existing.Label}' (la definición se conserva)");
+        }
+        var d = ((SetDashboardOp)op).Dashboard;
+        if (d is null) { ctx.Error("Indica el tablero."); return null; }
+        if (!Identifiers.IsValid(d.Name, out var err)) { ctx.Error($"Tablero: {err}"); return null; }
+        ValidateIcon(ctx, d.Icon);
+        var exists = boards.TryGetValue(d.Name, out var prev) && !prev.IsArchived;
+        // El nombre guardado conserva la capitalización original para que el enlace no cambie.
+        var name = prev?.Name ?? d.Name;
+        return new(d with { Name = name, IsArchived = false, Icon = d.Icon ?? "layout-dashboard" },
+            $"{(exists ? "Actualizar" : "Definir")} el tablero '{d.Label}' con {d.Widgets.Count} tarjeta(s)");
+    }
+
+    /// <summary>Al archivar un campo se retira del layout y de las columnas de las vistas (no hay nada que mostrar).</summary>
+    private static EntityDef WithoutField(EntityDef e, string field)
+    {
+        bool Other(string n) => !string.Equals(n, field, StringComparison.OrdinalIgnoreCase);
+        var layout = e.Layout is null ? null : e.Layout with
+        {
+            Sections = e.Layout.Sections.Select(s => s with { Fields = s.Fields.Where(i => Other(i.Field)).ToList() })
+                .Where(s => s.Fields.Count > 0).ToList(),
+        };
+        if (layout is { Sections.Count: 0 }) layout = null;
+        var views = e.Views?.Select(v => v.Columns is null ? v : v with { Columns = v.Columns.Where(Other).ToList() }).ToList();
+        return e with { Layout = layout, Views = views };
     }
 
     // ---------------- Validaciones ----------------

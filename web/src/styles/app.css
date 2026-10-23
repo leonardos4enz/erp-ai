@@ -465,3 +465,70 @@ code, pre, .mono { font-family: var(--font-mono); font-size: 0.8125rem; }
 /* Spec 004: notas de versión pendientes en la tarjeta del módulo. */
 .module-upgrades { margin: 0; padding-left: var(--space-5); font-size: var(--text-sm); color: var(--text-muted); }
 .module-requires { margin: 0; font-size: var(--text-sm); }
+
+/* ---------- Spec 007: layouts, vistas, reportes y tableros ---------- */
+.form-sections { display: flex; flex-direction: column; gap: var(--space-6); }
+/* Regresión (spec 007): display:flex anulaba el atributo hidden y las pestañas inactivas seguían a la vista. */
+.form-sections[hidden] { display: none; }
+.form-section + .form-section { border-top: 1px solid var(--border); padding-top: var(--space-5); }
+.form-section-title { font-size: var(--text-md); font-weight: 600; margin: 0 0 var(--space-4); }
+.form-section-desc { margin: calc(var(--space-3) * -1) 0 var(--space-4); font-size: var(--text-sm); }
+.form-grid.form-grid-1 { grid-template-columns: 1fr; }
+.form-grid.form-grid-1 .span-2 { grid-column: auto; }
+
+.view-bar { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.view-bar .select-wrap { min-width: 200px; }
+.filter-chips { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-4); }
+.filter-chip { display: inline-flex; align-items: center; gap: var(--space-1); padding: 2px var(--space-1) 2px var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-full); background: var(--surface); font-size: var(--text-sm); max-width: 100%; }
+.filter-chip > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.filter-row { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1.4fr) auto; gap: var(--space-2); align-items: end; }
+@media (max-width: 640px) { .filter-row { grid-template-columns: 1fr 1fr; } .filter-row > :nth-child(3) { grid-column: span 2; } }
+.column-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: var(--space-2) var(--space-4); }
+
+.report-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: var(--space-4); }
+.report-actions { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+/* Regresión (revisión exploratoria 007, F-03): en móvil los tres botones tapaban el título; pasan a su propia fila. */
+@media (max-width: 640px) { .page-actions:has(.report-actions) { margin-left: 0; width: 100%; } }
+.report-total td { font-weight: 600; border-top: 1px solid var(--border-strong); }
+.report-note { font-size: var(--text-sm); }
+
+.chart { width: 100%; height: auto; display: block; overflow: visible; }
+.chart text { fill: var(--text-muted); font-size: 11px; font-family: var(--font-sans); }
+.chart .chart-axis { stroke: var(--border-strong); }
+.chart .chart-grid { stroke: var(--border); }
+.chart .chart-bar { fill: var(--accent); }
+.chart .chart-line { stroke: var(--accent); fill: none; stroke-width: 2; }
+.chart .chart-dot { fill: var(--accent); }
+.chart-legend { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); margin: var(--space-3) 0 0; padding: 0; list-style: none; font-size: var(--text-sm); color: var(--text-muted); }
+.chart-legend li { display: inline-flex; align-items: center; gap: var(--space-2); }
+.chart-swatch { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+.pie-wrap { display: flex; gap: var(--space-5); align-items: center; flex-wrap: wrap; }
+.pie-wrap .chart { width: 180px; flex-shrink: 0; }
+
+.dashboard-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: var(--space-4); align-items: start; }
+.dashboard-grid .wide { grid-column: 1 / -1; }
+.widget { padding: var(--space-5); display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; }
+.widget-title { font-size: var(--text-sm); font-weight: 500; color: var(--text-muted); margin: 0; }
+.kpi-value { font-size: var(--text-2xl); font-weight: 600; font-variant-numeric: tabular-nums; color: var(--text); }
+.widget .table-scroll { max-height: 320px; }
+
+/* Serie de gráficas: paleta categórica validada (claro/oscuro, daltonismo); se asigna en orden fijo, nunca cíclica. */
+:root {
+  --chart-1: #2a78d6; --chart-2: #eb6834; --chart-3: #1baf7a; --chart-4: #eda100;
+  --chart-5: #e87ba4; --chart-6: #008300; --chart-7: #6250d6; --chart-8: #e34948;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --chart-1: #3987e5; --chart-2: #d95926; --chart-3: #199e70; --chart-4: #c98500;
+    --chart-5: #d55181; --chart-6: #008300; --chart-7: #9085e9; --chart-8: #e66767;
+  }
+}
+:root[data-theme="dark"] {
+  --chart-1: #3987e5; --chart-2: #d95926; --chart-3: #199e70; --chart-4: #c98500;
+  --chart-5: #d55181; --chart-6: #008300; --chart-7: #9085e9; --chart-8: #e66767;
+}
+.chart .chart-bar { fill: var(--chart-1); }
+.chart .chart-line { stroke: var(--chart-1); }
+.chart .chart-dot { fill: var(--chart-1); stroke: var(--surface); stroke-width: 2; }
+.chart .chart-hit { fill: transparent; }
+.chart .chart-hit:hover + .chart-bar, .chart .chart-bar:hover { opacity: 0.85; }

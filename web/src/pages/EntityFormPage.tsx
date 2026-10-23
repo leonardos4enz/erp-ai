@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, RefreshCw, Save, Trash2 } from 'lucide-react';
 import { ApiError, fieldError } from '../api/client';
 import { dataApi } from '../api/endpoints';
-import type { EntityDef, FieldDef, RecordTransition, RecordWorkflow, Row } from '../api/types';
+import type { EntityDef, FieldDef, LayoutState, RecordTransition, RecordWorkflow, Row } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { ConfirmDialog } from '../components/Dialog';
 import { resolveIcon } from '../components/DynamicIcon';
@@ -11,7 +11,8 @@ import { FieldInput } from '../components/FieldInput';
 import { LinesEditor } from '../components/LinesEditor';
 import { useToast } from '../components/Toast';
 import { HistoryPanel, stateLabel, TransitionDialog, WorkflowBar } from '../components/Workflow';
-import { Alert, Button, LoadingBlock, PageHeader } from '../components/ui';
+import { Alert, Button, LoadingBlock, PageHeader, Tabs } from '../components/ui';
+import { formSections, formTabs, hasLayoutConditions, placedFields, type FormSection } from '../lib/layout';
 import {
   blankLine, buildPayload, draftFromRow, isEmptyValue, lineErrorKey, lineFields, lookupFilterFor, mergeComputed, type Draft,
 } from '../lib/draft';
@@ -26,7 +27,9 @@ const EMPTY_DRAFT: Draft = { values: {}, touched: {}, lines: {} };
 function needsCompute(def: EntityDef, children: Record<string, EntityDef>): boolean {
   const calc = (f: FieldDef) => f.type === 'formula' || f.type === 'autonumber' || !!f.defaultValue;
   return activeFields(def).some((f) => calc(f) || f.type === 'lines')
-    || Object.values(children).some((c) => activeFields(c).some(calc));
+    || Object.values(children).some((c) => activeFields(c).some(calc))
+    // Spec 007: el servidor dice qué secciones y campos ocultar mientras se captura.
+    || hasLayoutConditions(def);
 }
 
 /** Validación local: obligatorios (incluye "obligatorio para rol"), números y longitudes. */
@@ -73,6 +76,9 @@ export function EntityFormPage() {
   const [transition, setTransition] = useState<RecordTransition | null>(null);
   const [dirty, setDirty] = useState(false);
   const [editTick, setEditTick] = useState(0);
+  // Spec 007: visibilidad condicional del layout (la calcula el servidor) y pestaña activa.
+  const [layoutState, setLayoutState] = useState<LayoutState | null>(null);
+  const [tab, setTab] = useState('');
 
   const draftRef = useRef(draft);
   draftRef.current = draft;
@@ -92,6 +98,7 @@ export function EntityFormPage() {
       const r = await dataApi.compute(def.name, buildPayload(def, children, draftRef.current, isNew), id, ctrl.signal);
       if (seq !== computeSeq.current || !r?.values) return;
       setDraft((d) => mergeComputed(def, children, d, r.values));
+      if (r.layout !== undefined) setLayoutState(r.layout ?? null);
     } catch {
       /* el cálculo en vivo es opcional: el servidor recalcula al guardar */
     }
@@ -101,6 +108,7 @@ export function EntityFormPage() {
     if (!def) return;
     setRow(r);
     setDraft(draftFromRow(def, children, r));
+    setLayoutState((r._layout as LayoutState | undefined) ?? null);
     setDirty(false);
     setConflict(false);
     setError(null);
@@ -124,6 +132,7 @@ export function EntityFormPage() {
     if (!ready) return;
     if (isNew) {
       setRow(undefined);
+      setLayoutState(null);
       setDraft(draftFromRow(def!, children));
       setDirty(false);
       setLoading(false);
@@ -157,8 +166,16 @@ export function EntityFormPage() {
   const linesFields = fields.filter((f) => f.type === 'lines');
   const isDocument = linesFields.length > 0;
   const headerFields = fields.filter((f) => f.type !== 'lines' && f.type !== 'parent' && !(f.type === 'state' && def.workflow));
-  const totalFields = isDocument ? headerFields.filter((f) => f.type === 'formula') : [];
-  const mainFields = headerFields.filter((f) => !totalFields.includes(f));
+  // Spec 007: con layout, las fórmulas que menciona van en su sección; las demás siguen en los totales del documento.
+  const placed = placedFields(def);
+  const isTotal = (f: FieldDef) => isDocument && f.type === 'formula' && !placed.has(f.name.toLowerCase());
+  const sections = formSections(def, headerFields, layoutState, isTotal);
+  const totalFields = headerFields.filter(isTotal);
+  // Con layout, solo lo visible: un campo oculto por condición no se valida (el servidor tampoco lo exige).
+  const mainFields = sections ? sections.flatMap((s) => s.fields.map((x) => x.field)) : headerFields.filter((f) => !totalFields.includes(f));
+  const tabs = sections ? formTabs(sections) : [];
+  const activeTab = tabs.includes(tab) ? tab : tabs[0];
+  const tabOf = (name: string) => sections?.find((s) => s.fields.some((x) => x.field.name.toLowerCase() === name.toLowerCase()))?.tab;
   const folioField = fields.find((f) => f.type === 'autonumber');
   const folio = folioField && row?.[folioField.name] ? String(row[folioField.name]) : null;
 
@@ -232,7 +249,10 @@ export function EntityFormPage() {
     const firstKey = Object.keys(errs)[0];
     if (firstKey) {
       const m = /^(\w+)\[(\d+)\]\.(\w+)$/.exec(firstKey);
-      document.getElementById(m ? `f-${m[1]}-${m[2]}-${m[3]}` : `f-${firstKey}`)?.focus();
+      const t = m ? undefined : tabOf(firstKey);
+      // La pestaña con el error se abre sola antes de enfocar el campo.
+      if (t && t !== activeTab) setTab(t);
+      window.setTimeout(() => document.getElementById(m ? `f-${m[1]}-${m[2]}-${m[3]}` : `f-${firstKey}`)?.focus(), 0);
       return;
     }
     setSaving(true);
@@ -251,8 +271,11 @@ export function EntityFormPage() {
       }
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) setConflict(true);
-      else if (err instanceof ApiError) setError(err);
-      else toast.fromError(err);
+      else if (err instanceof ApiError) {
+        setError(err);
+        const t = Object.keys(err.fieldErrors).map(tabOf).find(Boolean);
+        if (t) setTab(t);
+      } else toast.fromError(err);
     } finally {
       setSaving(false);
     }
@@ -272,7 +295,7 @@ export function EntityFormPage() {
     }
   }
 
-  function renderField(f: FieldDef) {
+  function renderField(f: FieldDef, wide = false) {
     const fid = `f-${f.name}`;
     const required = isRequiredFor(f, roles);
     const roleHint = lockHint(f, def) ?? (!f.required && required && isEditableField(f) ? 'Obligatorio para tu rol' : undefined);
@@ -291,7 +314,38 @@ export function EntityFormPage() {
         hint={roleHint}
         isNew={isNew}
         filter={def ? lookupFilterFor(f, { def, values: draft.values }) : undefined}
+        className={wide ? 'span-2' : undefined}
       />
+    );
+  }
+
+  function renderSection(s: FormSection) {
+    // Sin aria-labelledby: una región por sección sería ruido para el lector de pantalla y su nombre
+    // («Fechas») competiría con la etiqueta de un campo («Fecha»). El encabezado basta para navegar.
+    return (
+      <section key={s.name} className="form-section">
+        <h2 className="form-section-title">{s.label}</h2>
+        {s.description && <p className="subtle form-section-desc">{s.description}</p>}
+        <div className={`form-grid${s.columns === 1 ? ' form-grid-1' : ''}`}>{s.fields.map((x) => renderField(x.field, x.wide))}</div>
+      </section>
+    );
+  }
+
+  /** Campos del encabezado: rejilla simple, secciones o pestañas (spec 007). */
+  function renderBody() {
+    if (!sections) return mainFields.length === 0 && !isDocument
+      ? <p className="muted">Este catálogo no tiene campos activos.</p>
+      : <div className="form-grid">{mainFields.map((f) => renderField(f))}</div>;
+    if (!tabs.length) return <div className="form-sections">{sections.map(renderSection)}</div>;
+    return (
+      <div>
+        <Tabs items={tabs.map((t) => ({ id: t, label: t }))} value={activeTab!} onChange={setTab} label={`Secciones de ${def!.label.toLowerCase()}`} />
+        {tabs.map((t) => (
+          <div key={t} role="tabpanel" aria-label={t} hidden={t !== activeTab} className="form-sections">
+            {sections.filter((s) => s.tab === t).map(renderSection)}
+          </div>
+        ))}
+      </div>
     );
   }
 
@@ -392,9 +446,7 @@ export function EntityFormPage() {
         <form className="card" onSubmit={onSubmit} noValidate>
           <div className="card-pad stack">
             {alerts}
-            {mainFields.length === 0
-              ? <p className="muted">Este catálogo no tiene campos activos.</p>
-              : <div className="form-grid">{mainFields.map(renderField)}</div>}
+            {renderBody()}
           </div>
           {actions}
         </form>
@@ -412,7 +464,7 @@ export function EntityFormPage() {
       <form className="doc-form" onSubmit={onSubmit} noValidate>
         <section className="card card-pad stack" aria-label="Encabezado">
           {alerts}
-          <div className="form-grid">{mainFields.map(renderField)}</div>
+          {renderBody()}
         </section>
 
         {linesFields.map((lf) => {

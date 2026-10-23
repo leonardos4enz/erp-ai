@@ -1,7 +1,7 @@
 {
   "id": "compras",
   "name": "Compras",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "icon": "shopping-cart",
   "description": "Requisiciones, órdenes de compra con autorización por montos y recepción de mercancía con cantidades recibidas y pendientes. Incluye proveedores, productos y catálogos base.",
   "plan": {
@@ -370,6 +370,66 @@
               { "field": "IvaImporte", "read": ["Comprador", "Gerente de compras", "Director"] },
               { "field": "Total", "read": ["Comprador", "Gerente de compras", "Director"] },
               { "field": "CostoMXN", "read": ["Comprador", "Gerente de compras", "Director"] }
+            ] } }
+      ] } },
+    { "version": "1.4.0",
+      "description": "Formularios con secciones y pestañas (el tipo de cambio solo aparece si la moneda no es MXN), vistas compartidas, reportes de compras y el tablero «Compras». Reportes y tableros respetan la seguridad: el almacenista no ve importes.",
+      "plan": { "description": "Compras 1.4.0", "operations": [
+        { "op": "setLayout", "entity": "OrdenCompra", "layout": { "sections": [
+            { "name": "Datos", "label": "Datos de la orden", "tab": "General", "fields": ["Folio", "Proveedor", "Requisicion", "Fecha", "FechaEntrega", "Almacen", "Comprador"] },
+            { "name": "Pago", "label": "Condiciones de pago", "tab": "General",
+              "fields": ["Moneda", { "field": "TipoCambio", "visibleWhen": "NOT ISBLANK(Moneda) AND Moneda.Clave <> 'MXN'" }, "CondicionPago"] },
+            { "name": "Notas", "label": "Notas", "tab": "General", "columns": 1, "fields": ["Notas"] },
+            { "name": "Autorizacion", "label": "Autorización", "tab": "Seguimiento", "fields": ["AutorizadoPor", "FechaAutorizacion"] },
+            { "name": "Motivos", "label": "Motivos", "tab": "Seguimiento", "columns": 1, "fields": [
+                { "field": "MotivoRechazo", "visibleWhen": "Estado = 'Rechazada'" },
+                { "field": "MotivoCancelacion", "visibleWhen": "Estado = 'Cancelada'" }
+              ] }
+          ] } },
+        { "op": "setLayout", "entity": "Requisicion", "layout": { "sections": [
+            { "name": "Solicitud", "label": "Solicitud", "fields": ["Folio", "Solicitante", "Departamento", "Almacen", "Prioridad"] },
+            { "name": "Fechas", "label": "Fechas", "fields": ["Fecha", "FechaRequerida"] },
+            { "name": "Justificacion", "label": "Justificación", "columns": 1, "fields": ["Justificacion", "MotivoRechazo"] }
+          ] } },
+        { "op": "setViews", "entity": "Requisicion", "views": [
+            { "name": "Mias", "label": "Mis requisiciones", "filters": [{ "field": "Solicitante", "op": "eq", "value": "$me" }] },
+            { "name": "PorAprobar", "label": "Por aprobar", "roles": ["Gerente de compras", "Director"], "state": "PorAprobar", "sort": "FechaRequerida", "dir": "asc" }
+          ] },
+        { "op": "setViews", "entity": "OrdenCompra", "views": [
+            { "name": "PendientesRecibir", "label": "Pendientes de recibir", "filters": [{ "field": "Estado", "op": "in", "value": ["Enviada", "RecibidaParcial"] }],
+              "columns": ["Folio", "Proveedor", "FechaEntrega", "Almacen", "PendientePorRecibir", "Estado"], "sort": "FechaEntrega", "dir": "asc" },
+            { "name": "PorAutorizar", "label": "Por autorizar", "roles": ["Gerente de compras", "Director"], "state": "PorAutorizar" }
+          ] },
+        { "op": "setReports", "entity": "OrdenCompra", "reports": [
+            { "name": "ComprasPorProveedor", "label": "Compras por proveedor", "description": "Órdenes autorizadas en adelante (sin canceladas), en pesos.",
+              "groupBy": [{ "field": "Proveedor" }], "measures": [{ "fn": "count", "label": "Órdenes" }, { "fn": "sum", "field": "TotalMXN", "label": "Total MXN" }],
+              "filter": "Estado IN ('Autorizada', 'Enviada', 'RecibidaParcial', 'Recibida', 'Cerrada')", "orderBy": "measure", "limit": 20, "chart": "bar" },
+            { "name": "ComprasPorMes", "label": "Compras por mes", "description": "Total comprado por mes de la orden (sin borradores, rechazadas ni canceladas).",
+              "groupBy": [{ "field": "Fecha", "period": "month", "label": "Mes" }], "measures": [{ "fn": "sum", "field": "TotalMXN", "label": "Total MXN" }, { "fn": "count", "label": "Órdenes" }],
+              "filter": "Estado IN ('Autorizada', 'Enviada', 'RecibidaParcial', 'Recibida', 'Cerrada')", "chart": "line" },
+            { "name": "MontoComprado", "label": "Monto comprado", "description": "Total en pesos de las órdenes autorizadas en adelante.",
+              "measures": [{ "fn": "sum", "field": "TotalMXN", "label": "Total MXN" }],
+              "filter": "Estado IN ('Autorizada', 'Enviada', 'RecibidaParcial', 'Recibida', 'Cerrada')" },
+            { "name": "OrdenesAbiertas", "label": "Órdenes abiertas", "description": "Por autorizar, autorizadas o en espera de recibirse.",
+              "measures": [{ "fn": "count", "label": "Órdenes" }], "filter": "Estado IN ('PorAutorizar', 'Autorizada', 'Enviada', 'RecibidaParcial')" }
+          ] },
+        { "op": "setReports", "entity": "Requisicion", "reports": [
+            { "name": "PorEstado", "label": "Requisiciones por estado", "groupBy": [{ "field": "Estado" }], "measures": [{ "fn": "count", "label": "Requisiciones" }], "chart": "pie" }
+          ] },
+        { "op": "setReports", "entity": "OrdenCompraPartida", "reports": [
+            { "name": "ProductosMasComprados", "label": "Productos más comprados", "description": "Cantidades pedidas y recibidas por producto (todas las órdenes).",
+              "groupBy": [{ "field": "Producto" }], "measures": [{ "fn": "sum", "field": "Cantidad", "label": "Pedido" }, { "fn": "sum", "field": "CantidadRecibida", "label": "Recibido" }],
+              "orderBy": "measure", "limit": 15, "chart": "bar" }
+          ] },
+        { "op": "setDashboard", "dashboard": { "name": "Compras", "label": "Compras", "icon": "shopping-cart",
+            "description": "Órdenes abiertas, monto comprado, tendencia mensual y principales proveedores y productos.",
+            "widgets": [
+              { "type": "kpi", "entity": "OrdenCompra", "report": "OrdenesAbiertas" },
+              { "type": "kpi", "entity": "OrdenCompra", "report": "MontoComprado", "label": "Monto comprado (MXN)" },
+              { "type": "chart", "entity": "Requisicion", "report": "PorEstado" },
+              { "type": "chart", "entity": "OrdenCompra", "report": "ComprasPorMes", "wide": true },
+              { "type": "chart", "entity": "OrdenCompra", "report": "ComprasPorProveedor", "measure": 1, "wide": true },
+              { "type": "table", "entity": "OrdenCompraPartida", "report": "ProductosMasComprados", "wide": true }
             ] } }
       ] } }
   ],

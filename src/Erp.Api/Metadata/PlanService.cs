@@ -13,9 +13,10 @@ public sealed class PlanService(Db db, MetadataStore store, JsonSerializerOption
     public async Task<PlanPreview> PreviewAsync(ChangePlan plan, CancellationToken ct)
     {
         var model = await store.GetAsync(ct);
+        var boards = await store.GetDashboardsAsync(ct);
         await using var cn = await db.OpenAsync(ct);
         var roles = await LoadRolesAsync(cn, null);
-        return PlanCompiler.Compile(plan, model, roles).Preview;
+        return PlanCompiler.Compile(plan, model, roles, boards).Preview;
     }
 
     public async Task<int> ApplyAsync(ChangePlan plan, HttpContext http, CancellationToken ct)
@@ -46,8 +47,9 @@ public sealed class PlanService(Db db, MetadataStore store, JsonSerializerOption
 
         // Se recompila contra el modelo leído dentro de la transacción, no contra la caché.
         var model = await MetadataStore.LoadAsync(cn, tx);
+        var boards = await MetadataStore.LoadDashboardsAsync(cn, tx);
         var roles = await LoadRolesAsync(cn, tx);
-        var compiled = PlanCompiler.Compile(plan, model, extraRoles is null ? roles : roles.Union(extraRoles).ToHashSet(StringComparer.OrdinalIgnoreCase));
+        var compiled = PlanCompiler.Compile(plan, model, extraRoles is null ? roles : roles.Union(extraRoles).ToHashSet(StringComparer.OrdinalIgnoreCase), boards);
         if (!compiled.Preview.Valid)
             throw new ValidationFailed(compiled.Preview.Errors
                 .GroupBy(e => e.Operation < 0 ? "plan" : $"operations[{e.Operation}]")
@@ -58,6 +60,8 @@ public sealed class PlanService(Db db, MetadataStore store, JsonSerializerOption
 
         foreach (var name in compiled.TouchedEntities)
             await UpsertAsync(cn, tx, compiled.ResultingModel[name]);
+        foreach (var name in compiled.TouchedDashboards ?? new HashSet<string>())
+            await UpsertDashboardAsync(cn, tx, compiled.Dashboards![name]);
 
         // Spec 005: una fórmula nueva o cambiada también se calcula en los registros existentes.
         var result = compiled.ResultingModel;
@@ -102,13 +106,15 @@ public sealed class PlanService(Db db, MetadataStore store, JsonSerializerOption
         IReadOnlySet<string> extraRoles, CancellationToken ct)
     {
         IReadOnlyDictionary<string, EntityDef> model = await store.GetAsync(ct);
+        IReadOnlyDictionary<string, DashboardDef> boards = await store.GetDashboardsAsync(ct);
         await using var cn = await db.OpenAsync(ct);
         var roles = (await LoadRolesAsync(cn, null)).Union(extraRoles).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var errors = new List<PlanError>();
         var steps = new List<PlanStep>();
         foreach (var (label, plan) in chain)
         {
-            var compiled = PlanCompiler.Compile(plan, model, roles);
+            var compiled = PlanCompiler.Compile(plan, model, roles, boards);
+            boards = compiled.Dashboards!;
             var prefix = chain.Count > 1 ? $"[{label}] " : "";
             errors.AddRange(compiled.Preview.Errors.Select(e => e with { Message = prefix + e.Message }));
             steps.AddRange(compiled.Preview.Steps.Select(s => s with { Description = prefix + s.Description }));
@@ -121,13 +127,21 @@ public sealed class PlanService(Db db, MetadataStore store, JsonSerializerOption
     internal async Task<CompiledPlan> CompileWithRolesAsync(ChangePlan plan, IReadOnlySet<string> extraRoles, CancellationToken ct)
     {
         var model = await store.GetAsync(ct);
+        var boards = await store.GetDashboardsAsync(ct);
         await using var cn = await db.OpenAsync(ct);
         var roles = (await LoadRolesAsync(cn, null)).Union(extraRoles).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        return PlanCompiler.Compile(plan, model, roles);
+        return PlanCompiler.Compile(plan, model, roles, boards);
     }
 
     internal static async Task<IReadOnlySet<string>> LoadRolesAsync(DbConnection cn, DbTransaction? tx) =>
         (await cn.QueryAsync<string>("SELECT Name FROM meta.Role", transaction: tx)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    private static Task UpsertDashboardAsync(DbConnection cn, DbTransaction tx, DashboardDef d) =>
+        cn.ExecuteAsync("""
+            MERGE meta.Dashboard AS t USING (SELECT @Name AS Name) AS s ON t.Name = s.Name
+            WHEN MATCHED THEN UPDATE SET Label = @Label, DefinitionJson = @Json, IsArchived = @IsArchived, UpdatedAt = SYSUTCDATETIME()
+            WHEN NOT MATCHED THEN INSERT (Name, Label, DefinitionJson, IsArchived) VALUES (@Name, @Label, @Json, @IsArchived);
+            """, new { d.Name, d.Label, Json = JsonSerializer.Serialize(d with { IsArchived = false }, MetadataStore.Json), d.IsArchived }, tx);
 
     private static async Task UpsertAsync(DbConnection cn, DbTransaction tx, EntityDef e)
     {
@@ -136,9 +150,10 @@ public sealed class PlanService(Db db, MetadataStore store, JsonSerializerOption
             USING (SELECT @Name AS Name) AS s ON t.Name = s.Name
             WHEN MATCHED THEN UPDATE SET Label = @Label, LabelPlural = @LabelPlural, Icon = @Icon,
                 Description = @Description, DisplayField = @DisplayField, IsArchived = @IsArchived,
-                WorkflowJson = @WorkflowJson, RulesJson = @RulesJson, GroupName = @Group, AutomationsJson = @AutomationsJson, SecurityJson = @SecurityJson, UpdatedAt = SYSUTCDATETIME()
-            WHEN NOT MATCHED THEN INSERT (Name, Label, LabelPlural, Icon, Description, DisplayField, IsArchived, WorkflowJson, RulesJson, GroupName, AutomationsJson, SecurityJson)
-                VALUES (@Name, @Label, @LabelPlural, @Icon, @Description, @DisplayField, @IsArchived, @WorkflowJson, @RulesJson, @Group, @AutomationsJson, @SecurityJson)
+                WorkflowJson = @WorkflowJson, RulesJson = @RulesJson, GroupName = @Group, AutomationsJson = @AutomationsJson, SecurityJson = @SecurityJson,
+                LayoutJson = @LayoutJson, ViewsJson = @ViewsJson, ReportsJson = @ReportsJson, UpdatedAt = SYSUTCDATETIME()
+            WHEN NOT MATCHED THEN INSERT (Name, Label, LabelPlural, Icon, Description, DisplayField, IsArchived, WorkflowJson, RulesJson, GroupName, AutomationsJson, SecurityJson, LayoutJson, ViewsJson, ReportsJson)
+                VALUES (@Name, @Label, @LabelPlural, @Icon, @Description, @DisplayField, @IsArchived, @WorkflowJson, @RulesJson, @Group, @AutomationsJson, @SecurityJson, @LayoutJson, @ViewsJson, @ReportsJson)
             OUTPUT inserted.Id;
             """, new
         {
@@ -147,6 +162,9 @@ public sealed class PlanService(Db db, MetadataStore store, JsonSerializerOption
             RulesJson = e.Rules is null ? null : JsonSerializer.Serialize(e.Rules, MetadataStore.Json),
             AutomationsJson = e.Automations is null ? null : JsonSerializer.Serialize(e.Automations, MetadataStore.Json),
             SecurityJson = e.Security is null ? null : JsonSerializer.Serialize(e.Security, MetadataStore.Json),
+            LayoutJson = e.Layout is null ? null : JsonSerializer.Serialize(e.Layout, MetadataStore.Json),
+            ViewsJson = e.Views is null ? null : JsonSerializer.Serialize(e.Views, MetadataStore.Json),
+            ReportsJson = e.Reports is null ? null : JsonSerializer.Serialize(e.Reports, MetadataStore.Json),
         }, tx);
 
         foreach (var f in e.Fields)

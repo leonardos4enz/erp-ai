@@ -56,6 +56,76 @@ export interface SecurityPolicy {
   systemManaged?: boolean;
 }
 
+/* ---------- Spec 007: metadatos de interfaz ---------- */
+
+export type LayoutItem = string | { field: string; visibleWhen?: string; wide?: boolean };
+export interface LayoutSection {
+  name: string;
+  label: string;
+  description?: string;
+  tab?: string;
+  columns?: 1 | 2;
+  visibleWhen?: string;
+  fields: LayoutItem[];
+}
+export interface Layout { sections: LayoutSection[] }
+/** Qué oculta el layout para el borrador actual (lo calcula el servidor). */
+export interface LayoutState { hiddenSections: string[]; hiddenFields: string[] }
+
+export type FilterOp = 'eq' | 'ne' | 'gt' | 'gte' | 'lt' | 'lte' | 'contains' | 'in' | 'blank' | 'notBlank';
+export interface ViewFilter { field: string; op: FilterOp; value?: unknown; /** Solo presentación (p. ej. nombre del proveedor elegido). */ label?: string }
+export interface ViewDef {
+  name: string;
+  label: string;
+  roles?: string[];
+  columns?: string[];
+  filters?: ViewFilter[];
+  sort?: string;
+  dir?: 'asc' | 'desc';
+  state?: string;
+  default?: boolean;
+}
+export interface SavedView extends ViewDef { id?: number | null; personal: boolean }
+export interface ViewList { shared: SavedView[]; personal: SavedView[] }
+
+export interface ReportDef {
+  name: string;
+  label: string;
+  description?: string;
+  roles?: string[];
+  groupBy?: { field: string; period?: 'day' | 'month' | 'year'; label?: string }[];
+  measures: { fn: 'count' | 'sum' | 'avg' | 'min' | 'max'; field?: string; label?: string }[];
+  filter?: string;
+  orderBy?: 'group' | 'measure';
+  dir?: 'asc' | 'desc';
+  limit?: number;
+  chart?: 'bar' | 'line' | 'pie';
+}
+export interface ReportSummary { entity: string; entityLabel: string; group?: string | null; name: string; label: string; description?: string | null; chart?: string | null }
+export interface ReportColumn { key: string; label: string; kind: 'group' | 'measure'; type: 'text' | 'number' | 'date' | 'boolean'; scale?: number | null }
+export interface ReportResult {
+  entity: string;
+  name: string;
+  label: string;
+  description?: string | null;
+  chart?: 'bar' | 'line' | 'pie' | null;
+  columns: ReportColumn[];
+  rows: Record<string, string | number | boolean | null>[];
+  totals: Record<string, number | string | null>;
+  truncated: boolean;
+}
+export interface DashboardWidgetDef { type: 'kpi' | 'chart' | 'table'; label?: string; entity: string; report: string; measure?: number; wide?: boolean }
+export interface DashboardDef { name: string; label: string; icon?: string; description?: string; roles?: string[]; widgets: DashboardWidgetDef[] }
+export interface DashboardSummary { name: string; label: string; icon: string; description?: string | null }
+export interface DashboardResult {
+  name: string;
+  label: string;
+  icon: string;
+  description?: string | null;
+  widgets: { type: 'kpi' | 'chart' | 'table'; label: string; wide: boolean; entity: string; report: string; measure?: number | null; result: ReportResult }[];
+  definition?: DashboardDef | null;
+}
+
 export type StateColor = 'neutral' | 'accent' | 'success' | 'warning' | 'danger';
 
 export interface WorkflowState { name: string; label: string; color?: StateColor; editable?: boolean }
@@ -127,6 +197,11 @@ export interface EntityDef {
   security?: SecurityPolicy | null;
   /** Spec 006: las personas solo consultan; lo escribe el motor. */
   systemManaged?: boolean;
+  /** Spec 007: secciones y pestañas del formulario. */
+  layout?: Layout | null;
+  /** Spec 007: solo la reciben los modeladores. */
+  views?: ViewDef[] | null;
+  reports?: ReportDef[] | null;
   isChild?: boolean;
   parentEntity?: string;
 }
@@ -156,7 +231,12 @@ export type Operation =
   | { op: 'setWorkflow'; entity: string; workflow: Workflow }
   | { op: 'setRules'; entity: string; rules: Rule[] }
   | { op: 'setAutomations'; entity: string; automations: Automation[]; merge?: boolean }
-  | { op: 'setSecurity'; entity: string; security: SecurityPolicy | null };
+  | { op: 'setSecurity'; entity: string; security: SecurityPolicy | null }
+  | { op: 'setLayout'; entity: string; layout: Layout | null }
+  | { op: 'setViews'; entity: string; views: ViewDef[] }
+  | { op: 'setReports'; entity: string; reports: ReportDef[] }
+  | { op: 'setDashboard'; dashboard: DashboardDef }
+  | { op: 'archiveDashboard'; name: string };
 
 export interface ChangePlan { description: string; operations: Operation[] }
 

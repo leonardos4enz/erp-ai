@@ -50,4 +50,5 @@ y cada sesión queda como registro de una sola entrega. Al cerrar la spec:
 | 004 | [Campos asignados por el sistema y actualización de módulos](specs/004-campos-sistema-y-actualizaciones/spec.md) | Implementado |
 | 005 | [Automatizaciones entre registros, cantidades e Inventario](specs/005-automatizaciones-inventario/spec.md) | Implementado |
 | 006 | [Seguridad por campo y por registro](specs/006-seguridad-campos-registros/spec.md) | Implementado |
-| 007–011 | Vistas y reportes, integraciones, entornos, multi-empresa, IA | [Roadmap](roadmap.md) |
+| 007 | [Metadatos de interfaz: layouts, vistas, reportes y tableros](specs/007-metadatos-interfaz/spec.md) | Implementado |
+| 008–011 | Integraciones, entornos, multi-empresa, IA | [Roadmap](roadmap.md) |

@@ -12,8 +12,8 @@ en orden, no en paralelo: casi todas tocan el núcleo del motor (`PlanCompiler`,
 |---|---|
 | 005 Automatizaciones + inventario | Implementado ([spec](specs/005-automatizaciones-inventario/spec.md)) |
 | 006 Seguridad por campo/registro | Implementado ([spec](specs/006-seguridad-campos-registros/spec.md)) |
-| 007 Vistas, layouts, reportes | **Siguiente** |
-| 008 Integraciones | Pendiente |
+| 007 Vistas, layouts, reportes | Implementado ([spec](specs/007-metadatos-interfaz/spec.md)) |
+| 008 Integraciones | **Siguiente** |
 | 009 Entornos | Pendiente |
 | 010 Multi-empresa / multi-moneda | Pendiente |
 | 011 Asistente IA | Pendiente |
@@ -23,7 +23,7 @@ en orden, no en paralelo: casi todas tocan el núcleo del motor (`PlanCompiler`,
 |---|---|---|
 | Automatización entre registros | Una transición solo modifica su propio registro; la recepción no actualiza la OC; no hay cantidades recibidas/pendientes ni inventario | **005** |
 | Seguridad por campo y por registro | ~~Solo permisos por entidad~~ Resuelto en la 006: campos ocultos/solo lectura por rol y por estado, alcance por registro (propios, unidad, todos, reglas `where`) en el servidor | **006** |
-| Metadatos de interfaz | El formulario se deriva del orden de los campos; no hay vistas, layouts, reportes ni dashboards | **007** |
+| Metadatos de interfaz | ~~El formulario se deriva del orden de los campos~~ Resuelto en la 007: layouts con secciones, pestañas y visibilidad condicional; vistas compartidas y personales; reportes exportables; tableros; todo con la seguridad de la 006 en el servidor | **007** |
 | Integraciones y webhooks | No existen | **008** |
 | Entornos (sandbox → producción) | Los módulos se instalan y actualizan, pero no se exporta lo hecho en el modelador | **009** |
 | Multi-empresa y multi-moneda real | Una sola empresa; el tipo de cambio se captura a mano | **010** |
@@ -62,7 +62,8 @@ en orden, no en paralelo: casi todas tocan el núcleo del motor (`PlanCompiler`,
 - **Reportes:** agrupaciones y totales sobre una entidad y sus relaciones, exportables a Excel/CSV.
 - **Dashboards:** tarjetas de indicadores y gráficas definidas como metadatos (respetando 006).
 - Reportes y vistas deben filtrar con `RecordFilter.For` y quitar campos con `FieldAccess.Strip` (los mismos de la 006).
-- Pendiente del modelador (hallazgo F-03 de la 006): «Revisar cambios» aparece sin cambios en catálogos con `displayOrder` no consecutivo.
+- ~~Pendiente del modelador (hallazgo F-03 de la 006)~~ resuelto en la 007.
+- Pendiente para la 008: exportar e importar listados (la 007 exporta reportes) entra con la importación masiva.
 
 ### 008 — Integraciones
 - **Webhooks salientes** por evento, firmados con HMAC, con reintentos y bitácora de entregas.

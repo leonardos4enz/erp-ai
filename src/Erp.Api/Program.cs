@@ -41,6 +41,8 @@ builder.Services.AddSingleton<UserContextLoader>();
 builder.Services.AddScoped<PlanService>();
 builder.Services.AddScoped<RecordService>();
 builder.Services.AddScoped<ModuleService>();
+builder.Services.AddScoped<ReportService>();
+builder.Services.AddScoped<ViewService>();
 
 // ---------- Autenticación: cookie (ADR-0002) ----------
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
@@ -123,6 +125,7 @@ app.MapModel();
 app.MapData();
 app.MapAdmin();
 app.MapAudit();
+app.MapAnalytics();
 app.MapGet("/api/health", () => Results.Ok(new { status = "ok" })).AllowAnonymous();
 app.MapFallback("/api/{**path}", () => Results.Problem(title: "Ruta no encontrada.", statusCode: 404));
 

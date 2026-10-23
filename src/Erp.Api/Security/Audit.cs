@@ -15,6 +15,8 @@ public static class AuditActions
     public const string ModelChange = "model.change";
     public const string UserChange = "security.user";
     public const string RoleChange = "security.role";
+    /// <summary>Spec 007: vista personal del listado creada, cambiada o borrada.</summary>
+    public const string ViewChange = "view.change";
 }
 
 public static class Audit

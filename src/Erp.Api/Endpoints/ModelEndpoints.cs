@@ -81,6 +81,13 @@ public static class ModelEndpoints
             .Select(f => f with { Access = FieldAccess.ByRole(e, f, u), EditableIn = e.Security?.For(f.Name)?.EditableIn })
             .Where(f => u.CanManageModel || f.Access != FieldAccessLevels.Hidden)
             .ToList();
-        return e with { Fields = fields, Security = u.CanManageModel ? e.Security : null };
+        // Spec 007: vistas y reportes se consultan por /api/views y /api/reports, ya filtrados para el usuario.
+        return e with
+        {
+            Fields = fields,
+            Security = u.CanManageModel ? e.Security : null,
+            Views = u.CanManageModel ? e.Views : null,
+            Reports = u.CanManageModel ? e.Reports : null,
+        };
     }
 }

@@ -10,7 +10,8 @@ using static Erp.Api.Metadata.Identifiers;
 
 namespace Erp.Api.Data;
 
-public sealed record ListQuery(int Page = 1, int PageSize = 25, string? Search = null, string? Sort = null, string? Dir = null, string? State = null);
+public sealed record ListQuery(int Page = 1, int PageSize = 25, string? Search = null, string? Sort = null, string? Dir = null, string? State = null,
+    IReadOnlyList<ViewFilter>? Filters = null);
 public sealed record StateCount(string State, string Label, string Color, int Count);
 public sealed record ListResult(IReadOnlyList<Dictionary<string, object?>> Items, int Total, IReadOnlyList<StateCount>? StateCounts = null);
 public sealed record LookupItem(long Id, string Label);
@@ -33,7 +34,7 @@ public sealed partial class RecordService(Db db, MetadataStore store)
 
     private static readonly HashSet<string> IgnoredKeys = new(StringComparer.OrdinalIgnoreCase)
     {
-        "id", "_rowVersion", "_workflow", "createdAt", "createdBy", "updatedAt", "updatedBy",
+        "id", "_rowVersion", "_workflow", "_layout", "createdAt", "createdBy", "updatedAt", "updatedBy",
     };
 
     // ======================= Lectura =======================
@@ -71,6 +72,10 @@ public sealed partial class RecordService(Db db, MetadataStore store)
                     searchable.Select(f => $"t.{Quote(f.Name)} LIKE @search ESCAPE '\\'"))).Append(')');
             }
         }
+
+        // Spec 007: filtros por campo de la vista (validados contra metadatos y la seguridad por campo).
+        if (FilterSql.Build(e, q.Filters, user, cmd.Parameters, "flt") is { Length: > 0 } filterSql)
+            where.Append(" AND ").Append(filterSql);
 
         // El filtro por estado se compara contra los estados declarados, nunca se concatena.
         var baseWhere = where.ToString();
@@ -312,7 +317,7 @@ public sealed partial class RecordService(Db db, MetadataStore store)
     }
 
     /// <summary>Calcula valores por defecto y fórmulas sin guardar (totales en vivo en la UI).</summary>
-    public async Task<Dictionary<string, object?>> ComputeAsync(string entityName, long? id, JsonElement values, UserContext user, CancellationToken ct)
+    public async Task<(Dictionary<string, object?> Values, object? Layout)> ComputeAsync(string entityName, long? id, JsonElement values, UserContext user, CancellationToken ct)
     {
         var (e, model) = await RootEntityAsync(entityName, ct);
         Require(id is null ? user.Access(e.Name).Create : user.Access(e.Name).Update);
@@ -323,10 +328,13 @@ public sealed partial class RecordService(Db db, MetadataStore store)
         if (id is null && e.Workflow is not null) draft.Header[Workflow.StateField] = e.Workflow.Initial;
         await ParseIntoAsync(draft, e, model, values, loader, lenient: true, ct,
             new Writer(user, draft.Header.GetValueOrDefault(Workflow.StateField) as string));
-        Compute(draft, e, model, loader, Env(user, draft));
+        var env = Env(user, draft);
+        Compute(draft, e, model, loader, env);
         var row = await FormatDraftAsync(cn, e, model, draft, ct);
         FieldAccess.Strip(e, row, user, model);
-        return row;
+        // Spec 007: qué oculta el layout con los valores capturados hasta ahora.
+        var layout = HasConditions(e) ? LayoutOutput(EvaluateLayout(e, model, HeaderScope(draft, e, model, loader), env, user)) : null;
+        return (row, layout);
     }
 
     public async Task<Dictionary<string, object?>> TransitionAsync(string entityName, long id, TransitionRequest req, HttpContext http, CancellationToken ct)
@@ -507,7 +515,8 @@ public sealed partial class RecordService(Db db, MetadataStore store)
         var lineScopes = new Dictionary<string, List<DocScope>>(StringComparer.OrdinalIgnoreCase);
         var header = HeaderScope(d, e, model, loader, lineScopes);
 
-        if (checkRequired) RequiredErrors(e, d.Header, user, "", errors);
+        // Spec 007: un campo que el layout oculta por condición no se exige (la persona no lo ve).
+        if (checkRequired) RequiredErrors(e, d.Header, user, "", errors, EvaluateLayout(e, model, header, env, user).HiddenFields);
         RuleErrors(e, header, env, "", errors);
 
         foreach (var (field, list) in d.Lines)
@@ -524,9 +533,10 @@ public sealed partial class RecordService(Db db, MetadataStore store)
         if (errors.Count > 0) throw new ValidationFailed(errors);
     }
 
-    private static void RequiredErrors(EntityDef e, Values values, UserContext user, string prefix, Dictionary<string, string[]> errors)
+    private static void RequiredErrors(EntityDef e, Values values, UserContext user, string prefix, Dictionary<string, string[]> errors,
+        IReadOnlyList<string>? hidden = null)
     {
-        foreach (var f in e.ActiveFields.Where(f => !f.ReadOnly && f.Type != FieldTypes.Lines))
+        foreach (var f in e.ActiveFields.Where(f => !f.ReadOnly && f.Type != FieldTypes.Lines && hidden?.Contains(f.Name, StringComparer.OrdinalIgnoreCase) != true))
             if ((f.Required || user.HasRole(f.RequiredForRoles)) && IsBlank(values.GetValueOrDefault(f.Name)))
                 errors[prefix + f.Name] = [$"{f.Label} es obligatorio."];
     }
@@ -1006,6 +1016,12 @@ public sealed partial class RecordService(Db db, MetadataStore store)
                     };
                 }).ToList(),
             };
+        }
+        if (HasConditions(e))
+        {
+            var draft = (await LoadDraftAsync(cn, tx, e, model, id, ct))!;
+            var loader = new RelatedLoader(cn, tx, model);
+            row["_layout"] = LayoutOutput(EvaluateLayout(e, model, HeaderScope(draft, e, model, loader), Env(user, draft), user));
         }
         FieldAccess.Strip(e, row, user, model);
         return row;

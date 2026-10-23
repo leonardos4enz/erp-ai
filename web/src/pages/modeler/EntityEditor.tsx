@@ -4,7 +4,7 @@ import {
 } from 'lucide-react';
 import { ApiError } from '../../api/client';
 import { adminApi } from '../../api/endpoints';
-import type { Automation, ChangePlan, EntityDef, FieldDef, FieldType, FormulaResultType, Operation, Rule, SecurityPolicy, Workflow } from '../../api/types';
+import type { Automation, ChangePlan, EntityDef, FieldDef, FieldType, FormulaResultType, Layout, Operation, ReportDef, Rule, SecurityPolicy, ViewDef, Workflow } from '../../api/types';
 import { Dialog } from '../../components/Dialog';
 import { CURATED_ICONS, DynamicIcon } from '../../components/DynamicIcon';
 import { TagInput } from '../../components/TagInput';
@@ -64,6 +64,9 @@ interface Draft {
   workflowJson: string;
   automationsJson: string;
   securityJson: string;
+  layoutJson: string;
+  viewsJson: string;
+  reportsJson: string;
 }
 
 let keySeq = 0;
@@ -81,7 +84,7 @@ function draftFrom(def?: EntityDef): Draft {
   if (!def) {
     const f = blankField(0);
     f.label = 'Nombre'; f.name = 'Nombre'; f.required = true; f.maxLength = 150;
-    return { name: '', label: '', labelPlural: '', icon: 'package', description: '', displayField: '', group: '', fields: [f], rulesJson: '', workflowJson: '', automationsJson: '', securityJson: '' };
+    return { name: '', label: '', labelPlural: '', icon: 'package', description: '', displayField: '', group: '', fields: [f], rulesJson: '', workflowJson: '', automationsJson: '', securityJson: '', layoutJson: '', viewsJson: '', reportsJson: '' };
   }
   const fields = def.fields
     .slice()
@@ -94,6 +97,9 @@ function draftFrom(def?: EntityDef): Draft {
     workflowJson: def.workflow ? pretty(def.workflow) : '',
     automationsJson: def.automations?.length ? pretty(def.automations) : '',
     securityJson: def.security ? pretty(def.security) : '',
+    layoutJson: def.layout ? pretty(def.layout) : '',
+    viewsJson: def.views?.length ? pretty(def.views) : '',
+    reportsJson: def.reports?.length ? pretty(def.reports) : '',
   };
 }
 
@@ -142,7 +148,38 @@ function behaviourOperations(entity: string, original: EntityDef | undefined, d:
   if (security.ok && canonical(security.value) !== canonical(original?.security ?? null)) {
     ops.push({ op: 'setSecurity', entity, security: security.value });
   }
+  // Spec 007: metadatos de interfaz. Van al final: usan campos, estados y roles ya definidos.
+  const layout = parseJson<Layout>(d.layoutJson, 'object');
+  if (layout.ok && canonical(layout.value) !== canonical(original?.layout ?? null)) {
+    ops.push({ op: 'setLayout', entity, layout: layout.value });
+  }
+  const views = parseJson<ViewDef[]>(d.viewsJson, 'array');
+  if (views.ok && canonical(views.value ?? []) !== canonical(original?.views ?? [])) {
+    ops.push({ op: 'setViews', entity, views: views.value ?? [] });
+  }
+  const reports = parseJson<ReportDef[]>(d.reportsJson, 'array');
+  if (reports.ok && canonical(reports.value ?? []) !== canonical(original?.reports ?? [])) {
+    ops.push({ op: 'setReports', entity, reports: reports.value ?? [] });
+  }
   return ops;
+}
+
+/**
+ * Posición nueva de cada campo existente, solo si el orden relativo cambió. Regresión (revisión exploratoria 006,
+ * F-03): se comparaba el índice en pantalla con el `displayOrder` guardado, que no tiene por qué ser consecutivo
+ * (huecos, estado en -1), y se ofrecía «Revisar cambios» sin cambios.
+ */
+export function reorderedPositions(original: EntityDef, fields: { _isNew: boolean; _original?: FieldDef }[]): Map<string, number> {
+  const before = original.fields.slice().sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0)).map((f) => f.name);
+  const after = fields.filter((f) => !f._isNew && f._original).map((f) => f._original!.name);
+  const out = new Map<string, number>();
+  if (before.length === after.length && before.every((n, i) => n === after[i])) return out;
+  fields.forEach((f, i) => {
+    if (f._isNew || !f._original) return;
+    // Al reordenar se renumera de forma consecutiva; un campo que ya tiene su número no se envía.
+    if ((f._original.displayOrder ?? 0) !== i) out.set(f._original.name, i);
+  });
+  return out;
 }
 
 export function buildOperations(original: EntityDef | undefined, d: Draft): Operation[] {
@@ -167,6 +204,7 @@ export function buildOperations(original: EntityDef | undefined, d: Draft): Oper
   if (d.group.trim() !== (original.group ?? '')) { meta.group = d.group.trim(); metaChanged = true; }
   if (metaChanged) ops.push(meta);
 
+  const moved = reorderedPositions(original, d.fields);
   d.fields.forEach((f, i) => {
     if (f._isNew) {
       if (!f.isArchived) ops.push({ op: 'addField', entity: original.name, field: cleanField(f, i) });
@@ -183,7 +221,7 @@ export function buildOperations(original: EntityDef | undefined, d: Draft): Oper
     if ((f.editable !== false) !== (o.editable !== false)) { u.editable = f.editable !== false; changed = true; }
     if (f.type === 'choice' && !sameList(f.options, o.options)) { u.options = f.options ?? []; changed = true; }
     if (!sameList(f.requiredForRoles, o.requiredForRoles)) { u.requiredForRoles = f.requiredForRoles ?? []; changed = true; }
-    if (i !== (o.displayOrder ?? i)) { u.displayOrder = i; changed = true; }
+    if (moved.has(o.name)) { u.displayOrder = moved.get(o.name)!; changed = true; }
     if (supportsDefault(f.type) && (f.defaultValue ?? '').trim() !== (o.defaultValue ?? '')) { u.defaultValue = (f.defaultValue ?? '').trim(); changed = true; }
     if (f.type === 'formula' && (f.formula ?? '').trim() !== (o.formula ?? '')) { u.formula = (f.formula ?? '').trim(); changed = true; }
     if (changed) ops.push(u);
@@ -220,6 +258,12 @@ function validate(d: Draft, isNew: boolean, existingNames: string[]): Record<str
   if (!automations.ok) e.automationsJson = automations.error;
   const security = parseJson<SecurityPolicy>(d.securityJson, 'object');
   if (!security.ok) e.securityJson = security.error;
+  const layout = parseJson<Layout>(d.layoutJson, 'object');
+  if (!layout.ok) e.layoutJson = layout.error;
+  const views = parseJson<ViewDef[]>(d.viewsJson, 'array');
+  if (!views.ok) e.viewsJson = views.error;
+  const reports = parseJson<ReportDef[]>(d.reportsJson, 'array');
+  if (!reports.ok) e.reportsJson = reports.error;
   return e;
 }
 
@@ -543,9 +587,9 @@ export function EntityEditor({ original, entities, onCancel, onReview }: EntityE
         </div>
       </section>
 
-      <details className="card card-pad advanced-section" open={!!(original?.rules?.length || original?.workflow || original?.automations?.length || original?.security) || undefined}>
+      <details className="card card-pad advanced-section" open={!!(original?.rules?.length || original?.workflow || original?.automations?.length || original?.security || original?.layout || original?.views?.length || original?.reports?.length) || undefined}>
         <summary className="advanced-summary">
-          <span className="section-title">Reglas, proceso, automatizaciones y seguridad</span>
+          <span className="section-title">Reglas, proceso, automatizaciones, seguridad e interfaz</span>
           <span className="subtle">Avanzado · validaciones de negocio, estados del documento, efectos en otros registros y quién ve o edita qué</span>
         </summary>
         <div className="stack" style={{ marginTop: 'var(--space-4)' }}>
@@ -592,6 +636,39 @@ export function EntityEditor({ original, entities, onCancel, onReview }: EntityE
             error={visibleErrors.securityJson ?? (d.securityJson ? parseJsonError(d.securityJson, 'object') : undefined)}
             value={d.securityJson}
             onChange={(e) => setD((s) => ({ ...s, securityJson: e.target.value }))}
+          />
+          <Textarea
+            className="mono json-editor"
+            label="Layout del formulario (JSON)"
+            rows={12}
+            spellCheck={false}
+            placeholder={'{\n  "sections": [\n    { "name": "General", "label": "Datos generales", "tab": "General", "fields": ["Nombre", "Fecha"] },\n    { "name": "Pago", "label": "Pago", "tab": "General", "fields": ["Moneda", { "field": "TipoCambio", "visibleWhen": "Moneda.Clave <> \'MXN\'" }] }\n  ]\n}'}
+            hint="Secciones con name, label, fields y opcionalmente tab, columns (1 o 2), description y visibleWhen (también por campo). Los campos no mencionados van en «Otros datos»."
+            error={visibleErrors.layoutJson ?? (d.layoutJson ? parseJsonError(d.layoutJson, 'object') : undefined)}
+            value={d.layoutJson}
+            onChange={(e) => setD((s) => ({ ...s, layoutJson: e.target.value }))}
+          />
+          <Textarea
+            className="mono json-editor"
+            label="Vistas compartidas (JSON)"
+            rows={10}
+            spellCheck={false}
+            placeholder={'[\n  { "name": "Mias", "label": "Mis registros", "filters": [{ "field": "Responsable", "op": "eq", "value": "$me" }], "default": true }\n]'}
+            hint="Vistas del listado: name, label y opcionalmente roles, columns, filters (field, op, value; $me y $today), sort, dir, state y default."
+            error={visibleErrors.viewsJson ?? (d.viewsJson ? parseJsonError(d.viewsJson, 'array') : undefined)}
+            value={d.viewsJson}
+            onChange={(e) => setD((s) => ({ ...s, viewsJson: e.target.value }))}
+          />
+          <Textarea
+            className="mono json-editor"
+            label="Reportes (JSON)"
+            rows={12}
+            spellCheck={false}
+            placeholder={'[\n  { "name": "PorMes", "label": "Por mes", "groupBy": [{ "field": "Fecha", "period": "month" }],\n    "measures": [{ "fn": "count" }, { "fn": "sum", "field": "Total" }], "chart": "line" }\n]'}
+            hint="groupBy (hasta 2: Campo o Relacion.Campo; period day, month o year en fechas), measures (count, sum, avg, min, max), filter, orderBy, dir, limit, chart (bar, line, pie) y roles."
+            error={visibleErrors.reportsJson ?? (d.reportsJson ? parseJsonError(d.reportsJson, 'array') : undefined)}
+            value={d.reportsJson}
+            onChange={(e) => setD((s) => ({ ...s, reportsJson: e.target.value }))}
           />
         </div>
       </details>
