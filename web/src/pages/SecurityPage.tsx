@@ -663,13 +663,14 @@ const KIND_LABEL: Record<SecurityChange['kind'], string> = {
   'user.create': 'Alta de usuario', 'user.update': 'Cambio de usuario', 'role.create': 'Alta de rol', 'role.update': 'Cambio de rol',
   'team.create': 'Alta de equipo', 'team.update': 'Cambio de equipo', 'unit.move': 'Mover unidad',
   'apikey.create': 'Alta de clave de API', 'apikey.update': 'Roles de clave de API',
+  'oauthclient.create': 'Alta de cliente OAuth', 'oauthclient.update': 'Roles y alcances de cliente OAuth',
 };
 
 const FIELD_LABEL: Record<string, string> = {
   username: 'Usuario', displayName: 'Nombre', name: 'Nombre', isActive: 'Activo', roleIds: 'Roles', unit: 'Unidad', companyIds: 'Empresas',
   passwordChanged: 'Contraseña', canManageModel: 'Modificar el modelo', canManageUsers: 'Administrar usuarios', canViewAudit: 'Consultar auditoría',
   permissions: 'Permisos', inheritsRoleIds: 'Hereda de', memberIds: 'Miembros', parentId: 'Unidad superior', expiresInDays: 'Vence en (días)',
-  description: 'Descripción',
+  description: 'Descripción', scopes: 'Alcances', tokenMinutes: 'Vida del token (min)', clientId: 'client_id',
 };
 
 type Lookups = { roles: Role[]; users: User[]; companies: Company[]; units: BusinessUnit[] };

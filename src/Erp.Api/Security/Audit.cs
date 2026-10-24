@@ -21,6 +21,8 @@ public static class AuditActions
     public const string WebhookChange = "integration.webhook";
     /// <summary>Spec 008: alta, cambio, rotación o revocación de una clave de API (nunca la clave).</summary>
     public const string ApiKeyChange = "integration.apikey";
+    /// <summary>Spec 018: alta, cambio, rotación o revocación de un cliente OAuth (nunca el secreto).</summary>
+    public const string OAuthClientChange = "integration.oauthclient";
     public const string Import = "data.import";
     public const string Export = "data.export";
     /// <summary>Spec 009: paquetes de metadatos entre entornos (exportar, subir, rechazo al subir, aprobar, rechazar, aplicar).</summary>

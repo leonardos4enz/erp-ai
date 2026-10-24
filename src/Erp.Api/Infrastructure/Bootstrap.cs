@@ -588,6 +588,37 @@ public static class Bootstrap
             CONSTRAINT UX_ModelSnapshot_Import UNIQUE (ImportId, Moment)
         );
 
+        -- Spec 018: clientes OAuth (client credentials) y sus tokens opacos (solo el SHA-256 de secreto y token).
+        IF OBJECT_ID('meta.OAuthClient') IS NULL
+        CREATE TABLE meta.OAuthClient (
+            Id int IDENTITY PRIMARY KEY,
+            Name nvarchar(100) NOT NULL,
+            ClientId char(20) NOT NULL CONSTRAINT UX_OAuthClient_ClientId UNIQUE,
+            SecretHash varbinary(32) NOT NULL,
+            PreviousSecretHash varbinary(32) NULL,
+            PreviousExpiresAt datetime2(3) NULL,
+            Scopes nvarchar(200) NOT NULL,
+            TokenMinutes int NOT NULL,
+            UserId int NOT NULL REFERENCES meta.[User](Id),
+            CreatedBy int NOT NULL REFERENCES meta.[User](Id),
+            CreatedAt datetime2(3) NOT NULL DEFAULT SYSUTCDATETIME(),
+            RotatedAt datetime2(3) NULL,
+            RevokedAt datetime2(3) NULL,
+            LastTokenAt datetime2(3) NULL
+        );
+        IF OBJECT_ID('meta.OAuthToken') IS NULL
+        CREATE TABLE meta.OAuthToken (
+            Id bigint IDENTITY PRIMARY KEY,
+            ClientId int NOT NULL REFERENCES meta.OAuthClient(Id),
+            TokenHash varbinary(32) NOT NULL CONSTRAINT UX_OAuthToken_Hash UNIQUE,
+            Scopes nvarchar(200) NOT NULL,
+            IssuedAt datetime2(3) NOT NULL DEFAULT SYSUTCDATETIME(),
+            ExpiresAt datetime2(3) NOT NULL,
+            RevokedAt datetime2(3) NULL
+        );
+        IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_OAuthToken_Client' AND object_id = OBJECT_ID('meta.OAuthToken'))
+            CREATE INDEX IX_OAuthToken_Client ON meta.OAuthToken (ClientId, ExpiresAt);
+
         -- Constitución II.4: la auditoría es de solo inserción, incluso para la propia aplicación.
         IF OBJECT_ID('meta.TR_AuditLog_Immutable') IS NULL
             EXEC('CREATE TRIGGER meta.TR_AuditLog_Immutable ON meta.AuditLog INSTEAD OF UPDATE, DELETE AS

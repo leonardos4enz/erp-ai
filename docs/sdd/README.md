@@ -61,4 +61,5 @@ y cada sesión queda como registro de una sola entrega. Al cerrar la spec:
 | 015 | [Jerarquía de roles, equipos y unidades de negocio](specs/015-jerarquia-roles-equipos/spec.md) | Implementado |
 | 016 | [Automatizaciones asíncronas y programadas](specs/016-automatizaciones-asincronas/spec.md) | Implementado |
 | 017 | [Rollback de entornos](specs/017-rollback-entornos/spec.md) | Implementado |
-| 018–020 | Brechas de plataforma ([roadmap](roadmap.md#specs-planeadas-brechas-de-plataforma)) | Planeadas |
+| 018 | [OAuth2 (client credentials) y API OData](specs/018-oauth-odata/spec.md) | Implementado |
+| 019–020 | Brechas de plataforma ([roadmap](roadmap.md#specs-planeadas-brechas-de-plataforma)) | Planeadas |

@@ -23,7 +23,7 @@ en orden, no en paralelo: casi todas tocan el núcleo del motor (`PlanCompiler`,
 | 015 Jerarquía de roles, equipos y unidades | Implementado ([spec](specs/015-jerarquia-roles-equipos/spec.md)) |
 | 016 Automatizaciones asíncronas y programadas | Implementado ([spec](specs/016-automatizaciones-asincronas/spec.md)) |
 | 017 Rollback de entornos | Implementado ([spec](specs/017-rollback-entornos/spec.md)) |
-| 018 OAuth2 (client credentials) y API OData | Planeada |
+| 018 OAuth2 (client credentials) y API OData | Implementado ([spec](specs/018-oauth-odata/spec.md)) |
 | 019 Editores visuales (layouts y modelador) | Planeada |
 | 020 Contabilidad y costeo | Planeada |
 
@@ -186,6 +186,13 @@ Señaladas por la misma auditoría. Cada una es capacidad nueva del motor y va e
   documento de descubrimiento (`$metadata`/OpenAPI) generado del modelo; consultas OData de solo lectura (`$filter`,
   `$select`, `$orderby`, `$top`, `$expand` de un nivel) traducidas con la misma seguridad por registro y campo.
 - **Depende de:** 008, 015.
+- **Estado:** implementado en la [spec 018](specs/018-oauth-odata/spec.md): clientes OAuth (cuenta de servicio con roles,
+  alcances `odata.read`/`data.read`/`data.write`, rotación con gracia y revocación, con la aprobación de la 015),
+  `POST /oauth/token` con tokens opacos de 5 a 60 minutos, `$metadata` CSDL generado para quien lo pide y `/odata` de solo
+  lectura con `$filter`, `$select`, `$orderby`, `$top`, `$skip`, `$count` y `$expand` de un nivel, con el mismo alcance por
+  registro, campo y empresa que la API de datos. Pendiente: escritura y `$batch` por OData, filtros por rutas
+  (`Proveedor/Nombre`), opciones anidadas en `$expand`, introspección/revocación de tokens por el cliente (RFC 7662/7009)
+  y nombres de usuario en las filas.
 
 ### 019 — Editores visuales (layouts y modelador)
 - **Problema:** layouts, vistas y procesos (007) se editan como listas y formularios; es correcto pero lento, y el

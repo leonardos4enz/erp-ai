@@ -378,4 +378,17 @@ test.describe('H4 · producción', () => {
     await admin.dispose();
     await anon.dispose();
   });
+
+  // Spec 018 (H2 CA5): esta instancia conserva el límite por defecto del servidor de tokens (30 por minuto por dirección).
+  test('Spec 018 H2 CA5: el servidor de tokens limita las peticiones por dirección', async () => {
+    const anon = await request.newContext({ baseURL: PROD, storageState: { cookies: [], origins: [] } });
+    const statuses: number[] = [];
+    for (let i = 0; i < 32; i++) {
+      const r = await anon.post('/oauth/token', { form: { grant_type: 'client_credentials', client_id: 'erpcl_00000000000000', client_secret: 'erpcs_' + 'a'.repeat(43) } });
+      statuses.push(r.status());
+    }
+    expect(statuses.slice(0, 30).every((s) => s === 401)).toBe(true);
+    expect(statuses.slice(30)).toEqual([429, 429]);
+    await anon.dispose();
+  });
 });

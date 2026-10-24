@@ -58,6 +58,8 @@ builder.Services.AddSingleton<WebhookSecrets>();
 builder.Services.AddSingleton<WebhookSender>();
 builder.Services.AddScoped<WebhookService>();
 builder.Services.AddScoped<ApiKeyService>();
+builder.Services.AddScoped<OAuthClientService>(); // spec 018
+builder.Services.AddScoped<OAuthTokenService>();
 builder.Services.AddHostedService<WebhookDispatcher>();
 // Spec 016: automatizaciones asíncronas y tareas programadas.
 builder.Services.AddSingleton(AutomationOptions.From(builder.Configuration));
@@ -75,11 +77,13 @@ builder.Services.AddSingleton<AssistantKeys>();
 builder.Services.AddScoped<AssistantService>();
 
 // ---------- Autenticación: cookie (ADR-0002) ----------
-// Spec 008: con «Authorization: Bearer» se usa la clave de API (y nunca la cookie); si no, la cookie.
+// Spec 008: con «Authorization: Bearer» se usa la clave de API (y nunca la cookie); si no, la cookie. Spec 018: «Bearer erpat_…» es un token OAuth.
 builder.Services.AddAuthentication("erp")
     .AddPolicyScheme("erp", "erp", o => o.ForwardDefaultSelector = http =>
-        ApiKeyHandler.IsBearer(http.Request) ? ApiKeyHandler.SchemeName : CookieAuthenticationDefaults.AuthenticationScheme)
+        OAuthFormat.IsBearerToken(http.Request) ? OAuthTokenHandler.SchemeName
+        : ApiKeyHandler.IsBearer(http.Request) ? ApiKeyHandler.SchemeName : CookieAuthenticationDefaults.AuthenticationScheme)
     .AddScheme<AuthenticationSchemeOptions, ApiKeyHandler>(ApiKeyHandler.SchemeName, null)
+    .AddScheme<AuthenticationSchemeOptions, OAuthTokenHandler>(OAuthTokenHandler.SchemeName, null)
     .AddCookie(o =>
     {
         o.Cookie.Name = "erp.auth";
@@ -121,7 +125,15 @@ builder.Services.AddRateLimiter(o =>
             PermitLimit = builder.Configuration.GetValue("Security:LoginAttemptsPerMinute", 10),
             Window = TimeSpan.FromMinutes(1), QueueLimit = 0,
         }));
-    o.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(http => RateLimitPartition.GetFixedWindowLimiter(
+    // Spec 018: el servidor de tokens, por dirección, como el inicio de sesión.
+    o.AddPolicy("oauth", http => RateLimitPartition.GetFixedWindowLimiter(
+        http.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = builder.Configuration.GetValue("Security:TokenRequestsPerMinute", 30),
+            Window = TimeSpan.FromMinutes(1), QueueLimit = 0,
+        }));
+    o.GlobalLimiter =PartitionedRateLimiter.Create<HttpContext, string>(http => RateLimitPartition.GetFixedWindowLimiter(
         http.User.Identity?.Name ?? http.Connection.RemoteIpAddress?.ToString() ?? "unknown",
         // Configurable solo para la suite E2E, que hace como administrador más de 600 peticiones por minuto.
         _ => new FixedWindowRateLimiterOptions
@@ -159,7 +171,7 @@ if (spaFiles is not null)
 }
 
 app.UseAuthentication();
-app.UseApiKeyScope();
+app.UseBearerScope();
 app.UseRateLimiter();
 app.UseAuthorization();
 app.UseCsrfHeaderCheck();
@@ -176,8 +188,12 @@ app.MapAutomations();
 app.MapEnvironments();
 app.MapCompanies();
 app.MapAssistant();
+app.MapOAuthToken(); // spec 018
+app.MapOData();
 app.MapGet("/api/health", () => Results.Ok(new { status = "ok" })).AllowAnonymous();
 app.MapFallback("/api/{**path}", () => Results.Problem(title: "Ruta no encontrada.", statusCode: 404));
+app.MapFallback("/oauth/{**path}", () => Results.Problem(title: "Ruta no encontrada.", statusCode: 404));
+app.MapFallback("/odata/{**path}", () => ODataEndpoints.Error(404, "NotFound", "Ruta no encontrada."));
 
 if (spaFiles is not null)
     app.MapFallbackToFile("index.html", new StaticFileOptions { FileProvider = spaFiles });

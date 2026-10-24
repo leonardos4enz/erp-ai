@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Copy, KeyRound, Pencil, Plus, RefreshCw, RotateCcw, Send, Settings2, ShieldOff, Webhook } from 'lucide-react';
+import { Copy, Fingerprint, KeyRound, Pencil, Plus, RefreshCw, RotateCcw, Send, Settings2, ShieldOff, Webhook } from 'lucide-react';
 import { ApiError, fieldError } from '../api/client';
 import { adminApi, integrationsApi } from '../api/endpoints';
-import { isPending, type ApiKey, type DeliveryStatus, type Role, type WebhookEvent, type WebhookSummary } from '../api/types';
+import { isPending, type ApiKey, type DeliveryStatus, type OAuthClient, type OAuthScope, type Role, type WebhookEvent, type WebhookSummary } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { ConfirmDialog, Dialog } from '../components/Dialog';
 import { useToast } from '../components/Toast';
@@ -10,7 +10,7 @@ import { Alert, Badge, Button, Checkbox, EmptyState, Input, LoadingBlock, PageHe
 import { formatDateTime } from '../lib/format';
 import { useAsync } from '../lib/hooks';
 
-type Tab = 'webhooks' | 'keys';
+type Tab = 'webhooks' | 'keys' | 'clients';
 
 const deliveryTone: Record<DeliveryStatus, 'success' | 'warning' | 'danger' | 'neutral'> = {
   delivered: 'success', pending: 'warning', failed: 'danger', canceled: 'neutral',
@@ -20,8 +20,26 @@ const deliveryLabel: Record<DeliveryStatus, string> = {
 };
 
 /** Un secreto o clave se muestra una sola vez: el servidor solo guarda su hash (claves) o lo cifra (webhooks). */
-function SecretDialog({ secret, title, onClose, pending }: { secret: string | null; title: string; onClose: () => void; pending?: boolean }) {
+function CopyBox({ value, label }: { value: string; label: string }) {
   const toast = useToast();
+  return (
+    <div className="secret-box">
+      <code aria-label={label}>{value}</code>
+      <Button
+        icon={Copy}
+        aria-label={label === 'client_id' ? 'Copiar client_id' : undefined}
+        onClick={async () => {
+          try { await navigator.clipboard.writeText(value); toast.success('Copiado'); } catch { toast.error('No se pudo copiar; selecciónalo y cópialo a mano.'); }
+        }}
+      >
+        Copiar
+      </Button>
+    </div>
+  );
+}
+
+/** Spec 018: un cliente OAuth muestra también su client_id (no es secreto, pero va junto al secreto). */
+function SecretDialog({ secret, title, onClose, pending, clientId }: { secret: string | null; title: string; onClose: () => void; pending?: boolean; clientId?: string }) {
   return (
     <Dialog
       open={!!secret}
@@ -30,21 +48,24 @@ function SecretDialog({ secret, title, onClose, pending }: { secret: string | nu
       description="Cópialo ahora y guárdalo en el sistema que lo usará: no se volverá a mostrar."
       footer={<Button variant="primary" onClick={onClose}>Ya lo guardé</Button>}
     >
-      {pending && (
-        <Alert tone="warning" title="Pendiente de aprobación">
-          Este entorno exige que otro administrador apruebe las claves nuevas (Seguridad › Solicitudes). La clave funcionará cuando la apruebe.
-        </Alert>
-      )}
-      <div className="secret-box">
-        <code aria-label="Valor secreto">{secret}</code>
-        <Button
-          icon={Copy}
-          onClick={async () => {
-            try { await navigator.clipboard.writeText(secret ?? ''); toast.success('Copiado'); } catch { toast.error('No se pudo copiar; selecciónalo y cópialo a mano.'); }
-          }}
-        >
-          Copiar
-        </Button>
+      <div className="stack">
+        {pending && (
+          <Alert tone="warning" title="Pendiente de aprobación">
+            {clientId
+              ? 'Este entorno exige que otro administrador apruebe los clientes nuevos (Seguridad › Solicitudes). El cliente obtendrá tokens cuando lo apruebe.'
+              : 'Este entorno exige que otro administrador apruebe las claves nuevas (Seguridad › Solicitudes). La clave funcionará cuando la apruebe.'}
+          </Alert>
+        )}
+        {clientId && (
+          <div className="field">
+            <span className="field-label">client_id</span>
+            <CopyBox value={clientId} label="client_id" />
+          </div>
+        )}
+        <div className="field">
+          {clientId && <span className="field-label">client_secret</span>}
+          <CopyBox value={secret ?? ''} label="Valor secreto" />
+        </div>
       </div>
     </Dialog>
   );
@@ -465,15 +486,252 @@ function KeysTab() {
   );
 }
 
+/* ----------------------------- Clientes OAuth (spec 018) ----------------------------- */
+
+const scopeInfo: { id: OAuthScope; label: string; hint: string }[] = [
+  { id: 'odata.read', label: 'Consultas OData (odata.read)', hint: 'Lectura con $filter, $select, $orderby y $expand en /odata.' },
+  { id: 'data.read', label: 'Leer datos y reportes (data.read)', hint: 'Lecturas de /api/data y /api/reports.' },
+  { id: 'data.write', label: 'Escribir datos (data.write)', hint: 'Altas, cambios, transiciones, bajas e importación en /api/data.' },
+];
+const scopeShort: Record<OAuthScope, string> = { 'odata.read': 'OData', 'data.read': 'Leer datos', 'data.write': 'Escribir datos' };
+
+function ClientDialog({ open, client, roles, onClose, onSaved }: {
+  open: boolean; client: OAuthClient | null; roles: Role[]; onClose: () => void; onSaved: (created?: { clientId: string; secret: string; pending: boolean }) => void;
+}) {
+  const toast = useToast();
+  const isNew = !client;
+  const [name, setName] = useState('');
+  const [roleIds, setRoleIds] = useState<number[]>([]);
+  const [scopes, setScopes] = useState<OAuthScope[]>([]);
+  const [minutes, setMinutes] = useState('15');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<ApiError | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setName(client?.name ?? '');
+    setRoleIds(client?.roleIds ?? []);
+    setScopes(client?.scopes ?? ['odata.read']);
+    setMinutes(String(client?.tokenMinutes ?? 15));
+    setError(null);
+  }, [open, client]);
+
+  async function save() {
+    setSaving(true);
+    setError(null);
+    const input = { name: name.trim(), roleIds, scopes, tokenMinutes: Number(minutes) };
+    try {
+      if (isNew) {
+        const r = await integrationsApi.createClient(input);
+        // Pendiente de aprobación: el client_id va en la solicitud (no hay cliente todavía).
+        const clientId = isPending(r) ? String((r.securityChange.after as { clientId?: string }).clientId ?? '') : r.client.clientId;
+        onSaved({ clientId, secret: r.secret, pending: isPending(r) });
+      } else {
+        const r = await integrationsApi.updateClient(client.id, input);
+        if (isPending(r)) toast.success('Solicitud enviada: otro administrador debe aprobar los roles o alcances nuevos');
+        else toast.success('Cliente actualizado');
+        onSaved();
+      }
+    } catch (e) {
+      if (e instanceof ApiError) {
+        setError(e);
+        // El primer error puede quedar fuera de la vista si se desplazó el diálogo (lista de roles larga).
+        requestAnimationFrame(() => document.querySelector('[role="dialog"] .field-error')?.scrollIntoView({ block: 'nearest' }));
+      } else toast.fromError(e);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const available = roles.filter((r) => !isAdminRole(r));
+  return (
+    <Dialog
+      open={open}
+      onClose={onClose}
+      title={isNew ? 'Nuevo cliente OAuth' : `Editar ${client?.name}`}
+      description="El cliente cambia su client_id y secreto por un token corto. Sus roles deciden qué ve; los alcances, qué partes de la API puede usar."
+      footer={<><Button onClick={onClose} disabled={saving}>Cancelar</Button><Button variant="primary" loading={saving} onClick={() => void save()}>{isNew ? 'Crear cliente' : 'Guardar'}</Button></>}
+    >
+      <div className="stack">
+        {error && Object.keys(error.fieldErrors).length === 0 && <Alert tone="danger" title={error.title} />}
+        <Input label="Nombre" required value={name} maxLength={100} placeholder="Tablero de ventas" onChange={(e) => setName(e.target.value)} error={fieldError(error, 'name')} data-autofocus />
+        <fieldset className="field" style={{ border: 0, padding: 0, margin: 0 }}>
+          <legend className="field-label">Roles</legend>
+          {/* Regresión (revisión exploratoria 018, F-01): con muchos roles, el error al final de la lista quedaba fuera de la vista. */}
+          {fieldError(error, 'roleIds') && <span className="field-error" role="alert">{fieldError(error, 'roleIds')}</span>}
+          {available.length === 0 ? <span className="muted">No hay roles sin privilegios de administración.</span> : (
+            <div className="stack" style={{ gap: 'var(--space-2)' }}>
+              {available.map((r) => (
+                <Checkbox key={r.id} label={r.name} checked={roleIds.includes(r.id)}
+                  onChange={(c) => setRoleIds((ids) => (c ? [...ids, r.id] : ids.filter((x) => x !== r.id)))} />
+              ))}
+            </div>
+          )}
+          <span className="field-hint">Los roles de administración (todo, modelo o usuarios) no se pueden dar a un cliente.</span>
+        </fieldset>
+        <fieldset className="field" style={{ border: 0, padding: 0, margin: 0 }}>
+          <legend className="field-label">Alcances</legend>
+          <div className="stack" style={{ gap: 'var(--space-2)' }}>
+            {scopeInfo.map((s) => (
+              <div key={s.id}>
+                <Checkbox label={s.label} checked={scopes.includes(s.id)}
+                  onChange={(c) => setScopes((list) => (c ? [...list, s.id] : list.filter((x) => x !== s.id)))} />
+                <span className="field-hint" style={{ display: 'block', marginInlineStart: 'calc(16px + var(--space-2))' }}>{s.hint}</span>
+              </div>
+            ))}
+          </div>
+          {fieldError(error, 'scopes') && <span className="field-error" role="alert">{fieldError(error, 'scopes')}</span>}
+          <span className="field-hint">Un alcance limita, nunca agrega: dentro de él manda lo que permiten los roles.</span>
+        </fieldset>
+        <Select label="Vida del token" value={minutes} onChange={(e) => setMinutes(e.target.value)} error={fieldError(error, 'tokenMinutes')}>
+          <option value="5">5 minutos</option>
+          <option value="15">15 minutos</option>
+          <option value="30">30 minutos</option>
+          <option value="60">60 minutos</option>
+        </Select>
+      </div>
+    </Dialog>
+  );
+}
+
+function RotateClientDialog({ client, onClose, onRotated }: { client: OAuthClient | null; onClose: () => void; onRotated: (clientId: string, secret: string) => void }) {
+  const toast = useToast();
+  const [grace, setGrace] = useState<'0' | '24'>('0');
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { if (client) setGrace('0'); }, [client]);
+  return (
+    <Dialog
+      open={!!client}
+      onClose={onClose}
+      title={`Rotar el secreto de ${client?.name}`}
+      description="Se emite un secreto nuevo; el client_id, los roles y los alcances no cambian."
+      footer={<><Button onClick={onClose} disabled={saving}>Cancelar</Button><Button variant="primary" loading={saving} onClick={async () => {
+        if (!client) return;
+        setSaving(true);
+        try { const r = await integrationsApi.rotateClient(client.id, grace === '24' ? 24 : 0); onRotated(r.client.clientId, r.secret); }
+        catch (e) { toast.fromError(e); } finally { setSaving(false); }
+      }}>Rotar secreto</Button></>}
+    >
+      <Select label="El secreto anterior" value={grace} onChange={(e) => setGrace(e.target.value as '0' | '24')}>
+        <option value="0">Deja de servir de inmediato y se revocan sus tokens</option>
+        <option value="24">Sigue sirviendo 24 horas (para cambiarlo sin cortes)</option>
+      </Select>
+    </Dialog>
+  );
+}
+
+function ClientsTab() {
+  const toast = useToast();
+  const [tick, setTick] = useState(0);
+  const { data: clients, loading, error } = useAsync((s) => integrationsApi.clients(s), [tick]);
+  const { data: urls } = useAsync((s) => integrationsApi.clientEndpoints(s), []);
+  const { data: roles } = useAsync(() => adminApi.roles(), []);
+  const [editing, setEditing] = useState<OAuthClient | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [rotating, setRotating] = useState<OAuthClient | null>(null);
+  const [revoking, setRevoking] = useState<OAuthClient | null>(null);
+  const [shown, setShown] = useState<{ clientId: string; secret: string; pending: boolean } | null>(null);
+  const roleName = (id: number) => roles?.find((r) => r.id === id)?.name ?? `#${id}`;
+
+  if (loading && !clients) return <LoadingBlock />;
+  if (error) return <Alert tone="danger" title={error instanceof ApiError ? error.title : 'No se pudieron cargar los clientes'} />;
+
+  return (
+    <div className="stack">
+      <div className="row" style={{ justifyContent: 'flex-end' }}>
+        <Button variant="primary" icon={Plus} onClick={() => setCreating(true)}>Nuevo cliente</Button>
+      </div>
+      <div className="table-wrap">
+        {!clients?.length ? (
+          <EmptyState icon={Fingerprint} title="Sin clientes OAuth" description="Un cliente obtiene tokens de vida corta para consultar por OData o usar la API de datos con alcances acotados." />
+        ) : (
+          // Con todos los clientes revocados no queda nada enfocable: la región misma recibe el foco para desplazarla con el teclado.
+          <div className="table-scroll" tabIndex={0} role="region" aria-label="Clientes OAuth: tabla desplazable">
+            <table className="table">
+              <thead><tr><th>Nombre</th><th>client_id</th><th>Roles</th><th>Alcances</th><th>Último token</th><th>Estado</th><th><span className="sr-only">Acciones</span></th></tr></thead>
+              <tbody>
+                {clients.map((c) => (
+                  <tr key={c.id}>
+                    <td style={{ fontWeight: 500 }}>{c.name}</td>
+                    <td className="mono" style={{ fontSize: 'var(--text-sm)' }}>{c.clientId}</td>
+                    <td>{c.roleIds.map(roleName).join(', ') || '—'}</td>
+                    <td>
+                      <div className="row" style={{ gap: 4, flexWrap: 'wrap' }}>{c.scopes.map((s) => <Badge key={s} tone="neutral">{scopeShort[s]}</Badge>)}</div>
+                      <div className="subtle" style={{ fontSize: 'var(--text-sm)' }}>Token de {c.tokenMinutes} min</div>
+                    </td>
+                    <td>
+                      {c.lastTokenAt ? formatDateTime(c.lastTokenAt) : 'Nunca'}
+                      {c.activeTokens > 0 && <div className="subtle" style={{ fontSize: 'var(--text-sm)' }}>{c.activeTokens === 1 ? '1 token activo' : `${c.activeTokens} tokens activos`}</div>}
+                      {c.previousExpiresAt && <div className="subtle" style={{ fontSize: 'var(--text-sm)' }}>El secreto anterior sirve hasta {formatDateTime(c.previousExpiresAt)}</div>}
+                    </td>
+                    <td><Badge tone={c.status === 'active' ? 'success' : 'danger'}>{c.status === 'active' ? 'Vigente' : 'Revocado'}</Badge></td>
+                    <td>
+                      {c.status === 'active' && (
+                        <div className="row" style={{ gap: 4, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                          <Button size="sm" variant="ghost" icon={Pencil} onClick={() => setEditing(c)} aria-label={`Editar ${c.name}`}>Editar</Button>
+                          <Button size="sm" variant="ghost" icon={RotateCcw} onClick={() => setRotating(c)} aria-label={`Rotar el secreto de ${c.name}`}>Rotar</Button>
+                          <Button size="sm" variant="ghost" icon={ShieldOff} onClick={() => setRevoking(c)} aria-label={`Revocar ${c.name}`}>Revocar</Button>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+      <Alert tone="info" title="Cómo se usa">
+        <div className="stack" style={{ gap: 'var(--space-2)' }}>
+          <span>
+            Pide un token con <code>POST</code> a la URL del token, <code>grant_type=client_credentials</code> y el client_id y secreto en
+            <code> Authorization: Basic</code>. Envía el token como <code>Authorization: Bearer &lt;token&gt;</code>; al vencer, pide otro.
+          </span>
+          {urls && (
+            <dl className="url-list">
+              <dt>URL del token</dt><dd><code>{urls.token}</code></dd>
+              <dt>API OData</dt><dd><code>{urls.odata}</code> (descubrimiento en <code>$metadata</code>)</dd>
+            </dl>
+          )}
+        </div>
+      </Alert>
+
+      <ClientDialog open={creating || !!editing} client={editing} roles={roles ?? []}
+        onClose={() => { setCreating(false); setEditing(null); }}
+        onSaved={(created) => { setCreating(false); setEditing(null); setTick((t) => t + 1); if (created) setShown(created); }} />
+      <RotateClientDialog client={rotating} onClose={() => setRotating(null)}
+        onRotated={(clientId, secret) => { setRotating(null); setTick((t) => t + 1); setShown({ clientId, secret, pending: false }); }} />
+      <ConfirmDialog
+        open={!!revoking}
+        danger
+        title="Revocar cliente"
+        message={<>«{revoking?.name}» dejará de obtener tokens y los que tiene dejan de servir ya. No se puede deshacer.</>}
+        confirmLabel="Revocar"
+        onCancel={() => setRevoking(null)}
+        onConfirm={async () => {
+          if (!revoking) return;
+          try { await integrationsApi.revokeClient(revoking.id); toast.success('Cliente revocado'); setTick((t) => t + 1); }
+          catch (e) { toast.fromError(e); }
+          finally { setRevoking(null); }
+        }}
+      />
+      <SecretDialog secret={shown?.secret ?? null} clientId={shown?.clientId} pending={shown?.pending} title="Credenciales del cliente" onClose={() => setShown(null)} />
+    </div>
+  );
+}
+
+const tabLabel: Record<Tab, string> = { webhooks: 'Webhooks', keys: 'Claves de API', clients: 'Clientes OAuth' };
+
 export function IntegrationsPage() {
   const [tab, setTab] = useState<Tab>('webhooks');
   return (
     <div className="page">
-      <PageHeader icon={Webhook} title="Integraciones" subtitle="A dónde se avisan los eventos (webhooks) y qué servicios pueden usar la API (claves)." />
+      <PageHeader icon={Webhook} title="Integraciones" subtitle="A dónde se avisan los eventos (webhooks) y qué servicios pueden usar la API (claves y clientes OAuth)." />
       <Tabs label="Integraciones" value={tab} onChange={setTab}
-        items={[{ id: 'webhooks', label: 'Webhooks', icon: Webhook }, { id: 'keys', label: 'Claves de API', icon: KeyRound }]} />
-      <div role="tabpanel" aria-label={tab === 'webhooks' ? 'Webhooks' : 'Claves de API'}>
-        {tab === 'webhooks' ? <WebhooksTab /> : <KeysTab />}
+        items={[{ id: 'webhooks', label: tabLabel.webhooks, icon: Webhook }, { id: 'keys', label: tabLabel.keys, icon: KeyRound },
+          { id: 'clients', label: tabLabel.clients, icon: Fingerprint }]} />
+      <div role="tabpanel" aria-label={tabLabel[tab]}>
+        {tab === 'webhooks' ? <WebhooksTab /> : tab === 'keys' ? <KeysTab /> : <ClientsTab />}
       </div>
     </div>
   );

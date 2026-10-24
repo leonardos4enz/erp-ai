@@ -21,8 +21,12 @@ public static class SecurityChangeKinds
     public const string ApiKeyCreate = "apikey.create";
     public const string ApiKeyUpdate = "apikey.update";
 
-    /// <summary>Las claves de API las administra solo el superusuario (spec 008); sus solicitudes también.</summary>
-    public static bool IsApiKey(string kind) => kind.StartsWith("apikey.", StringComparison.Ordinal);
+    public const string OAuthClientCreate = "oauthclient.create";
+    public const string OAuthClientUpdate = "oauthclient.update";
+
+    /// <summary>Las claves de API (spec 008) y los clientes OAuth (spec 018) los administra solo el superusuario; sus solicitudes también.</summary>
+    public static bool IsIntegration(string kind) =>
+        kind.StartsWith("apikey.", StringComparison.Ordinal) || kind.StartsWith("oauthclient.", StringComparison.Ordinal);
 }
 
 /// <summary>Lo que decide el acceso de un usuario (sin datos que cambian solos, como el último inicio de sesión).</summary>
@@ -74,6 +78,10 @@ public static class SecurityGrants
     public static bool UnitMove(int? beforeParent, int? afterParent) => afterParent is not null && afterParent != beforeParent;
 
     public static bool ApiKeyRoles(IEnumerable<int>? before, IEnumerable<int> after) => before is null || Adds(before, after);
+
+    /// <summary>Spec 018: un cliente OAuth amplía acceso si gana roles o alcances (la vida del token no da acceso nuevo).</summary>
+    public static bool OAuthClient(IEnumerable<int>? beforeRoles, IEnumerable<string>? beforeScopes, IEnumerable<int> roles, IEnumerable<string> scopes) =>
+        beforeRoles is null || beforeScopes is null || Adds(beforeRoles, roles) || scopes.Except(beforeScopes, StringComparer.Ordinal).Any();
 }
 
 public sealed record SecurityChangeDto(int Id, string Kind, int? TargetId, string Summary, string Status, JsonElement? Before,
@@ -158,7 +166,7 @@ public sealed class SecurityApproval(Db db, EnvironmentOptions env)
              ORDER BY c.Id DESC
             """, new { id, status }, tx);
         static DateTime U(DateTime d) => DateTime.SpecifyKind(d, DateTimeKind.Utc);
-        return rows.Where(r => id is not null || user.IsSuperuser || !SecurityChangeKinds.IsApiKey(r.Kind))
+        return rows.Where(r => id is not null || user.IsSuperuser || !SecurityChangeKinds.IsIntegration(r.Kind))
             .Select(r => new SecurityChangeDto(r.Id, r.Kind, r.TargetId, r.Summary, r.Status,
                 r.BeforeJson is null ? null : JsonDocument.Parse(r.BeforeJson).RootElement.Clone(),
                 JsonSerializer.SerializeToElement(Redacted(r.PayloadJson)), r.Hash, r.RequestedBy, U(r.RequestedAt), r.ReviewedBy,
@@ -168,7 +176,7 @@ public sealed class SecurityApproval(Db db, EnvironmentOptions env)
     }
 
     private static bool CanReview(UserContext user, string kind) =>
-        SecurityChangeKinds.IsApiKey(kind) ? user.IsSuperuser : user.CanManageUsers;
+        SecurityChangeKinds.IsIntegration(kind) ? user.IsSuperuser : user.CanManageUsers;
 
     /// <summary>La carga sin hashes: quien revisa ve que cambia la contraseña o que hay un secreto, no su hash.</summary>
     private static Dictionary<string, object?> Redacted(string payloadJson)
@@ -197,8 +205,8 @@ public sealed class SecurityApproval(Db db, EnvironmentOptions env)
                    CAST(N'' AS nvarchar(100)) AS RequestedBy, c.RequestedAt, CAST(NULL AS nvarchar(100)) AS ReviewedBy, c.ReviewedAt, c.ReviewComment
               FROM meta.SecurityChange c WHERE c.Id = @id
             """, new { id }) ?? throw new NotFound("La solicitud no existe.");
-        if (!CanReview(user, row.Kind)) throw new Forbidden(SecurityChangeKinds.IsApiKey(row.Kind)
-            ? "Una solicitud de clave de API la aprueba otro administrador del sistema." : "No puedes aprobar cambios de seguridad.");
+        if (!CanReview(user, row.Kind)) throw new Forbidden(SecurityChangeKinds.IsIntegration(row.Kind)
+            ? "Una solicitud de clave de API o de cliente OAuth la aprueba otro administrador del sistema." : "No puedes aprobar cambios de seguridad.");
         if (row.RequestedById == user.Id) throw new Forbidden("La debe aprobar un administrador distinto de quien la solicitó.");
         if (!string.Equals(req.Hash, row.Hash, StringComparison.OrdinalIgnoreCase))
             throw new Conflict("La solicitud no coincide con la que revisaste: vuelve a revisarla.");

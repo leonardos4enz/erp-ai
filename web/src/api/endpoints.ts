@@ -1,7 +1,7 @@
 import { api } from './client';
 import type {
   AuditEntry, AutomationRun, AutomationRunDetail, ScheduleSummary, ChangePlan, Company, ExchangeRate, ChangeSetSummary, DashboardResult, DashboardSummary, EntityDef, HistoryEntry, LayoutState, LookupItem, Me,
-  ApiKey, AssistantStatus, BusinessUnit, PendingChange, SecurityChange, Team, Conversation, ConversationSummary, Proposal, EnvironmentInfo, ExportableCatalogs, ExportPreview, ExportRequest, ImportResult, ModuleInfo, PackageImport, ModulePreview, WebhookDelivery, WebhookSummary, Paged, PlanPreview, ReportResult, ReportSummary, Role, Row, RowList, SavedView, User, ViewFilter, ViewList,
+  ApiKey, AssistantStatus, OAuthClient, OAuthScope, BusinessUnit, PendingChange, SecurityChange, Team, Conversation, ConversationSummary, Proposal, EnvironmentInfo, ExportableCatalogs, ExportPreview, ExportRequest, ImportResult, ModuleInfo, PackageImport, ModulePreview, WebhookDelivery, WebhookSummary, Paged, PlanPreview, ReportResult, ReportSummary, Role, Row, RowList, SavedView, User, ViewFilter, ViewList,
 } from './types';
 
 const enc = encodeURIComponent;
@@ -203,6 +203,16 @@ export const integrationsApi = {
   rotateKey: (id: number, graceHours: 0 | 24) =>
     api<{ key: ApiKey; secret: string }>(`/admin/api-keys/${id}/rotate`, { method: 'POST', body: { graceHours } }),
   revokeKey: (id: number) => api<void>(`/admin/api-keys/${id}/revoke`, { method: 'POST' }),
+  // Spec 018: clientes OAuth.
+  clients: (signal?: AbortSignal) => api<OAuthClient[]>('/admin/oauth-clients', { signal }),
+  clientEndpoints: (signal?: AbortSignal) => api<{ token: string; odata: string }>('/admin/oauth-clients/endpoints', { signal }),
+  createClient: (input: { name: string; roleIds: number[]; scopes: OAuthScope[]; tokenMinutes: number }) =>
+    api<{ client: OAuthClient; secret: string } | (PendingChange & { secret: string })>('/admin/oauth-clients', { method: 'POST', body: input }),
+  updateClient: (id: number, input: { name: string; roleIds: number[]; scopes: OAuthScope[]; tokenMinutes: number }) =>
+    api<OAuthClient | PendingChange>(`/admin/oauth-clients/${id}`, { method: 'PUT', body: input }),
+  rotateClient: (id: number, graceHours: 0 | 24) =>
+    api<{ client: OAuthClient; secret: string }>(`/admin/oauth-clients/${id}/rotate`, { method: 'POST', body: { graceHours } }),
+  revokeClient: (id: number) => api<void>(`/admin/oauth-clients/${id}/revoke`, { method: 'POST' }),
 };
 
 /** Spec 016: tareas programadas y bitácora de automatizaciones (solo superusuario). */

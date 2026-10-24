@@ -632,3 +632,8 @@ code, pre, .mono { font-family: var(--font-mono); font-size: 0.8125rem; }
   .assistant-history { position: static; max-height: 240px; order: 2; }
   .assistant-prompt { max-width: 100%; }
 }
+/* Spec 018: URLs del servidor de tokens y de OData en Integraciones › Clientes OAuth. */
+.url-list { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: var(--space-1) var(--space-3); margin: 0; }
+.url-list dt { font-weight: 500; }
+.url-list dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 640px) { .url-list { grid-template-columns: minmax(0, 1fr); } .url-list dd { margin-bottom: var(--space-2); } }

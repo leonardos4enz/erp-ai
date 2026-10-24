@@ -39,5 +39,32 @@ public static class IntegrationEndpoints
             await svc.RevokeAsync(id, http, ct);
             return Results.NoContent();
         });
+
+        // Spec 018: clientes OAuth (client credentials).
+        var clients = app.MapGroup("/api/admin/oauth-clients").RequireAuthorization();
+        clients.MapGet("/", (HttpContext http, OAuthClientService svc, CancellationToken ct) => svc.ListAsync(http.CurrentUser(), ct));
+        clients.MapGet("/endpoints", (HttpContext http) =>
+        {
+            if (!http.CurrentUser().IsSuperuser) throw new Infrastructure.Forbidden();
+            var origin = $"{http.Request.Scheme}://{http.Request.Host}{http.Request.PathBase}";
+            return new { token = $"{origin}/oauth/token", odata = $"{origin}/odata/" };
+        });
+        clients.MapPost("/", (SaveOAuthClientRequest req, HttpContext http, OAuthClientService svc, CancellationToken ct) => svc.CreateAsync(req, http, ct));
+        clients.MapPut("/{id:int}", (int id, SaveOAuthClientRequest req, HttpContext http, OAuthClientService svc, CancellationToken ct) => svc.UpdateAsync(id, req, http, ct));
+        clients.MapPost("/{id:int}/rotate", (int id, RotateOAuthClientRequest req, HttpContext http, OAuthClientService svc, CancellationToken ct) => svc.RotateAsync(id, req, http, ct));
+        clients.MapPost("/{id:int}/revoke", async (int id, HttpContext http, OAuthClientService svc, CancellationToken ct) =>
+        {
+            await svc.RevokeAsync(id, http, ct);
+            return Results.NoContent();
+        });
+    }
+
+    /// <summary>Spec 018 (H2): servidor de tokens. Anónimo (el cliente se autentica en la petición) y con límite por dirección.</summary>
+    public static void MapOAuthToken(this IEndpointRouteBuilder app)
+    {
+        app.MapPost("/oauth/token", (HttpContext http, OAuthTokenService svc, CancellationToken ct) => svc.IssueAsync(http, ct))
+            .AllowAnonymous().RequireRateLimiting("oauth").DisableAntiforgery();
+        app.MapMethods("/oauth/token", ["GET", "PUT", "PATCH", "DELETE"], (HttpContext http) =>
+            OAuthTokenService.Error(http, 405, "invalid_request", "El servidor de tokens solo acepta POST.")).AllowAnonymous();
     }
 }

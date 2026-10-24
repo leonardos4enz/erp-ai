@@ -21,7 +21,7 @@ public static class SecurityChangeEndpoints
     }
 
     private static async Task<SecurityChangeDto> Approve(int id, ReviewSecurityChangeRequest req, HttpContext http, SecurityApproval gate, Db db,
-        MetadataStore store, ApiKeyService keys, CancellationToken ct)
+        MetadataStore store, ApiKeyService keys, OAuthClientService clients, CancellationToken ct)
     {
         var user = http.CurrentUser();
         var approving = await gate.ClaimAsync(id, req, user, ct);
@@ -41,6 +41,8 @@ public static class SecurityChangeEndpoints
                 SecurityChangeKinds.UnitMove => await AdminEndpoints.MoveUnit(target, approving.Read<AdminEndpoints.MoveUnitRequest>(), http, db, gate, approving),
                 SecurityChangeKinds.ApiKeyCreate => await keys.CreateCoreAsync(approving.Read<ApiKeyService.ApiKeyPayload>(), null, http, approving, ct),
                 SecurityChangeKinds.ApiKeyUpdate => await keys.UpdateCoreAsync(target, approving.Read<UpdateApiKeyRequest>(), http, approving, ct),
+                SecurityChangeKinds.OAuthClientCreate => await clients.CreateCoreAsync(approving.Read<OAuthClientService.OAuthClientPayload>(), null, http, approving, ct),
+                SecurityChangeKinds.OAuthClientUpdate => await clients.UpdateCoreAsync(target, approving.Read<SaveOAuthClientRequest>(), http, approving, ct),
                 _ => throw new Conflict("Tipo de solicitud desconocido."),
             };
         }

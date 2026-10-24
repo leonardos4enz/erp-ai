@@ -426,9 +426,9 @@ test('H4 CA4: solo el superusuario ve Automatizaciones en el menú y llega por l
   await expect(page).toHaveURL(/\/admin\/automations$/);
   await expect(page.getByRole('heading', { name: 'Automatizaciones' })).toBeVisible();
   await expect(page.getByRole('tab', { name: 'Tareas programadas' })).toHaveAttribute('aria-selected', 'true');
-  // Integraciones vuelve a ser solo webhooks y claves.
+  // Integraciones vuelve a ser solo webhooks y credenciales (spec 018: también clientes OAuth).
   await page.goto('/admin/integrations');
-  await expect(page.getByRole('tab')).toHaveText(['Webhooks', 'Claves de API']);
+  await expect(page.getByRole('tab')).toHaveText(['Webhooks', 'Claves de API', 'Clientes OAuth']);
 
   const ctx = await browser.newContext({ storageState: undefined });
   const other = await ctx.newPage();

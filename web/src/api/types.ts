@@ -221,6 +221,25 @@ export interface ApiKey {
   revokedAt?: string | null;
   status: 'active' | 'expired' | 'revoked';
 }
+/** Spec 018: cliente OAuth (client credentials). El secreto solo se ve al crearlo o rotarlo. */
+export type OAuthScope = 'odata.read' | 'data.read' | 'data.write';
+export interface OAuthClient {
+  id: number;
+  name: string;
+  clientId: string;
+  roleIds: number[];
+  username: string;
+  scopes: OAuthScope[];
+  tokenMinutes: number;
+  createdAt: string;
+  createdBy: string;
+  rotatedAt?: string | null;
+  previousExpiresAt?: string | null;
+  revokedAt?: string | null;
+  lastTokenAt?: string | null;
+  activeTokens: number;
+  status: 'active' | 'revoked';
+}
 export interface ImportColumn { column: string; field?: string | null; label?: string | null; status: 'ok' | 'ignored' | 'error'; message?: string | null }
 export interface ImportResult {
   dryRun: boolean;
@@ -652,7 +671,7 @@ export interface Conversation { id: number; turns: Proposal[] }
 export interface BusinessUnit { id: number; name: string; parentId: number | null; depth: number; users: number; teams: number }
 export interface Team { id: number; name: string; unit?: string | null; isActive: boolean; memberIds: number[] }
 
-export type SecurityChangeKind = 'user.create' | 'user.update' | 'role.create' | 'role.update' | 'team.create' | 'team.update' | 'unit.move' | 'apikey.create' | 'apikey.update';
+export type SecurityChangeKind = 'user.create' | 'user.update' | 'role.create' | 'role.update' | 'team.create' | 'team.update' | 'unit.move' | 'apikey.create' | 'apikey.update' | 'oauthclient.create' | 'oauthclient.update';
 
 export interface SecurityChange {
   id: number;

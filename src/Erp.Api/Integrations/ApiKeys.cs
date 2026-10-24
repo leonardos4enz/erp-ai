@@ -44,8 +44,8 @@ public sealed class ApiKeyHandler(IOptionsMonitor<AuthenticationSchemeOptions> o
 {
     public const string SchemeName = "ApiKey";
 
-    /// <summary>Rutas que una clave puede usar; el resto (administración, modelo, módulos, auditoría) responde 403.</summary>
-    public static readonly string[] AllowedPaths = ["/api/data", "/api/reports", "/api/auth/me"];
+    /// <summary>Rutas que una clave puede usar (spec 018: también OData); el resto (administración, modelo, módulos, auditoría) responde 403.</summary>
+    public static readonly string[] AllowedPaths = ["/api/data", "/api/reports", "/api/auth/me", "/odata"];
 
     public static bool IsBearer(HttpRequest r) => r.Headers.Authorization.ToString().StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase);
 
@@ -133,7 +133,7 @@ public sealed class ApiKeyService(Db db, PasswordService passwords, SecurityAppr
     }
 
     /// <summary>Roles válidos para un servicio: existentes y sin superusuario, modelador ni administración de usuarios.</summary>
-    private static async Task<int[]> ValidRolesAsync(System.Data.Common.DbConnection cn, System.Data.Common.DbTransaction tx, int[]? roleIds,
+    internal static async Task<int[]> ValidRolesAsync(System.Data.Common.DbConnection cn, System.Data.Common.DbTransaction tx, int[]? roleIds,
         Dictionary<string, string[]> errors)
     {
         var ids = (roleIds ?? []).Distinct().ToArray();
@@ -142,11 +142,11 @@ public sealed class ApiKeyService(Db db, PasswordService passwords, SecurityAppr
             "SELECT Id, CAST(CASE WHEN IsSuperuser = 1 OR CanManageModel = 1 OR CanManageUsers = 1 THEN 1 ELSE 0 END AS bit) FROM meta.Role WHERE Id IN @ids",
             new { ids }, tx)).ToList();
         if (roles.Count != ids.Length) errors["roleIds"] = ["Alguno de los roles no existe."];
-        else if (roles.Any(r => r.Admin)) errors["roleIds"] = ["Una clave de API no puede tener roles de administración (todo, modelo o usuarios)."];
+        else if (roles.Any(r => r.Admin)) errors["roleIds"] = ["Una integración (clave de API o cliente OAuth) no puede tener roles de administración (todo, modelo o usuarios)."];
         return ids;
     }
 
-    private static string? ValidName(string? name, Dictionary<string, string[]> errors)
+    internal static string? ValidName(string? name, Dictionary<string, string[]> errors)
     {
         var n = name?.Trim();
         if (string.IsNullOrEmpty(n) || n.Length > MaxName) errors["name"] = [$"Escribe un nombre de máximo {MaxName} caracteres."];

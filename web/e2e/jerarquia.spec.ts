@@ -495,6 +495,37 @@ test.describe('H4 · aprobación de cambios de seguridad', () => {
     expect((await admin.post(`/api/admin/api-keys/${key.id}/revoke`)).status()).toBe(204);
   });
 
+  test('Spec 018 H1 CA2: el cliente OAuth solicitado emite tokens solo al aprobarse; ganar alcances espera, quitarlos no', async () => {
+    const admin = await at('admin');
+    const res = await admin.post('/api/admin/oauth-clients', { data: { name: 'J15 BI', roleIds: [ids.consulta], scopes: ['odata.read'], tokenMinutes: 5 } });
+    expect(res.status(), await res.text()).toBe(202);
+    const { secret, securityChange } = (await res.json()) as { secret: string; securityChange: Change & { after: { clientId: string } } };
+    const clientId = securityChange.after.clientId;
+    expect(clientId).toMatch(/^erpcl_[0-9a-f]{14}$/);
+    const anon = await request.newContext({ baseURL: SEC, storageState: { cookies: [], origins: [] } });
+    const token = (scope?: string) => anon.post('/oauth/token', { form: { grant_type: 'client_credentials', client_id: clientId, client_secret: secret, ...(scope ? { scope } : {}) } });
+    expect((await token()).status()).toBe(401); // no existe hasta que se aprueba
+    const seen = (await pending('admin2')).find((c) => c.id === securityChange.id)!;
+    expect(seen.kind).toBe('oauthclient.create');
+    expect(JSON.stringify(seen)).not.toContain('secretHash');
+    expect((await approve('admin', seen)).status()).toBe(403); // quien lo pidió no aprueba
+    expect((await approve('admin2', seen)).status()).toBe(200);
+    expect((await token()).status()).toBe(200);
+
+    const client = ((await (await admin.get('/api/admin/oauth-clients')).json()) as { id: number; name: string }[]).find((c) => c.name === 'J15 BI')!;
+    const save = (scopes: string[]) => admin.put(`/api/admin/oauth-clients/${client.id}`, { data: { name: 'J15 BI', roleIds: [ids.consulta], scopes, tokenMinutes: 5 } });
+    expect((await save(['odata.read', 'data.write'])).status()).toBe(202);
+    expect((await token('data.write')).status()).toBe(400); // aún no lo tiene
+    expect((await save([])).status()).toBe(400);
+    expect((await admin.post(`/api/admin/oauth-clients/${client.id}/revoke`)).status()).toBe(204);
+    expect((await token()).status()).toBe(401);
+    // La solicitud pendiente sobre un cliente revocado ya no se aplica.
+    const widen = (await pending('admin2')).find((c) => c.kind === 'oauthclient.update')!;
+    expect((await approve('admin2', widen)).status()).toBe(409);
+    expect((await (await at('admin2')).post(`/api/admin/security-changes/${widen.id}/reject`, { data: {} })).status()).toBe(200);
+    await anon.dispose();
+  });
+
   test('H4 CA3 (UI): otro administrador revisa el antes y el después y aprueba desde Solicitudes', async ({ browser }) => {
     const ctx = await browser.newContext({ storageState: undefined, baseURL: SEC, viewport: { width: 1280, height: 800 } });
     const page = await ctx.newPage();

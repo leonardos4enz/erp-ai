@@ -58,6 +58,8 @@ export default defineConfig({
       // Spec 016: la bandeja de automatizaciones revisa cada segundo y reintenta lo transitorio sin esperar minutos.
       Automations__PollSeconds: '1',
       Automations__RetryDelaysSeconds: '1,1',
+      // Spec 018: páginas de OData de 3 filas para probar @odata.nextLink sin crear cientos de registros.
+      OData__MaxPageSize: '3',
       // Spec 009: la suite se comporta como producción (aprobación de otro administrador y paquetes firmados).
       Environments__Name: 'Producción E2E',
       Environments__RequireApproval: 'true',
