@@ -46,6 +46,7 @@ public static class AssistantPrompt
         - updateField { entity, field, label?, required?, showInList?, options?, requiredForRoles?, displayOrder?,
           defaultValue?, formula?, editable?, lookupFilter? }   (no cambia tipo, longitud ni referencia)
         - archiveField { entity, field }
+        - restoreEntity { entity } / restoreField { entity, field }   (reactivan lo archivado con los datos que conservó)
         - setWorkflow { entity, workflow: { initial, states: [{ name, label, color?, editable? }],
           transitions: [{ name, label, from: string[], to, roles?, when?, whenMessage?, requireComment?, requiredFields?,
           set?: [{ field, value }], icon?, variant?, system? }] } }

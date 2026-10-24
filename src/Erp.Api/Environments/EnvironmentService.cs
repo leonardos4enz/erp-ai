@@ -30,7 +30,11 @@ public sealed record PackageImportDto(int Id, string PackageId, string Name, str
     string Hash, bool Signed, string? SourceEnvironment, DateTime? ExportedAt, string UploadedBy, DateTime UploadedAt,
     string? ReviewedBy, DateTime? ReviewedAt, string? ReviewComment, string? AppliedBy, DateTime? AppliedAt, int? ChangeSetId,
     string? Description = null, string? InstalledVersion = null, PackageDiffDto? Diff = null,
-    bool CanApprove = false, bool CanApply = false, string? BlockedReason = null);
+    bool CanApprove = false, bool CanApply = false, string? BlockedReason = null,
+    string Kind = EnvironmentService.KindPackage, int? RevertOf = null, string? TargetVersion = null, int? RevertedBy = null,
+    bool CanRevert = false, string? RevertBlockedReason = null, SnapshotInfo? Snapshot = null);
+/// <summary>Spec 017: huellas de las instantáneas de lo que el paquete podía tocar, antes y después de aplicarlo.</summary>
+public sealed record SnapshotInfo(string BeforeHash, string AfterHash);
 
 /// <summary>
 /// Spec 009: exportar lo hecho en el modelador como paquete y aplicarlo en otro entorno por diff, con aprobación.
@@ -42,6 +46,12 @@ public sealed class EnvironmentService(Db db, MetadataStore store, PlanService p
     public const string Approved = "approved";
     public const string Rejected = "rejected";
     public const string Applied = "applied";
+    /// <summary>Spec 017: un paquete deshecho por una reversión aplicada.</summary>
+    public const string Reverted = "reverted";
+    public const string KindPackage = "package";
+    public const string KindRevert = "revert";
+    public const string Before = "before";
+    public const string After = "after";
     public const int MaxComment = 500;
 
     private static readonly StringComparer Ci = StringComparer.OrdinalIgnoreCase;
@@ -314,35 +324,64 @@ public sealed class EnvironmentService(Db db, MetadataStore store, PlanService p
         RequireSuperuser(user);
         await using var cn = await db.OpenAsync(ct);
         var row = await cn.QuerySingleOrDefaultAsync<ImportRow>($"{SelectImport} WHERE i.Id = @id", new { id }) ?? throw new NotFound("El paquete no existe.");
-        var dto = ToDto(row);
+        var installed = await cn.ExecuteScalarAsync<string?>("SELECT Version FROM meta.Module WHERE Id = @PackageId", new { row.PackageId });
+        var dto = ToDto(row) with { Description = row.Description, InstalledVersion = installed };
+        if (row.Kind == KindRevert)
+        {
+            var content = RevertContent.Parse(row.ContentJson);
+            dto = dto with { Snapshot = new SnapshotInfo(content.BeforeHash, content.AfterHash) };
+        }
+        else
+        {
+            // Una instantánea alterada no se muestra como válida; el motivo sale en RevertBlockedReason.
+            try
+            {
+                if (await LoadSnapshotsAsync(cn, null, row.Id) is { } snaps)
+                    dto = dto with { Snapshot = new SnapshotInfo(snaps.Before.Hash, snaps.After.Hash) };
+            }
+            catch (Conflict) { }
+        }
+
+        if (row.Status == Applied && row.Kind == KindPackage)
+        {
+            var why = await RevertBlockedAsync(cn, null, row, installed, checkPending: true);
+            return dto with { CanRevert = why is null, RevertBlockedReason = why };
+        }
         if (row.Status is not (Pending or Approved)) return dto;
 
-        var p = Parse(row.ContentJson);
-        var installed = await cn.ExecuteScalarAsync<string?>("SELECT Version FROM meta.Module WHERE Id = @PackageId", new { row.PackageId });
         var model = await MetadataStore.LoadAsync(cn, null);
         var boards = await MetadataStore.LoadDashboardsAsync(cn, null);
-        var diff = ComputeDiff(p, model, boards, await LoadRolesAsync(cn, null));
-        var blocked = Blocked(row, diff, installed, user, out var canApprove);
-        return dto with
+        var roles = await LoadRolesAsync(cn, null);
+        PackageDiffDto diff;
+        string? versionBlock;
+        if (row.Kind == KindRevert)
         {
-            Description = row.Description, InstalledVersion = installed, Diff = diff,
-            CanApprove = canApprove, CanApply = blocked is null, BlockedReason = blocked,
-        };
+            // Una instantánea alterada no se revisa ni se aplica (H3 CA3): se explica en lugar del diff.
+            try { (diff, _, versionBlock) = await RevertDiffAsync(cn, null, row, model, boards, roles); }
+            catch (Conflict ex) { return dto with { BlockedReason = ex.Message }; }
+        }
+        else
+        {
+            diff = ComputeDiff(Parse(row.ContentJson), model, boards, roles);
+            versionBlock = PackageRules.IsNewer(row.Version, installed) ? null
+                : $"Este entorno ya tiene la versión {installed} de «{row.Name}»: ya no se puede aplicar la {row.Version}.";
+        }
+        var blocked = Blocked(row, diff, versionBlock, user, out var canApprove);
+        return dto with { Diff = diff, CanApprove = canApprove, CanApply = blocked is null, BlockedReason = blocked };
     }
 
     /// <summary>Por qué no se puede aplicar todavía (nulo = se puede). También dice si este usuario puede aprobar.</summary>
-    private string? Blocked(ImportRow row, PackageDiffDto diff, string? installed, UserContext user, out bool canApprove)
+    private string? Blocked(ImportRow row, PackageDiffDto diff, string? versionBlock, UserContext user, out bool canApprove)
     {
         canApprove = false;
-        if (!PackageRules.IsNewer(row.Version, installed))
-            return $"Este entorno ya tiene la versión {installed} de «{row.Name}»: ya no se puede aplicar la {row.Version}.";
-        if (!diff.Valid) return "El paquete tiene errores o conflictos con este entorno.";
+        if (versionBlock is not null) return versionBlock;
+        if (!diff.Valid) return row.Kind == KindRevert ? "La reversión tiene errores o conflictos con este entorno." : "El paquete tiene errores o conflictos con este entorno.";
         if (!env.RequireApproval) return null;
         if (row.Status == Pending)
         {
             canApprove = user.Id != row.UploadedById;
-            return canApprove
-                ? "Este entorno requiere aprobación antes de aplicar."
+            return canApprove ? "Este entorno requiere aprobación antes de aplicar."
+                : row.Kind == KindRevert ? "Este entorno requiere que la apruebe un administrador distinto de quien la pidió."
                 : "Este entorno requiere que lo apruebe un administrador distinto de quien lo subió.";
         }
         return row.ApprovedDiffHash == diff.DiffHash ? null
@@ -360,8 +399,17 @@ public sealed class EnvironmentService(Db db, MetadataStore store, PlanService p
         var row = await LockAsync(cn, tx, id);
         if (row.Status != Pending) throw new Conflict("Solo se aprueba un paquete pendiente.");
         // Cuatro ojos (H4 CA1): quien sube no aprueba.
-        if (row.UploadedById == user.Id) throw new Forbidden("Lo debe aprobar un administrador distinto de quien lo subió.");
-        var diff = ComputeDiff(Parse(row.ContentJson), await MetadataStore.LoadAsync(cn, tx), await MetadataStore.LoadDashboardsAsync(cn, tx), await LoadRolesAsync(cn, tx));
+        if (row.UploadedById == user.Id)
+            throw new Forbidden(row.Kind == KindRevert ? "La debe aprobar un administrador distinto de quien pidió la reversión."
+                : "Lo debe aprobar un administrador distinto de quien lo subió.");
+        var (model, boards, roles) = (await MetadataStore.LoadAsync(cn, tx), await MetadataStore.LoadDashboardsAsync(cn, tx), await LoadRolesAsync(cn, tx));
+        PackageDiffDto diff;
+        if (row.Kind == KindRevert)
+        {
+            (diff, _, var versionBlock) = await RevertDiffAsync(cn, tx, row, model, boards, roles);
+            if (versionBlock is not null) throw new Conflict(versionBlock);
+        }
+        else diff = ComputeDiff(Parse(row.ContentJson), model, boards, roles);
         if (!diff.Valid) throw new Conflict("El paquete tiene errores o conflictos con este entorno: no se puede aprobar.");
         if (!string.Equals(req.DiffHash, diff.DiffHash, StringComparison.Ordinal))
             throw new Conflict("El entorno cambió mientras revisabas: vuelve a abrir el paquete y revisa el diff.");
@@ -371,7 +419,8 @@ public sealed class EnvironmentService(Db db, MetadataStore store, PlanService p
                 ReviewComment = @comment, ApprovedDiffHash = @DiffHash WHERE Id = @id
             """, new { id, UserId = user.Id, comment, diff.DiffHash }, tx);
         await Audit.WriteAsync(cn, tx, http, AuditActions.EnvironmentApprove, "Paquete", row.PackageId,
-            after: new { import = id, row.Version, hash = row.ContentHash, diffHash = diff.DiffHash, comment, localArchives = diff.LocalArchives });
+            after: new { import = id, kind = row.Kind, revertOf = row.RevertOf, row.Version, hash = row.ContentHash, diffHash = diff.DiffHash, comment,
+                localArchives = diff.LocalArchives });
         await tx.CommitAsync(ct);
         return await DetailAsync(id, user, ct);
     }
@@ -398,7 +447,7 @@ public sealed class EnvironmentService(Db db, MetadataStore store, PlanService p
              WHERE Id = @id
             """, new { id, UserId = user.Id, comment }, tx);
         await Audit.WriteAsync(cn, tx, http, AuditActions.EnvironmentReject, "Paquete", row.PackageId,
-            after: new { import = id, row.Version, hash = row.ContentHash, previousStatus = row.Status, comment });
+            after: new { import = id, kind = row.Kind, revertOf = row.RevertOf, row.Version, hash = row.ContentHash, previousStatus = row.Status, comment });
         await tx.CommitAsync(ct);
         return await DetailAsync(id, user, ct);
     }
@@ -421,6 +470,13 @@ public sealed class EnvironmentService(Db db, MetadataStore store, PlanService p
             var row = await LockAsync(cn, tx, id);
             if (row.Status is not (Pending or Approved)) throw new Conflict("El paquete ya no está en revisión.");
             if (env.RequireApproval && row.Status != Approved) throw new Conflict("Este entorno requiere que otro administrador apruebe el paquete antes de aplicarlo.");
+            if (row.Kind == KindRevert)
+            {
+                changeSetId = await ApplyRevertAsync(cn, tx, row, req, http);
+                await tx.CommitAsync(ct);
+                store.Invalidate();
+                return (changeSetId, await DetailAsync(id, user, ct));
+            }
 
             // Lo guardado debe ser exactamente lo que se subió (y, con clave, lo que firmó el origen).
             var p = Parse(row.ContentJson);
@@ -433,7 +489,8 @@ public sealed class EnvironmentService(Db db, MetadataStore store, PlanService p
 
             var model = await MetadataStore.LoadAsync(cn, tx);
             var roles = await LoadRolesAsync(cn, tx);
-            var diff = ComputeDiff(p, model, await MetadataStore.LoadDashboardsAsync(cn, tx), roles, out var plan);
+            var boards = await MetadataStore.LoadDashboardsAsync(cn, tx);
+            var diff = ComputeDiff(p, model, boards, roles, out var plan);
             if (!diff.Valid) throw new Conflict("El paquete tiene errores o conflictos con este entorno.");
             if (!string.Equals(req.DiffHash, diff.DiffHash, StringComparison.Ordinal))
                 throw new Conflict("El entorno cambió desde que revisaste el paquete: vuelve a abrirlo y revisa el diff.");
@@ -448,7 +505,12 @@ public sealed class EnvironmentService(Db db, MetadataStore store, PlanService p
             var roleIds = await ModuleService.EnsureRolesAsync(cn, tx, grants.Where(r => diff.Roles.First(x => x.Name == r.Name).IsNew));
             foreach (var r in grants.Where(r => !roleIds.ContainsKey(r.Name))) roleIds[r.Name] = roles[r.Name].Id;
             if (plan.Operations.Count > 0) changeSetId = await plans.ApplyInTransactionAsync(cn, tx, plan, http);
-            await ModuleService.GrantAsync(cn, tx, grants, roleIds, await MetadataStore.LoadAsync(cn, tx));
+            var afterModel = await MetadataStore.LoadAsync(cn, tx);
+            await ModuleService.GrantAsync(cn, tx, grants, roleIds, afterModel);
+            // Spec 017 (H1): cómo estaba y cómo quedó lo que el paquete puede tocar, en la misma transacción.
+            var (scope, scopeBoards) = ModelDiff.Scope(p);
+            var snapshot = await SaveSnapshotsAsync(cn, tx, id, ModelSnapshot.Take(scope, scopeBoards, model, boards),
+                ModelSnapshot.Take(scope, scopeBoards, afterModel, await MetadataStore.LoadDashboardsAsync(cn, tx)));
 
             await cn.ExecuteAsync("""
                 MERGE meta.Module AS t USING (SELECT @PackageId AS Id) AS s ON t.Id = s.Id
@@ -460,11 +522,198 @@ public sealed class EnvironmentService(Db db, MetadataStore store, PlanService p
             await Audit.WriteAsync(cn, tx, http, AuditActions.EnvironmentApply, "Paquete", row.PackageId,
                 before: new { version = installed },
                 after: new { import = id, row.Version, hash = row.ContentHash, diffHash = diff.DiffHash, changeSetId, approvedBy = row.ReviewedBy,
-                    rolesCreated = diff.Roles.Where(r => r.IsNew).Select(r => r.Name), localArchives = diff.LocalArchives });
+                    rolesCreated = diff.Roles.Where(r => r.IsNew).Select(r => r.Name), localArchives = diff.LocalArchives,
+                    snapshot = new { before = snapshot.BeforeHash, after = snapshot.AfterHash } });
             await tx.CommitAsync(ct);
         }
         store.Invalidate();
         return (changeSetId, await DetailAsync(id, user, ct));
+    }
+
+    // ---------------- Spec 017: reversión ----------------
+
+    /// <summary>Lo que identifica una solicitud de reversión; su huella es la de la fila (como el contenido de un paquete).</summary>
+    private sealed record RevertContent(int RevertOf, string PackageId, string Version, string? TargetVersion, string BeforeHash, string AfterHash)
+    {
+        public static RevertContent Parse(string json) => JsonSerializer.Deserialize<RevertContent>(json, PackageJson.Canonical)!;
+    }
+
+    private sealed record StoredSnapshot(ModelSnapshot Snapshot, string Hash);
+
+    private static string Sha(string text) => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
+
+    private static async Task<(string BeforeHash, string AfterHash)> SaveSnapshotsAsync(DbConnection cn, DbTransaction tx, int importId,
+        ModelSnapshot before, ModelSnapshot after)
+    {
+        var hashes = new List<string>();
+        foreach (var (moment, snapshot) in new[] { (Before, before), (After, after) })
+        {
+            var json = JsonSerializer.Serialize(snapshot, MetadataStore.Json);
+            var hash = Sha(json);
+            await cn.ExecuteAsync("INSERT meta.ModelSnapshot (ImportId, Moment, ContentJson, ContentHash) VALUES (@importId, @moment, @json, @hash)",
+                new { importId, moment, json, hash }, tx);
+            hashes.Add(hash);
+        }
+        return (hashes[0], hashes[1]);
+    }
+
+    /// <summary>Nulo si el paquete no tiene instantáneas (se aplicó antes de la 017). Una huella que no coincide es 409 (H3 CA3).</summary>
+    private static async Task<(StoredSnapshot Before, StoredSnapshot After)?> LoadSnapshotsAsync(DbConnection cn, DbTransaction? tx, int importId)
+    {
+        var rows = (await cn.QueryAsync<(string Moment, string ContentJson, string ContentHash)>(
+            "SELECT Moment, ContentJson, ContentHash FROM meta.ModelSnapshot WHERE ImportId = @importId", new { importId }, tx)).ToList();
+        StoredSnapshot? Read(string moment)
+        {
+            var r = rows.FirstOrDefault(x => x.Moment == moment);
+            if (r.ContentJson is null) return null;
+            if (Sha(r.ContentJson) != r.ContentHash)
+                throw new Conflict("La instantánea guardada del paquete no coincide con su huella: no se puede revertir.");
+            return new(JsonSerializer.Deserialize<ModelSnapshot>(r.ContentJson, MetadataStore.Json)!, r.ContentHash);
+        }
+        return Read(Before) is { } b && Read(After) is { } a ? (b, a) : null;
+    }
+
+    /// <summary>Por qué este paquete aplicado no se puede revertir (nulo = se puede).</summary>
+    private static async Task<string?> RevertBlockedAsync(DbConnection cn, DbTransaction? tx, ImportRow row, string? installed, bool checkPending)
+    {
+        if (row.Kind != KindPackage) return "Una reversión no se revierte: para volver a esa versión, sube de nuevo el paquete.";
+        if (row.Status != Applied) return "Solo se revierte un paquete aplicado.";
+        if (installed != row.Version)
+            return installed is null ? $"«{row.Name}» ya no está instalado en este entorno."
+                : $"Este entorno tiene la versión {installed} de «{row.Name}»: solo se revierte la versión instalada.";
+        if (await cn.ExecuteScalarAsync<int?>(
+                "SELECT TOP 1 Id FROM meta.PackageImport WHERE PackageId = @PackageId AND Kind = 'package' AND Status = 'applied' AND Id > @Id",
+                new { row.PackageId, row.Id }, tx) is not null)
+            return "Hay una aplicación posterior de este paquete: solo se revierte la última.";
+        try
+        {
+            if (await LoadSnapshotsAsync(cn, tx, row.Id) is null)
+                return "Este paquete se aplicó antes de que existieran las instantáneas del modelo: no se puede revertir. Promueve un paquete nuevo.";
+        }
+        catch (Conflict ex) { return ex.Message; }
+        if (checkPending && await cn.ExecuteScalarAsync<int?>(
+                "SELECT TOP 1 Id FROM meta.PackageImport WITH (UPDLOCK, HOLDLOCK) WHERE RevertOf = @Id AND Status IN ('pending', 'approved')",
+                new { row.Id }, tx) is { } open)
+            return $"Ya hay una reversión de este paquete en revisión (#{open}).";
+        return null;
+    }
+
+    /// <summary>H2 CA2: pedir la reversión crea una solicitud pendiente que se revisa, aprueba y aplica como un paquete.</summary>
+    public async Task<PackageImportDto> RevertAsync(int id, HttpContext http, CancellationToken ct)
+    {
+        var user = http.CurrentUser();
+        RequireSuperuser(user);
+        int revertId;
+        await using (var cn = await db.OpenAsync(ct))
+        await using (var tx = (SqlTransaction)await cn.BeginTransactionAsync(ct))
+        {
+            var row = await LockAsync(cn, tx, id);
+            var installed = await cn.ExecuteScalarAsync<string?>("SELECT Version FROM meta.Module WITH (UPDLOCK, HOLDLOCK) WHERE Id = @PackageId",
+                new { row.PackageId }, tx);
+            if (await RevertBlockedAsync(cn, tx, row, installed, checkPending: true) is { } why) throw new Conflict(why);
+            var snaps = (await LoadSnapshotsAsync(cn, tx, row.Id))!.Value;
+            var content = JsonSerializer.Serialize(new RevertContent(row.Id, row.PackageId, row.Version, row.PreviousVersion,
+                snaps.Before.Hash, snaps.After.Hash), PackageJson.Canonical);
+            var hash = Sha(content);
+            revertId = await cn.ExecuteScalarAsync<int>("""
+                INSERT meta.PackageImport (PackageId, Name, Version, Description, ContentJson, ContentHash, Signed, Status, UploadedBy,
+                    Kind, RevertOf, TargetVersion)
+                OUTPUT inserted.Id VALUES (@PackageId, @Name, @Version, @Description, @content, @hash, 0, 'pending', @UserId, 'revert', @Id, @PreviousVersion)
+                """, new
+            {
+                row.PackageId, row.Name, row.Version, Description = $"Deshace la aplicación #{row.Id} y vuelve {(row.PreviousVersion is null ? "a como estaba antes de instalarlo" : $"a la versión {row.PreviousVersion}")}.",
+                content, hash, UserId = user.Id, row.Id, row.PreviousVersion,
+            }, tx);
+            await Audit.WriteAsync(cn, tx, http, AuditActions.EnvironmentRevertRequest, "Paquete", row.PackageId, after: new
+            {
+                import = revertId, revertOf = row.Id, version = row.Version, targetVersion = row.PreviousVersion, hash,
+                snapshot = new { before = snaps.Before.Hash, after = snaps.After.Hash },
+            });
+            await tx.CommitAsync(ct);
+        }
+        return await DetailAsync(revertId, user, ct);
+    }
+
+    /// <summary>
+    /// El diff inverso (H2): la instantánea «antes» contra el modelo actual, compilado contra este entorno. No otorga roles ni
+    /// permisos (roles = []); la huella cubre el plan y a qué aplicación deshace. <c>VersionBlock</c>: si ya no se puede revertir.
+    /// </summary>
+    private async Task<(PackageDiffDto Diff, ChangePlan Plan, string? VersionBlock)> RevertDiffAsync(DbConnection cn, DbTransaction? tx, ImportRow row,
+        IReadOnlyDictionary<string, EntityDef> model, IReadOnlyDictionary<string, DashboardDef> boards, IReadOnlyDictionary<string, RoleRow> roles)
+    {
+        if (Sha(row.ContentJson) != row.ContentHash) throw new Conflict("El contenido guardado de la reversión no coincide con su huella: no se aplica.");
+        var content = RevertContent.Parse(row.ContentJson);
+        var reverted = await cn.QuerySingleAsync<ImportRow>($"{SelectImport} WHERE i.Id = @RevertOf", new { content.RevertOf }, tx);
+        var snaps = await LoadSnapshotsAsync(cn, tx, reverted.Id) ?? throw new Conflict("El paquete no tiene instantáneas: no se puede revertir.");
+        if (snaps.Before.Hash != content.BeforeHash || snaps.After.Hash != content.AfterHash)
+            throw new Conflict("La instantánea del paquete no es la que se usó al pedir la reversión: no se aplica.");
+        var installed = await cn.ExecuteScalarAsync<string?>("SELECT Version FROM meta.Module WHERE Id = @PackageId", new { row.PackageId }, tx);
+        var versionBlock = await RevertBlockedAsync(cn, tx, reverted, installed, checkPending: false);
+
+        var result = ModelDiff.Revert(snaps.Before.Snapshot, snaps.After.Snapshot, model, boards,
+            $"Revertir {row.Name} {row.Version} (paquete {row.PackageId})");
+        var plan = result.Plan;
+        var errors = new List<PlanError>();
+        var steps = new List<PlanStep>();
+        if (plan.Operations.Count > 0)
+        {
+            var compiled = PlanCompiler.Compile(plan, model, roles.Keys.ToHashSet(Ci), boards).Preview;
+            errors.AddRange(compiled.Errors);
+            steps.AddRange(compiled.Steps);
+        }
+        // H2 CA7: los roles del paquete se quedan (pueden tener usuarios); se avisa para limpiarlos a mano.
+        var warnings = new List<string>(result.Warnings);
+        var packageRoles = Parse(reverted.ContentJson).AllRoles.Select(r => r.Name).Where(roles.ContainsKey).Order(Ci).ToList();
+        if (packageRoles.Count > 0)
+            warnings.Add($"Los roles del paquete ({string.Join(", ", packageRoles)}) y sus permisos se conservan: revísalos en Seguridad si ya no se usan.");
+
+        var diffHash = Sha(JsonSerializer.Serialize(new { kind = KindRevert, revertOf = reverted.Id, plan.Operations }, PackageJson.Canonical));
+        var diff = new PackageDiffDto(errors.Count == 0 && result.Conflicts.Count == 0, errors, steps, result.Conflicts, warnings, [], diffHash,
+            plan.Operations.Count == 0, result.LocalArchives);
+        return (diff, plan, versionBlock);
+    }
+
+    /// <summary>H2 CA6: dentro de la transacción y el candado de <see cref="ApplyAsync"/>; la misma compuerta que un paquete.</summary>
+    private async Task<int?> ApplyRevertAsync(SqlConnection cn, SqlTransaction tx, ImportRow row, ApplyRequest req, HttpContext http)
+    {
+        var user = http.CurrentUser();
+        var reverted = await LockAsync(cn, tx, row.RevertOf!.Value);
+        var installed = await cn.ExecuteScalarAsync<string?>("SELECT Version FROM meta.Module WITH (UPDLOCK, HOLDLOCK) WHERE Id = @PackageId", new { row.PackageId }, tx);
+        var model = await MetadataStore.LoadAsync(cn, tx);
+        var boards = await MetadataStore.LoadDashboardsAsync(cn, tx);
+        var (diff, plan, versionBlock) = await RevertDiffAsync(cn, tx, row, model, boards, await LoadRolesAsync(cn, tx));
+        if (versionBlock is not null) throw new Conflict(versionBlock);
+        if (!diff.Valid) throw new Conflict("La reversión tiene errores o conflictos con este entorno.");
+        if (!string.Equals(req.DiffHash, diff.DiffHash, StringComparison.Ordinal))
+            throw new Conflict("El entorno cambió desde que revisaste la reversión: vuelve a abrirla y revisa el diff.");
+        if (env.RequireApproval && row.ApprovedDiffHash != diff.DiffHash)
+            throw new Conflict("El entorno cambió desde la aprobación: el diff ya no es el que se aprobó.");
+        RequireArchiveConfirmed(diff, req.ConfirmArchive);
+
+        int? changeSetId = plan.Operations.Count > 0 ? await plans.ApplyInTransactionAsync(cn, tx, plan, http) : null;
+        var scopeBefore = (await LoadSnapshotsAsync(cn, tx, reverted.Id))!.Value.Before.Snapshot;
+        var (scope, scopeBoards) = (scopeBefore.Entities.ToHashSet(Ci), scopeBefore.Dashboards.ToHashSet(Ci));
+        var snapshot = await SaveSnapshotsAsync(cn, tx, row.Id, ModelSnapshot.Take(scope, scopeBoards, model, boards),
+            ModelSnapshot.Take(scope, scopeBoards, await MetadataStore.LoadAsync(cn, tx), await MetadataStore.LoadDashboardsAsync(cn, tx)));
+
+        // La versión vuelve a la anterior; si no había, el paquete deja de figurar como instalado.
+        await cn.ExecuteAsync("""
+            IF @TargetVersion IS NULL DELETE meta.Module WHERE Id = @PackageId;
+            ELSE UPDATE meta.Module SET Version = @TargetVersion WHERE Id = @PackageId;
+            UPDATE meta.PackageImport SET Status = 'applied', AppliedBy = @UserId, AppliedAt = SYSUTCDATETIME(), ChangeSetId = @changeSetId,
+                PreviousVersion = @installed WHERE Id = @Id;
+            UPDATE meta.PackageImport SET Status = 'reverted', RevertedBy = @Id WHERE Id = @RevertOf;
+            """, new { row.TargetVersion, row.PackageId, UserId = user.Id, changeSetId, installed, row.Id, row.RevertOf }, tx);
+        await Audit.WriteAsync(cn, tx, http, AuditActions.EnvironmentRevert, "Paquete", row.PackageId,
+            before: new { version = installed },
+            after: new
+            {
+                import = row.Id, revertOf = row.RevertOf, version = row.TargetVersion, hash = row.ContentHash, diffHash = diff.DiffHash, changeSetId,
+                approvedBy = row.ReviewedBy, localArchives = diff.LocalArchives,
+                restored = RevertContent.Parse(row.ContentJson) is var c ? new { before = c.BeforeHash, after = c.AfterHash } : null,
+                snapshot = new { before = snapshot.BeforeHash, after = snapshot.AfterHash },
+            });
+        return changeSetId;
     }
 
     // ---------------- Diff ----------------
@@ -543,13 +792,14 @@ public sealed class EnvironmentService(Db db, MetadataStore store, PlanService p
     private sealed record ImportRow(int Id, string PackageId, string Name, string Version, string? Description, string? SourceEnvironment,
         DateTime? ExportedAt, string ContentJson, string ContentHash, bool Signed, string Status, string? PreviousVersion,
         int UploadedById, string UploadedBy, DateTime UploadedAt, int? ReviewedById, string? ReviewedBy, DateTime? ReviewedAt,
-        string? ReviewComment, string? ApprovedDiffHash, string? AppliedBy, DateTime? AppliedAt, int? ChangeSetId);
+        string? ReviewComment, string? ApprovedDiffHash, string? AppliedBy, DateTime? AppliedAt, int? ChangeSetId,
+        string Kind, int? RevertOf, string? TargetVersion, int? RevertedBy);
 
     private const string SelectImport = """
         SELECT i.Id, i.PackageId, i.Name, i.Version, i.Description, i.SourceEnvironment, i.ExportedAt, i.ContentJson, i.ContentHash,
                i.Signed, i.Status, i.PreviousVersion, i.UploadedBy AS UploadedById, up.Username AS UploadedBy, i.UploadedAt,
                i.ReviewedBy AS ReviewedById, rv.Username AS ReviewedBy, i.ReviewedAt, i.ReviewComment, i.ApprovedDiffHash,
-               ap.Username AS AppliedBy, i.AppliedAt, i.ChangeSetId
+               ap.Username AS AppliedBy, i.AppliedAt, i.ChangeSetId, i.Kind, i.RevertOf, i.TargetVersion, i.RevertedBy
           FROM meta.PackageImport i
           JOIN meta.[User] up ON up.Id = i.UploadedBy
           LEFT JOIN meta.[User] rv ON rv.Id = i.ReviewedBy
@@ -566,7 +816,8 @@ public sealed class EnvironmentService(Db db, MetadataStore store, PlanService p
 
     private static PackageImportDto ToDto(ImportRow r) => new(r.Id, r.PackageId, r.Name, r.Version, r.PreviousVersion, r.Status, r.ContentHash,
         r.Signed, r.SourceEnvironment, r.ExportedAt is { } e ? Utc(e) : null, r.UploadedBy, Utc(r.UploadedAt), r.ReviewedBy,
-        r.ReviewedAt is { } rv ? Utc(rv) : null, r.ReviewComment, r.AppliedBy, r.AppliedAt is { } ap ? Utc(ap) : null, r.ChangeSetId);
+        r.ReviewedAt is { } rv ? Utc(rv) : null, r.ReviewComment, r.AppliedBy, r.AppliedAt is { } ap ? Utc(ap) : null, r.ChangeSetId,
+        Kind: r.Kind, RevertOf: r.RevertOf, TargetVersion: r.TargetVersion, RevertedBy: r.RevertedBy);
 
     private static ModulePackage Parse(string json) => JsonSerializer.Deserialize<ModulePackage>(json, PackageJson.Read)!;
 

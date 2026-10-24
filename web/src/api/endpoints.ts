@@ -237,6 +237,8 @@ export const environmentsApi = {
   reject: (id: number, comment: string) => api<PackageImport>(`/admin/environments/imports/${id}/reject`, { method: 'POST', body: { comment } }),
   apply: (id: number, diffHash: string, confirmArchive = false) =>
     api<{ changeSetId: number | null; import: PackageImport }>(`/admin/environments/imports/${id}/apply`, { method: 'POST', body: { diffHash, confirmArchive } }),
+  /** Spec 017: crea la solicitud de reversión (se revisa y aplica como un paquete). */
+  revert: (id: number) => api<PackageImport>(`/admin/environments/imports/${id}/revert`, { method: 'POST', body: {} }),
 };
 
 /** Spec 011: el asistente propone planes; aplicar usa el plan guardado en el servidor. */

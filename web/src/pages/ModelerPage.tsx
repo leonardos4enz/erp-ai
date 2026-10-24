@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Archive, Boxes, History, Pencil, Plus, Workflow } from 'lucide-react';
+import { Archive, ArchiveRestore, Boxes, History, Pencil, Plus, Workflow } from 'lucide-react';
 import { ApiError } from '../api/client';
 import { modelApi } from '../api/endpoints';
 import type { ChangePlan, ChangeSetSummary, EntityDef } from '../api/types';
@@ -137,7 +137,13 @@ export function ModelerPage() {
                       </div>
                     </td>
                     <td className="td-actions">
-                      {!e.isArchived && (
+                      {e.isArchived ? (
+                        <div className="row" style={{ justifyContent: 'flex-end', gap: 2 }}>
+                          {/* Spec 017 (H4 CA3): vuelve con los registros que conservó su tabla. */}
+                          <Button variant="ghost" size="sm" icon={ArchiveRestore} aria-label={`Reactivar ${e.labelPlural}`}
+                            onClick={() => setPlan({ description: `Reactivar catálogo ${e.labelPlural}`, operations: [{ op: 'restoreEntity', entity: e.name }] })}>Reactivar</Button>
+                        </div>
+                      ) : (
                         <div className="row" style={{ justifyContent: 'flex-end', gap: 2 }}>
                           <Button variant="ghost" size="sm" icon={Pencil} onClick={() => setParams({ edit: e.name })}>Editar</Button>
                           <Button variant="ghost" size="sm" iconOnly icon={Archive} aria-label={`Archivar ${e.labelPlural}`} title="Archivar" onClick={() => setPlan({ description: `Archivar catálogo ${e.labelPlural}`, operations: [{ op: 'archiveEntity', entity: e.name }] })} />

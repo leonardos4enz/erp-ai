@@ -30,6 +30,9 @@ public static class AuditActions
     public const string EnvironmentApprove = "environment.approve";
     public const string EnvironmentReject = "environment.reject";
     public const string EnvironmentApply = "environment.apply";
+    /// <summary>Spec 017: pedir la reversión de un paquete aplicado y aplicarla (aprobar y rechazar usan las de la 009).</summary>
+    public const string EnvironmentRevertRequest = "environment.revertRequest";
+    public const string EnvironmentRevert = "environment.revert";
     /// <summary>Spec 010: alta o cambio de una empresa; alta, reemplazo o baja de un tipo de cambio; cambio de empresa actual.</summary>
     public const string CompanyChange = "company.change";
     public const string RateChange = "rate.change";

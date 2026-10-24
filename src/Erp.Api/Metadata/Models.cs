@@ -531,9 +531,11 @@ public sealed record ChangePlan
 [JsonDerivedType(typeof(CreateEntityOp), "createEntity")]
 [JsonDerivedType(typeof(UpdateEntityOp), "updateEntity")]
 [JsonDerivedType(typeof(ArchiveEntityOp), "archiveEntity")]
+[JsonDerivedType(typeof(RestoreEntityOp), "restoreEntity")]
 [JsonDerivedType(typeof(AddFieldOp), "addField")]
 [JsonDerivedType(typeof(UpdateFieldOp), "updateField")]
 [JsonDerivedType(typeof(ArchiveFieldOp), "archiveField")]
+[JsonDerivedType(typeof(RestoreFieldOp), "restoreField")]
 [JsonDerivedType(typeof(SetWorkflowOp), "setWorkflow")]
 [JsonDerivedType(typeof(SetRulesOp), "setRules")]
 [JsonDerivedType(typeof(SetAutomationsOp), "setAutomations")]
@@ -679,6 +681,19 @@ public sealed record UpdateFieldOp : Operation
 }
 
 public sealed record ArchiveFieldOp : Operation
+{
+    public required string Entity { get; init; }
+    public required string Field { get; init; }
+}
+
+/// <summary>Spec 017. Reactiva un catálogo archivado: su tabla y sus registros se conservaron.</summary>
+public sealed record RestoreEntityOp : Operation
+{
+    public required string Entity { get; init; }
+}
+
+/// <summary>Spec 017. Reactiva un campo archivado: su columna y sus datos se conservaron.</summary>
+public sealed record RestoreFieldOp : Operation
 {
     public required string Entity { get; init; }
     public required string Field { get; init; }

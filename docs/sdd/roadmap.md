@@ -22,7 +22,7 @@ en orden, no en paralelo: casi todas tocan el núcleo del motor (`PlanCompiler`,
 | 014 Pendientes menores y riesgos residuales | Implementado ([spec](specs/014-pendientes-menores/spec.md)) |
 | 015 Jerarquía de roles, equipos y unidades | Implementado ([spec](specs/015-jerarquia-roles-equipos/spec.md)) |
 | 016 Automatizaciones asíncronas y programadas | Implementado ([spec](specs/016-automatizaciones-asincronas/spec.md)) |
-| 017 Rollback de entornos | Planeada |
+| 017 Rollback de entornos | Implementado ([spec](specs/017-rollback-entornos/spec.md)) |
 | 018 OAuth2 (client credentials) y API OData | Planeada |
 | 019 Editores visuales (layouts y modelador) | Planeada |
 | 020 Contabilidad y costeo | Planeada |
@@ -176,6 +176,8 @@ Señaladas por la misma auditoría. Cada una es capacidad nueva del motor y va e
   el mismo compilador, vista previa, aprobación y auditoría; reactivar campos y catálogos archivados como operación del
   plan (nunca borrar datos).
 - **Depende de:** 009, 014 (campos locales confirmados), 012 (cuatro ojos sin atajos).
+- **Estado:** implementado en la [spec 017](specs/017-rollback-entornos/spec.md): instantáneas antes y después de aplicar,
+  solicitud de reversión con diff inverso que pasa por la misma compuerta, y `restoreEntity`/`restoreField` en el plan.
 
 ### 018 — OAuth2 (client credentials) y API OData con descubrimiento
 - **Problema:** las integraciones usan claves de API estáticas (008) y endpoints propios: sin expiración corta, sin

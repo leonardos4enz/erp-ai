@@ -569,6 +569,25 @@ public static class Bootstrap
         IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_AutomationRun_Name')
             CREATE INDEX IX_AutomationRun_Name ON meta.AutomationRun (Kind, EntityName, Name, Id);
 
+        -- Spec 017: instantáneas de lo que un paquete puede tocar (antes y después de aplicarlo) y solicitudes de reversión.
+        IF COL_LENGTH('meta.PackageImport', 'Kind') IS NULL
+            ALTER TABLE meta.PackageImport ADD Kind nvarchar(10) NOT NULL CONSTRAINT DF_PackageImport_Kind DEFAULT 'package';
+        IF COL_LENGTH('meta.PackageImport', 'RevertOf') IS NULL
+            ALTER TABLE meta.PackageImport ADD RevertOf int NULL CONSTRAINT FK_PackageImport_RevertOf REFERENCES meta.PackageImport(Id);
+        IF COL_LENGTH('meta.PackageImport', 'TargetVersion') IS NULL ALTER TABLE meta.PackageImport ADD TargetVersion nvarchar(20) NULL;
+        IF COL_LENGTH('meta.PackageImport', 'RevertedBy') IS NULL ALTER TABLE meta.PackageImport ADD RevertedBy int NULL;
+
+        IF OBJECT_ID('meta.ModelSnapshot') IS NULL
+        CREATE TABLE meta.ModelSnapshot (
+            Id int IDENTITY PRIMARY KEY,
+            ImportId int NOT NULL REFERENCES meta.PackageImport(Id),
+            Moment nvarchar(6) NOT NULL,
+            ContentJson nvarchar(max) NOT NULL,
+            ContentHash char(64) NOT NULL,
+            CreatedAt datetime2(3) NOT NULL DEFAULT SYSUTCDATETIME(),
+            CONSTRAINT UX_ModelSnapshot_Import UNIQUE (ImportId, Moment)
+        );
+
         -- Constitución II.4: la auditoría es de solo inserción, incluso para la propia aplicación.
         IF OBJECT_ID('meta.TR_AuditLog_Immutable') IS NULL
             EXEC('CREATE TRIGGER meta.TR_AuditLog_Immutable ON meta.AuditLog INSTEAD OF UPDATE, DELETE AS

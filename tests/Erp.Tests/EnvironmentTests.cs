@@ -152,15 +152,18 @@ public class EnvironmentTests
     }
 
     [Fact]
-    public void Cambiar_el_tipo_o_reactivar_un_campo_son_conflictos()
+    public void Cambiar_el_tipo_es_conflicto_y_un_campo_archivado_se_reactiva()
     {
         var (source, _) = Base(Producto(new FieldDef { Name = "Peso", Label = "Peso", Type = "decimal" }));
         var (target, _) = Base(Producto(new FieldDef { Name = "Peso", Label = "Peso", Type = "text" }));
         var diff = Diff(source, target, "Producto");
         Assert.Contains(diff.Conflicts, c => c.Contains("Peso") && c.Contains("tipo"));
 
+        // Spec 017 (H4 CA4): antes era conflicto; ahora el diff lo reactiva con restoreField.
         var (archived, _) = Apply(Plan(new ArchiveFieldOp { Entity = "Producto", Field = "Peso" }), source, NoBoards, System);
-        Assert.Contains(Diff(source, archived, "Producto").Conflicts, c => c.Contains("archivado"));
+        var restore = Diff(source, archived, "Producto");
+        Assert.Empty(restore.Conflicts);
+        Assert.Equal(new Operation[] { new RestoreFieldOp { Entity = "Producto", Field = "Peso" } }, restore.Plan.Operations);
     }
 
     [Fact]

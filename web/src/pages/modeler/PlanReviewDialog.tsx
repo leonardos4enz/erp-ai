@@ -71,14 +71,18 @@ export function PlanReviewDialog({ plan, onClose, onApplied }: PlanReviewDialogP
 }
 
 /** Resultado de validar un plan: estado general, errores y pasos con su SQL. Se reutiliza al instalar módulos. */
-export function PlanPreviewView({ preview, validText = 'Se aplicará en una sola transacción. Si un paso falla, no se aplica ninguno.' }: { preview: PlanPreview; validText?: string }) {
+export function PlanPreviewView({ preview, validText = 'Se aplicará en una sola transacción. Si un paso falla, no se aplica ninguno.', invalid }: {
+  preview: PlanPreview; validText?: string;
+  /** Cuando lo que bloquea no son errores del plan (p. ej. conflictos de un paquete, que se muestran aparte). */
+  invalid?: { title: string; text: string };
+}) {
   const generalErrors = preview.errors.filter((e) => !preview.steps.some((s) => s.operation === e.operation));
   return (
     <div className="stack">
       {preview.valid ? (
         <Alert tone="info" icon={CheckCircle2} title="El plan es válido">{validText}</Alert>
       ) : (
-        <Alert tone="danger" title="El plan tiene errores">Corrige los puntos marcados y vuelve a revisar.</Alert>
+        <Alert tone="danger" title={invalid?.title ?? 'El plan tiene errores'}>{invalid?.text ?? 'Corrige los puntos marcados y vuelve a revisar.'}</Alert>
       )}
       {generalErrors.map((e, i) => (
         <Alert key={i} tone="danger" title={e.operation >= 0 ? `Operación ${e.operation + 1}` : 'Plan'}>{e.message}</Alert>

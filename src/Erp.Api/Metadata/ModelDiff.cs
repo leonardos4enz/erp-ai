@@ -12,6 +12,31 @@ public sealed record ModelDiffResult(ChangePlan Plan, IReadOnlyList<string> Conf
 }
 
 /// <summary>
+/// Spec 017 (reversión). <c>ArchiveEntities</c>/<c>ArchiveDashboards</c>: alcance en el que lo que no está en lo deseado se
+/// archiva. <c>Applied</c>: el modelo justo después de aplicar el paquete; un campo del destino que lo deseado no trae solo
+/// es «local» (requiere confirmación, 014) si tampoco estaba ahí.
+/// </summary>
+public sealed record DiffOptions(IReadOnlySet<string> ArchiveEntities, IReadOnlySet<string> ArchiveDashboards,
+    IReadOnlyDictionary<string, EntityDef>? Applied = null);
+
+/// <summary>
+/// Spec 017: lo que el paquete podía tocar (sus catálogos con sus partidas y sus tableros) tal como estaba en un momento.
+/// <c>Entities</c>/<c>Dashboards</c> son el alcance; las definiciones, solo las que existían.
+/// </summary>
+public sealed record ModelSnapshot(IReadOnlyList<string> Entities, IReadOnlyList<string> Dashboards,
+    IReadOnlyList<EntityDef> EntityDefs, IReadOnlyList<DashboardDef> DashboardDefs)
+{
+    public static ModelSnapshot Take(IReadOnlySet<string> entities, IReadOnlySet<string> dashboards,
+        IReadOnlyDictionary<string, EntityDef> model, IReadOnlyDictionary<string, DashboardDef> boards) =>
+        new(entities.Order(StringComparer.OrdinalIgnoreCase).ToList(), dashboards.Order(StringComparer.OrdinalIgnoreCase).ToList(),
+            model.Values.Where(e => entities.Contains(e.Name)).OrderBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList(),
+            boards.Values.Where(d => dashboards.Contains(d.Name)).OrderBy(d => d.Name, StringComparer.OrdinalIgnoreCase).ToList());
+
+    public IReadOnlyDictionary<string, EntityDef> EntityMap() => EntityDefs.ToDictionary(e => e.Name, StringComparer.OrdinalIgnoreCase);
+    public IReadOnlyDictionary<string, DashboardDef> DashboardMap() => DashboardDefs.ToDictionary(d => d.Name, StringComparer.OrdinalIgnoreCase);
+}
+
+/// <summary>
 /// Spec 009: compara estados de modelo (no historiales). Es puro, como <see cref="PlanCompiler"/>: el resultado es un
 /// <see cref="ChangePlan"/> que pasa por el compilador igual que cualquier cambio del modelador.
 /// </summary>
@@ -28,7 +53,7 @@ public static class ModelDiff
         IReadOnlyDictionary<string, DashboardDef> desiredBoards,
         IReadOnlyDictionary<string, EntityDef> target,
         IReadOnlyDictionary<string, DashboardDef> targetBoards,
-        string description)
+        string description, DiffOptions? options = null)
     {
         var conflicts = new List<string>();
         var warnings = new List<string>();
@@ -39,6 +64,9 @@ public static class ModelDiff
         var sets = new List<Operation>();
         var archives = new List<Operation>();
         var boards = new List<Operation>();
+        var source = options is null ? "el paquete" : "la versión anterior";
+        var restoreEntities = new List<Operation>();
+        var restoreFields = new List<Operation>();
         var created = new HashSet<string>(Ci);
         var localArchives = new List<string>();
 
@@ -67,16 +95,21 @@ public static class ModelDiff
         foreach (var d in desired.Values.Where(d => !d.IsArchived && target.ContainsKey(d.Name)).OrderBy(d => d.Name, Ci))
         {
             var t = target[d.Name];
-            if (t.IsArchived) { conflicts.Add($"El catálogo «{d.Label}» está archivado en este entorno: no se puede reactivar con un paquete."); continue; }
+            // Spec 017: un catálogo archivado se reactiva (su tabla conservó los registros) y se compara como activo.
+            if (t.IsArchived)
+            {
+                restoreEntities.Add(new RestoreEntityOp { Entity = t.Name });
+                t = t with { IsArchived = false };
+            }
             if (t.IsChild != d.IsChild || !Ci.Equals(t.ParentEntity ?? "", d.ParentEntity ?? ""))
             {
-                conflicts.Add($"«{d.Label}» es {(d.IsChild ? $"partida de {d.ParentEntity}" : "un catálogo")} en el paquete y " +
+                conflicts.Add($"«{d.Label}» es {(d.IsChild ? $"partida de {d.ParentEntity}" : "un catálogo")} en {source} y " +
                               $"{(t.IsChild ? $"partida de {t.ParentEntity}" : "un catálogo")} en este entorno.");
                 continue;
             }
             // Spec 010: pasar a un registro por empresa es un cambio; volver a compartido no tiene operación.
             if (t.PerCompany && !d.PerCompany)
-                conflicts.Add($"«{d.Label}» es por empresa en este entorno y compartido en el paquete: un catálogo por empresa no vuelve a ser compartido.");
+                conflicts.Add($"«{d.Label}» es por empresa en este entorno y compartido en {source}: un catálogo por empresa no vuelve a ser compartido.");
             if (EntityChange(d, t, warnings) is { } ue) updates.Add(ue);
 
             foreach (var df in d.ActiveFields.Where(f => f.Type != FieldTypes.State))
@@ -84,8 +117,13 @@ public static class ModelDiff
                 var tf = t.FindField(df.Name);
                 var where = $"«{d.Label}» › {df.Label}";
                 if (tf is null) { adds.Add(new AddFieldOp { Entity = t.Name, Field = Clean(df) }); continue; }
-                if (tf.IsArchived) { conflicts.Add($"{where}: el campo está archivado en este entorno y no se puede reactivar."); continue; }
                 if (StructureChange(df, tf) is { } why) { conflicts.Add($"{where}: {why}. No se puede cambiar la estructura de un campo existente."); continue; }
+                // Spec 017: un campo archivado se reactiva con los datos que conservó su columna.
+                if (tf.IsArchived)
+                {
+                    restoreFields.Add(new RestoreFieldOp { Entity = t.Name, Field = tf.Name });
+                    tf = tf with { IsArchived = false };
+                }
                 if (FieldChange(t.Name, df, tf) is { } uf) updates.Add(uf);
             }
             foreach (var tf in t.ActiveFields.Where(f => f.Type != FieldTypes.State))
@@ -94,12 +132,16 @@ public static class ModelDiff
                 if (df is { IsArchived: false }) continue;
                 if (tf.Type == FieldTypes.Parent) continue; // ya se reportó como conflicto de partida
                 archives.Add(new ArchiveFieldOp { Entity = t.Name, Field = tf.Name });
-                if (df is null) localArchives.Add($"«{t.Label}» › {tf.Label} no viene en el paquete: se archiva (sus datos se conservan).");
+                if (df is not null) continue;
+                if (options?.Applied is not { } applied)
+                    localArchives.Add($"«{t.Label}» › {tf.Label} no viene en el paquete: se archiva (sus datos se conservan).");
+                else if (applied.GetValueOrDefault(t.Name)?.FindField(tf.Name) is null)
+                    localArchives.Add($"«{t.Label}» › {tf.Label} se agregó en este entorno después del paquete: se archiva (sus datos se conservan).");
             }
 
             if (!JsonEq(d.Workflow, t.Workflow))
             {
-                if (d.Workflow is null) conflicts.Add($"«{d.Label}»: el paquete no trae el proceso que tiene este entorno, y un proceso no se puede quitar.");
+                if (d.Workflow is null) conflicts.Add($"«{d.Label}»: {source} no trae el proceso que tiene este entorno, y un proceso no se puede quitar.");
                 else workflows.Add(new SetWorkflowOp { Entity = t.Name, Workflow = d.Workflow });
             }
             Sets(d, t, sets);
@@ -113,10 +155,29 @@ public static class ModelDiff
             if (tb is null || tb.IsArchived || !JsonEq(wanted, tb)) boards.Add(new SetDashboardOp { Dashboard = wanted });
         }
 
+        // Spec 017 (reversión): lo que existe en el alcance y no en lo deseado se archiva; nunca se borra.
+        var archiveEntities = new List<Operation>();
+        if (options is not null)
+        {
+            var gone = options.ArchiveEntities
+                .Where(n => target.TryGetValue(n, out var t) && !t.IsArchived && !(desired.TryGetValue(n, out var d) && !d.IsArchived))
+                .Select(n => target[n]).ToList();
+            var goneNames = gone.Select(e => e.Name).ToHashSet(Ci);
+            // El campo de partidas del documento primero: si no, documento y partida se referencian y ninguno se puede archivar.
+            foreach (var e in gone.OrderBy(e => e.Name, Ci))
+                foreach (var f in e.ActiveFields.Where(f => f.Type == FieldTypes.Lines && goneNames.Contains(f.ChildEntity ?? "")))
+                    archiveEntities.Add(new ArchiveFieldOp { Entity = e.Name, Field = f.Name });
+            archiveEntities.AddRange(OrderForArchive(gone).Select(e => new ArchiveEntityOp { Entity = e.Name }));
+            foreach (var n in options.ArchiveDashboards.Order(Ci))
+                if (targetBoards.TryGetValue(n, out var tb) && !tb.IsArchived && !(desiredBoards.TryGetValue(n, out var dbd) && !dbd.IsArchived))
+                    boards.Add(new ArchiveDashboardOp { Name = tb.Name });
+        }
+
         var plan = new ChangePlan
         {
             Description = description,
-            Operations = [.. creates, .. adds, .. updates, .. workflows, .. sets, .. archives, .. boards],
+            Operations = [.. restoreEntities, .. creates, .. restoreFields, .. adds, .. updates, .. workflows, .. sets, .. archives,
+                .. archiveEntities, .. boards],
         };
         return new ModelDiffResult(plan, conflicts, warnings, created) { LocalArchives = localArchives };
     }
@@ -133,6 +194,57 @@ public static class ModelDiff
         var desiredBoards = boards.Where(kv => dashboards.Contains(kv.Key) && !kv.Value.IsArchived).ToDictionary(kv => kv.Key, kv => kv.Value, Ci);
         var restBoards = boards.Where(kv => !dashboards.Contains(kv.Key)).ToDictionary(kv => kv.Key, kv => kv.Value, Ci);
         return Compute(desired, desiredBoards, rest, restBoards, description);
+    }
+
+    /// <summary>
+    /// Spec 017: el diff inverso. Lo deseado es la instantánea <paramref name="before"/>; lo que el paquete creó se archiva, lo
+    /// que cambió vuelve y lo que archivó se reactiva. <paramref name="after"/> distingue lo que cambió aquí después de aplicar.
+    /// </summary>
+    public static ModelDiffResult Revert(ModelSnapshot before, ModelSnapshot after, IReadOnlyDictionary<string, EntityDef> current,
+        IReadOnlyDictionary<string, DashboardDef> currentBoards, string description)
+    {
+        var applied = after.EntityMap();
+        var appliedBoards = after.DashboardMap();
+        var scope = before.Entities.Concat(after.Entities).ToHashSet(Ci);
+        var scopeBoards = before.Dashboards.Concat(after.Dashboards).ToHashSet(Ci);
+        var diff = Compute(before.EntityMap(), before.DashboardMap(), current, currentBoards, description,
+            new DiffOptions(scope, scopeBoards, applied));
+
+        // Deriva: el modelador cambió algo del alcance después de aplicar; revertir también lo deshace.
+        var warnings = new List<string>(diff.Warnings);
+        foreach (var n in scope.Order(Ci))
+        {
+            var now = current.GetValueOrDefault(n);
+            var then = applied.GetValueOrDefault(n);
+            if ((now is not null || then is not null) && !JsonEq(now, then))
+                warnings.Add($"«{(now ?? then)!.LabelPlural}» cambió en este entorno después de aplicar el paquete: revertir también deshace ese cambio.");
+        }
+        foreach (var n in scopeBoards.Order(Ci))
+        {
+            var now = currentBoards.GetValueOrDefault(n);
+            var then = appliedBoards.GetValueOrDefault(n);
+            if ((now is not null || then is not null) && !JsonEq(now, then))
+                warnings.Add($"El tablero «{(now ?? then)!.Label}» cambió en este entorno después de aplicar el paquete: revertir también deshace ese cambio.");
+        }
+        var archived = diff.Plan.Operations.OfType<ArchiveEntityOp>().Select(o => current[o.Entity].LabelPlural).ToList();
+        if (archived.Count > 0)
+            warnings.Add($"Se archivan los catálogos que creó el paquete ({string.Join(", ", archived)}): dejan de verse y sus registros se conservan.");
+        return diff with { Warnings = warnings };
+    }
+
+    /// <summary>Quien referencia antes que el referido (la partida antes que su documento): nadie activo apunta a un archivado.</summary>
+    private static IEnumerable<EntityDef> OrderForArchive(List<EntityDef> gone)
+    {
+        var remaining = gone.OrderBy(e => e.Name, Ci).ToList();
+        bool Referenced(EntityDef e) => remaining.Any(o => !Ci.Equals(o.Name, e.Name) &&
+            o.ActiveFields.Any(f => f.Type is FieldTypes.Reference or FieldTypes.Parent && Ci.Equals(f.ReferenceEntity, e.Name)));
+        while (remaining.Count > 0)
+        {
+            // En un ciclo (A ↔ B) no hay orden posible: el compilador lo reporta y la reversión queda bloqueada.
+            var next = remaining.FirstOrDefault(e => !Referenced(e)) ?? remaining[0];
+            remaining.Remove(next);
+            yield return next;
+        }
     }
 
     /// <summary>Catálogos y tableros que crea un paquete (su alcance).</summary>

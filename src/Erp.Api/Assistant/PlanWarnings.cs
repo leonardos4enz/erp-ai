@@ -31,6 +31,12 @@ public static class PlanWarnings
                 case ArchiveFieldOp a:
                     list.Add($"Archiva el campo «{a.Field}» de «{Label(a.Entity)}» (sus datos se conservan).");
                     break;
+                case RestoreEntityOp r:
+                    list.Add($"Reactiva el catálogo «{Label(r.Entity)}»: vuelve a mostrarse con los registros que conservó.");
+                    break;
+                case RestoreFieldOp r:
+                    list.Add($"Reactiva el campo «{r.Field}» de «{Label(r.Entity)}»: vuelve a verse con los datos que conservó.");
+                    break;
                 case ArchiveDashboardOp a:
                     list.Add($"Archiva el tablero «{a.Name}».");
                     break;

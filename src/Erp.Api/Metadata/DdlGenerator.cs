@@ -125,6 +125,16 @@ public static class DdlGenerator
         return statements;
     }
 
+    /// <summary>
+    /// Spec 017: al reactivar un campo único de un catálogo por empresa, su índice se recrea por empresa: pudo estar archivado
+    /// cuando el catálogo pasó a ser por empresa (y <see cref="MakePerCompany"/> solo rehace los índices de campos activos).
+    /// </summary>
+    public static IReadOnlyList<string> RestoreIndexes(string entity, FieldDef f, bool perCompany)
+    {
+        if (!perCompany || !f.Unique || f.Type == FieldTypes.Autonumber) return [];
+        return [$"DROP INDEX IF EXISTS {Constraint("UX", entity, f.Name)} ON {AppTable(entity)};", .. Indexes(entity, f, perCompany: true)];
+    }
+
     private static string CompanyIndex(string entity) =>
         $"CREATE INDEX {Constraint("IX", entity, CompanyColumn)} ON {AppTable(entity)} ({Quote(CompanyColumn)}) WHERE [IsDeleted] = 0;";
 

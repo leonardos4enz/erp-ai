@@ -32,6 +32,8 @@ public static class EnvironmentEndpoints
             svc.ApproveAsync(id, req, http, ct));
         g.MapPost("/imports/{id:int}/reject", (int id, RejectRequest req, HttpContext http, EnvironmentService svc, CancellationToken ct) =>
             svc.RejectAsync(id, req, http, ct));
+        // Spec 017: crea la solicitud de reversión; se revisa, aprueba y aplica con los mismos endpoints que un paquete.
+        g.MapPost("/imports/{id:int}/revert", (int id, HttpContext http, EnvironmentService svc, CancellationToken ct) => svc.RevertAsync(id, http, ct));
         g.MapPost("/imports/{id:int}/apply", async (int id, ApplyRequest req, HttpContext http, EnvironmentService svc, CancellationToken ct) =>
         {
             var (changeSetId, import) = await svc.ApplyAsync(id, req, http, ct);

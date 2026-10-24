@@ -324,11 +324,13 @@ test('H4 CA2 + H5 CA2: la aprobación queda ligada al diff; un rol nuevo llega c
 test('H2 CA3: lo que el plan no puede expresar es conflicto y bloquea', async ({ page }) => {
   const admin = await as('admin');
   const marcas = await exportFile({ id: 'marcas-env', name: 'Marcas', version: '1.1.0', entities: ['EnvMarca'], dashboards: [] });
-  await applyPlan(admin, { description: 'E2E 009: archivar país', operations: [{ op: 'archiveField', entity: 'EnvMarca', field: 'Pais' }] });
+  // Spec 017: reactivar un campo archivado ya no es conflicto (se prueba en rollback.spec); quitar un proceso, sí.
+  await applyPlan(admin, { description: 'E2E 009: proceso local', operations: [{ op: 'setWorkflow', entity: 'EnvMarca', workflow: {
+    initial: 'Activa', states: [{ name: 'Activa', label: 'Activa' }], transitions: [] } }] });
   const { id } = await (await upload('admin', marcas)).json();
   const d = await detail(id);
   expect(d.diff.valid).toBe(false);
-  expect(d.diff.conflicts.join(' ')).toContain('País: el campo está archivado en este entorno');
+  expect(d.diff.conflicts.join(' ')).toContain('«Marca E2E»: el paquete no trae el proceso que tiene este entorno');
   expect(d.canApply).toBe(false);
   const approve = await (await as('aprobador')).post(`/api/admin/environments/imports/${id}/approve`, { data: { diffHash: d.diff.diffHash } });
   expect(approve.status()).toBe(409);
@@ -338,7 +340,7 @@ test('H2 CA3: lo que el plan no puede expresar es conflicto y bloquea', async ({
   const dialog = page.getByRole('dialog', { name: 'Marcas v1.1.0' });
   await expect(dialog).toContainText('Conflictos: el plan no puede expresar estos cambios');
   await expect(dialog.getByRole('button', { name: 'Aplicar paquete' })).toBeDisabled();
-  await dialog.getByLabel('Comentario').fill('Conflicto con País');
+  await dialog.getByLabel('Comentario').fill('Conflicto con el proceso');
   await dialog.getByRole('button', { name: 'Rechazar' }).click();
   await expect(dialog).toContainText('Rechazado por admin');
 });

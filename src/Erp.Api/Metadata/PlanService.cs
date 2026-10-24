@@ -65,6 +65,8 @@ public sealed class PlanService(Db db, MetadataStore store, JsonSerializerOption
             {
                 AddFieldOp a when string.Equals(a.Field.Type?.Trim(), FieldTypes.Formula, StringComparison.OrdinalIgnoreCase) => a.Entity,
                 UpdateFieldOp u when u.Formula is not null => u.Entity,
+                // Spec 017: una fórmula reactivada no se calculó mientras estuvo archivada.
+                RestoreFieldOp r when model.TryGetValue(r.Entity, out var re) && re.FindField(r.Field) is { Type: FieldTypes.Formula } => r.Entity,
                 _ => null,
             })
             .OfType<string>()

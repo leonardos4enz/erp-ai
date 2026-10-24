@@ -60,4 +60,5 @@ y cada sesión queda como registro de una sola entrega. Al cerrar la spec:
 | 014 | [Pendientes menores y riesgos residuales](specs/014-pendientes-menores/spec.md) | Implementado |
 | 015 | [Jerarquía de roles, equipos y unidades de negocio](specs/015-jerarquia-roles-equipos/spec.md) | Implementado |
 | 016 | [Automatizaciones asíncronas y programadas](specs/016-automatizaciones-asincronas/spec.md) | Implementado |
-| 017–020 | Brechas de plataforma ([roadmap](roadmap.md#specs-planeadas-brechas-de-plataforma)) | Planeadas |
+| 017 | [Rollback de entornos](specs/017-rollback-entornos/spec.md) | Implementado |
+| 018–020 | Brechas de plataforma ([roadmap](roadmap.md#specs-planeadas-brechas-de-plataforma)) | Planeadas |

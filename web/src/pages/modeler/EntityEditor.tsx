@@ -231,6 +231,8 @@ export function buildOperations(original: EntityDef | undefined, d: Draft): Oper
     const o = f._original!;
     if (f.isArchived && !o.isArchived) { ops.push({ op: 'archiveField', entity: original.name, field: o.name }); return; }
     if (f.isArchived) return;
+    // Spec 017 (H4): reactivar un campo archivado; los cambios que se le hagan van después, ya activo.
+    if (o.isArchived) ops.push({ op: 'restoreField', entity: original.name, field: o.name });
     const u: Extract<Operation, { op: 'updateField' }> = { op: 'updateField', entity: original.name, field: o.name };
     let changed = false;
     if (f.label.trim() !== o.label) { u.label = f.label.trim(); changed = true; }
@@ -394,9 +396,8 @@ function FieldRow({ f, index, count, errors, entities, roleNames, onChange, onMo
           ) : f.isArchived ? (
             <Button
               variant="ghost" size="sm" iconOnly icon={ArchiveRestore}
-              aria-label="Deshacer archivado"
-              title={f._original?.isArchived ? 'Restaurar campos archivados no está disponible' : 'Deshacer archivado'}
-              disabled={!!f._original?.isArchived}
+              aria-label={f._original?.isArchived ? `Reactivar campo ${f.label}` : 'Deshacer archivado'}
+              title={f._original?.isArchived ? 'Reactivar (vuelve con los datos que conservó)' : 'Deshacer archivado'}
               onClick={() => onChange({ isArchived: false })}
             />
           ) : (

@@ -74,6 +74,8 @@ public static partial class PlanCompiler
                 AddFieldOp op => AddField(ctx, op),
                 UpdateFieldOp op => UpdateField(ctx, op),
                 ArchiveFieldOp op => ArchiveField(ctx, op),
+                RestoreEntityOp op => RestoreEntity(ctx, op),
+                RestoreFieldOp op => RestoreField(ctx, op),
                 SetWorkflowOp op => SetWorkflow(ctx, op),
                 SetRulesOp op => SetRules(ctx, op),
                 SetAutomationsOp op => SetAutomations(ctx, op),
@@ -165,8 +167,15 @@ public static partial class PlanCompiler
         // Spec 010: en un catálogo compartido la moneda base o la empresa dependerían de quién guarda el registro.
         var shared = !(e.IsChild ? model.TryGetValue(e.ParentEntity ?? "", out var doc) && doc.PerCompany : e.PerCompany);
 
+        // Spec 017: reactivar en cualquier orden dentro del plan; lo que quede apuntando a algo archivado es error aquí.
+        if (e.IsChild && (!model.TryGetValue(e.ParentEntity ?? "", out var parentDoc) || parentDoc.IsArchived))
+            msgs.Add($"{e.Name} es una partida y su documento '{e.ParentEntity}' está archivado: reactívalo también.");
+
         foreach (var f in e.ActiveFields)
         {
+            if (f.Type == FieldTypes.Reference && !string.Equals(f.ReferenceEntity, e.Name, StringComparison.OrdinalIgnoreCase) &&
+                model.TryGetValue(f.ReferenceEntity ?? "", out var referenced) && referenced.IsArchived)
+                msgs.Add($"{e.Name}.{f.Name} apunta a '{referenced.Name}', que está archivado: reactívalo también o archiva el campo.");
             Check(f.DefaultValue, $"valor por defecto de {f.Name}");
             Check(f.Formula, $"fórmula de {f.Name}");
             if (shared && f.Formula is not null && Expressions.ExprAnalyzer.UsedFunctions(f.Formula).FirstOrDefault(Expressions.ExprAnalyzer.CompanyFunctions.Contains) is { } fn)
@@ -399,6 +408,29 @@ public static partial class PlanCompiler
             updated = updated with { DisplayField = null };
         updated = WithoutField(updated, f.Name);
         return new(updated, $"Archivar campo '{f.Label}' de '{e.Label}' (la columna y sus datos se conservan)", []);
+    }
+
+    // ---------------- Spec 017: reactivar ----------------
+    // Lo que se reactiva conservó su tabla o su columna: no hay DDL que cree ni borre. Las referencias se revisan en la pasada final.
+
+    private static OpResult? RestoreEntity(Ctx ctx, RestoreEntityOp op)
+    {
+        if (op.Entity is null || !ctx.Model.TryGetValue(op.Entity, out var e)) return ctx.Fail($"El catálogo '{op.Entity}' no existe.");
+        if (!e.IsArchived) return ctx.Fail($"El catálogo '{e.Label}' no está archivado.");
+        return new(e with { IsArchived = false }, $"Reactivar catálogo '{e.Label}' (vuelve con los registros que conservó)", []);
+    }
+
+    private static OpResult? RestoreField(Ctx ctx, RestoreFieldOp op)
+    {
+        var e = ctx.Active(op.Entity);
+        if (e is null) return null;
+        var f = e.FindField(op.Field);
+        if (f is null) return ctx.Fail($"El campo '{op.Field}' no existe en '{e.Name}'.");
+        if (!f.IsArchived) return ctx.Fail($"El campo '{f.Label}' de '{e.Label}' no está archivado.");
+        var empty = f.Required || f.Type == FieldTypes.Autonumber ? "; los registros creados mientras estuvo archivado lo tienen vacío" : "";
+        return new(ReplaceField(e, f with { IsArchived = false }),
+            $"Reactivar campo '{f.Label}' de '{e.Label}' (la columna conservó sus datos{empty})",
+            DdlGenerator.RestoreIndexes(e.Name, f, e.PerCompany));
     }
 
     private static readonly HashSet<string> StateColors = ["neutral", "accent", "success", "warning", "danger"];

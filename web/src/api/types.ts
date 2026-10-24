@@ -376,6 +376,8 @@ export type Operation =
   | { op: 'addField'; entity: string; field: FieldDef }
   | { op: 'updateField'; entity: string; field: string; label?: string; required?: boolean; showInList?: boolean; options?: string[]; requiredForRoles?: string[]; displayOrder?: number; defaultValue?: string; formula?: string; editable?: boolean; lookupFilter?: { field: string; source: string } }
   | { op: 'archiveField'; entity: string; field: string }
+  | { op: 'restoreEntity'; entity: string }
+  | { op: 'restoreField'; entity: string; field: string }
   | { op: 'setWorkflow'; entity: string; workflow: Workflow }
   | { op: 'setRules'; entity: string; rules: Rule[] }
   | { op: 'setAutomations'; entity: string; automations: Automation[]; merge?: boolean }
@@ -569,7 +571,7 @@ export interface ExportPreview extends PlanPreview {
   signed: boolean;
 }
 
-export type PackageStatus = 'pending' | 'approved' | 'rejected' | 'applied';
+export type PackageStatus = 'pending' | 'approved' | 'rejected' | 'applied' | 'reverted';
 
 export interface PackageImport {
   id: number;
@@ -597,6 +599,15 @@ export interface PackageImport {
   canApprove: boolean;
   canApply: boolean;
   blockedReason?: string | null;
+  /** Spec 017: `revert` = solicitud de reversión de `revertOf` (deja `targetVersion`; nula = sin instalar). */
+  kind: 'package' | 'revert';
+  revertOf?: number | null;
+  targetVersion?: string | null;
+  /** En un paquete revertido: la solicitud que lo deshizo. */
+  revertedBy?: number | null;
+  canRevert: boolean;
+  revertBlockedReason?: string | null;
+  snapshot?: { beforeHash: string; afterHash: string } | null;
 }
 
 // ---------- Spec 011: asistente IA ----------

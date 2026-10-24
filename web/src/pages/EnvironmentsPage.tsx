@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Archive, CheckCircle2, Download, Eye, Fingerprint, GitCompareArrows, History, PackageCheck, PackagePlus, Rocket, ScanSearch, ShieldAlert,
-  ShieldCheck, Upload, XCircle,
+  Archive, Camera, CheckCircle2, Download, Eye, Fingerprint, GitCompareArrows, History, PackageCheck, PackagePlus, Rocket, RotateCcw, ScanSearch,
+  ShieldAlert, ShieldCheck, Undo2, Upload, XCircle,
 } from 'lucide-react';
 import { ApiError, fieldError } from '../api/client';
 import { environmentsApi } from '../api/endpoints';
@@ -16,14 +16,20 @@ import { PlanPreviewView } from './modeler/PlanReviewDialog';
 
 type Tab = 'received' | 'export';
 
-const statusTone: Record<PackageStatus, 'warning' | 'accent' | 'danger' | 'success'> = {
-  pending: 'warning', approved: 'accent', rejected: 'danger', applied: 'success',
+const statusTone: Record<PackageStatus, 'warning' | 'accent' | 'danger' | 'success' | 'neutral'> = {
+  pending: 'warning', approved: 'accent', rejected: 'danger', applied: 'success', reverted: 'neutral',
 };
 const statusLabel: Record<PackageStatus, string> = {
-  pending: 'Pendiente', approved: 'Aprobado', rejected: 'Rechazado', applied: 'Aplicado',
+  pending: 'Pendiente', approved: 'Aprobado', rejected: 'Rechazado', applied: 'Aplicado', reverted: 'Revertido',
 };
 
 const shortHash = (h: string) => h.slice(0, 12);
+
+/** Spec 017: una solicitud de reversión se nombra por el paquete que deshace. */
+const importTitle = (p: PackageImport) => (p.kind === 'revert' ? `Reversión de ${p.name} v${p.version}` : `${p.name} v${p.version}`);
+const versionText = (p: PackageImport) => p.kind === 'revert'
+  ? `${p.version} → ${p.targetVersion ?? 'sin instalar'}`
+  : `${p.previousVersion ? `${p.previousVersion} → ` : ''}${p.version}`;
 
 /** 1.4.2 → 1.5.0 (la misma regla que el servidor). */
 function nextMinor(last?: string) {
@@ -82,13 +88,15 @@ function Notes({ tone, title, items }: { tone: 'danger' | 'warning' | 'info'; ti
 
 /* ----------------------------- Paquetes recibidos ----------------------------- */
 
-function ReviewDialog({ id, env, onClose, onChanged }: { id: number | null; env: EnvironmentInfo | undefined; onClose: () => void; onChanged: () => void }) {
+function ReviewDialog({ id, env, onClose, onChanged, onOpen }: {
+  id: number | null; env: EnvironmentInfo | undefined; onClose: () => void; onChanged: () => void; onOpen: (id: number) => void;
+}) {
   const toast = useToast();
   const { refresh } = useAuth();
   const [tick, setTick] = useState(0);
   const { data, loading, error } = useAsync<PackageImport | undefined>((s) => (id ? environmentsApi.detail(id, s) : Promise.resolve(undefined)), [id, tick]);
   const [comment, setComment] = useState('');
-  const [busy, setBusy] = useState<'approve' | 'reject' | 'apply' | null>(null);
+  const [busy, setBusy] = useState<'approve' | 'reject' | 'apply' | 'revert' | null>(null);
   const [actionError, setActionError] = useState<ApiError | null>(null);
   // Spec 014 (H4): archivar campos que solo existen aquí se confirma aparte; si el diff cambia, se vuelve a pedir.
   const [confirmArchive, setConfirmArchive] = useState(false);
@@ -96,11 +104,19 @@ function ReviewDialog({ id, env, onClose, onChanged }: { id: number | null; env:
   useEffect(() => { setComment(''); setActionError(null); }, [id]);
   useEffect(() => { setConfirmArchive(false); }, [id, data?.diff?.diffHash]);
 
-  async function act(kind: 'approve' | 'reject' | 'apply') {
+  async function act(kind: 'approve' | 'reject' | 'apply' | 'revert') {
     if (!data) return;
     setBusy(kind);
     setActionError(null);
     try {
+      if (kind === 'revert') {
+        // Spec 017 (H2 CA2): se crea la solicitud y se abre para revisar su diff; nada cambia todavía.
+        const r = await environmentsApi.revert(data.id);
+        toast.success('Reversión solicitada', 'Revisa el diff antes de aplicarla.');
+        onChanged();
+        onOpen(r.id);
+        return;
+      }
       if (kind === 'approve') {
         await environmentsApi.approve(data.id, data.diff!.diffHash, comment.trim() || undefined, confirmArchive);
         toast.success('Paquete aprobado', 'Ya se puede aplicar.');
@@ -109,7 +125,9 @@ function ReviewDialog({ id, env, onClose, onChanged }: { id: number | null; env:
         toast.success('Paquete rechazado');
       } else {
         const r = await environmentsApi.apply(data.id, data.diff!.diffHash, confirmArchive);
-        toast.success('Paquete aplicado', `${data.name} v${data.version}${r.changeSetId ? ` · conjunto de cambios #${r.changeSetId}` : ''}`);
+        const changes = r.changeSetId ? ` · conjunto de cambios #${r.changeSetId}` : '';
+        if (data.kind === 'revert') toast.success('Reversión aplicada', `${data.name} queda ${data.targetVersion ? `en la versión ${data.targetVersion}` : 'sin instalar'}${changes}`);
+        else toast.success('Paquete aplicado', `${data.name} v${data.version}${changes}`);
         await refresh();
       }
       setComment('');
@@ -125,6 +143,7 @@ function ReviewDialog({ id, env, onClose, onChanged }: { id: number | null; env:
   }
 
   const open = data && (data.status === 'pending' || data.status === 'approved');
+  const isRevert = data?.kind === 'revert';
   const diff = data?.diff;
   const needsArchive = !!open && (diff?.localArchives.length ?? 0) > 0 && !confirmArchive;
   const err = actionError ?? (error instanceof ApiError ? error : null);
@@ -133,7 +152,7 @@ function ReviewDialog({ id, env, onClose, onChanged }: { id: number | null; env:
       open={id !== null}
       onClose={() => { if (!busy) onClose(); }}
       size="lg"
-      title={data ? `${data.name} v${data.version}` : 'Paquete'}
+      title={data ? importTitle(data) : 'Paquete'}
       description={data?.description || 'Revisa el diff contra este entorno antes de aplicarlo.'}
       footer={
         <>
@@ -147,9 +166,14 @@ function ReviewDialog({ id, env, onClose, onChanged }: { id: number | null; env:
               title={needsArchive ? 'Confirma primero los campos que se archivarán' : undefined}>Aprobar</Button>
           )}
           {open && (
-            <Button variant="primary" icon={Rocket} loading={busy === 'apply'} disabled={!!busy || !data?.canApply || needsArchive} onClick={() => void act('apply')}
+            <Button variant="primary" icon={isRevert ? Undo2 : Rocket} loading={busy === 'apply'} disabled={!!busy || !data?.canApply || needsArchive} onClick={() => void act('apply')}
               title={data?.canApply && needsArchive ? 'Confirma primero los campos que se archivarán' : undefined}>
-              Aplicar paquete
+              {isRevert ? 'Aplicar reversión' : 'Aplicar paquete'}
+            </Button>
+          )}
+          {data?.canRevert && (
+            <Button icon={RotateCcw} loading={busy === 'revert'} disabled={!!busy} onClick={() => void act('revert')}>
+              {data.previousVersion ? 'Revertir a la versión anterior' : 'Revertir la instalación'}
             </Button>
           )}
         </>
@@ -162,25 +186,47 @@ function ReviewDialog({ id, env, onClose, onChanged }: { id: number | null; env:
           <div className="module-summary">
             <div className="module-summary-item">
               <PackageCheck size={16} aria-hidden />
-              <div><div className="subtle">Versión</div><div>{data.status === 'applied' ? `${data.previousVersion ?? 'Sin instalar'} → ${data.version}` : `${data.installedVersion ?? 'Sin instalar'} → ${data.version}`}</div></div>
+              <div><div className="subtle">Versión</div><div>{isRevert ? `${data.version} → ${data.targetVersion ?? 'Sin instalar'}`
+                : data.status === 'applied' || data.status === 'reverted' ? `${data.previousVersion ?? 'Sin instalar'} → ${data.version}`
+                : `${data.installedVersion ?? 'Sin instalar'} → ${data.version}`}</div></div>
             </div>
-            <div className="module-summary-item">
-              <GitCompareArrows size={16} aria-hidden />
-              <div><div className="subtle">Origen</div><div>{data.sourceEnvironment ?? 'Desconocido'}{data.exportedAt && <span className="subtle"> · {formatDateTime(data.exportedAt)}</span>}</div></div>
-            </div>
-            <div className="module-summary-item">
-              <ShieldCheck size={16} aria-hidden />
-              <div><div className="subtle">Firma</div><div>{data.signed ? (env?.signing ? 'Firmado y verificado' : 'Firmado (este entorno no tiene clave para verificarlo)') : 'Sin firma'}</div></div>
-            </div>
+            {isRevert ? (
+              <div className="module-summary-item">
+                <Undo2 size={16} aria-hidden />
+                <div><div className="subtle">Deshace</div>
+                  {/* Regresión (verificación 017, F-02): enlace alineado con su etiqueta, no un botón con relleno. */}
+                  <div><button type="button" className="env-link" onClick={() => onOpen(data.revertOf!)} aria-label={`Ver la aplicación #${data.revertOf}`}>Aplicación #{data.revertOf}</button></div></div>
+              </div>
+            ) : (
+              <>
+                <div className="module-summary-item">
+                  <GitCompareArrows size={16} aria-hidden />
+                  <div><div className="subtle">Origen</div><div>{data.sourceEnvironment ?? 'Desconocido'}{data.exportedAt && <span className="subtle"> · {formatDateTime(data.exportedAt)}</span>}</div></div>
+                </div>
+                <div className="module-summary-item">
+                  <ShieldCheck size={16} aria-hidden />
+                  <div><div className="subtle">Firma</div><div>{data.signed ? (env?.signing ? 'Firmado y verificado' : 'Firmado (este entorno no tiene clave para verificarlo)') : 'Sin firma'}</div></div>
+                </div>
+              </>
+            )}
             <div className="module-summary-item">
               <Fingerprint size={16} aria-hidden />
               <div className="grow" style={{ minWidth: 0 }}><div className="subtle">Huella (SHA-256)</div><div className="mono env-hash" aria-label="Huella del paquete">{data.hash}</div></div>
             </div>
+            {data.snapshot && (
+              <div className="module-summary-item">
+                <Camera size={16} aria-hidden />
+                <div className="grow" style={{ minWidth: 0 }}>
+                  <div className="subtle">{isRevert ? 'Vuelve a la instantánea' : 'Instantánea antes de aplicar'}</div>
+                  <div className="mono env-hash" aria-label="Huella de la instantánea" title={`Después: ${data.snapshot.afterHash}`}>{data.snapshot.beforeHash}</div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Quién hizo qué (H4 CA3): la misma información queda en la auditoría. */}
           <ul className="env-trail subtle">
-            <li>Subido por {data.uploadedBy} · {formatDateTime(data.uploadedAt)}</li>
+            <li>{isRevert ? 'Pedida por' : 'Subido por'} {data.uploadedBy} · {formatDateTime(data.uploadedAt)}</li>
             {data.reviewedBy && data.status !== 'rejected' && (
               <li>Aprobado por {data.reviewedBy} · {formatDateTime(data.reviewedAt)}{data.reviewComment && <> · «{data.reviewComment}»</>}</li>
             )}
@@ -191,7 +237,22 @@ function ReviewDialog({ id, env, onClose, onChanged }: { id: number | null; env:
           {data.status === 'rejected' && (
             <Alert tone="danger" title={`Rechazado por ${data.reviewedBy ?? '—'}`}>{data.reviewComment}</Alert>
           )}
-          {data.status === 'applied' && <Alert tone="info" icon={CheckCircle2} title="Paquete aplicado">El modelo de este entorno ya tiene esta versión.</Alert>}
+          {data.status === 'applied' && (isRevert ? (
+            <Alert tone="info" icon={CheckCircle2} title="Reversión aplicada">
+              {data.targetVersion ? `El entorno volvió a la versión ${data.targetVersion}.` : 'El paquete dejó de estar instalado.'} Lo que creó se archivó con sus datos.
+            </Alert>
+          ) : (
+            <Alert tone="info" icon={CheckCircle2} title="Paquete aplicado">
+              El modelo de este entorno ya tiene esta versión.
+              {!data.canRevert && data.revertBlockedReason && <div className="subtle">{data.revertBlockedReason}</div>}
+            </Alert>
+          ))}
+          {data.status === 'reverted' && (
+            <Alert tone="info" icon={RotateCcw} title="Paquete revertido"
+              action={data.revertedBy ? <Button size="sm" variant="ghost" onClick={() => onOpen(data.revertedBy!)}>Ver la reversión</Button> : undefined}>
+              Una reversión aplicada deshizo esta versión. Para volver a tenerla, sube de nuevo el paquete.
+            </Alert>
+          )}
 
           {diff && (
             <>
@@ -212,12 +273,21 @@ function ReviewDialog({ id, env, onClose, onChanged }: { id: number | null; env:
               )}
               <RolesSummary roles={diff.roles} />
               {diff.empty ? (
-                <Alert tone="info" title="Sin cambios en el modelo">Este entorno ya coincide con el paquete: al aplicarlo solo se registra la versión.</Alert>
+                <Alert tone="info" title="Sin cambios en el modelo">{isRevert
+                  ? 'El modelo ya coincide con la versión anterior: al aplicarla solo se registra la versión.'
+                  : 'Este entorno ya coincide con el paquete: al aplicarlo solo se registra la versión.'}</Alert>
               ) : (diff.steps.length > 0 || diff.errors.length > 0) && (
                 <section aria-labelledby="pkg-diff">
                   <h3 id="pkg-diff" className="section-title">Cambios en este entorno</h3>
+                  {/* Regresión (verificación 017, F-01): con conflictos y sin errores no hay «puntos marcados» que corregir. */}
                   <PlanPreviewView preview={diff}
-                    validText="Se aplica en una sola transacción, con auditoría. Ningún dato se borra: los campos que salen se archivan." />
+                    invalid={diff.errors.length === 0 && diff.conflicts.length > 0 ? {
+                      title: 'No se puede aplicar por los conflictos',
+                      text: 'Estos son los pasos que sí se pueden expresar; los conflictos de arriba bloquean la aplicación.',
+                    } : undefined}
+                    validText={isRevert
+                      ? 'Se aplica en una sola transacción, con auditoría. Nada se borra: lo que creó el paquete se archiva y lo que archivó se reactiva.'
+                      : 'Se aplica en una sola transacción, con auditoría. Ningún dato se borra: los campos que salen se archivan.'} />
                 </section>
               )}
               {!data.canApply && data.blockedReason && <Alert tone="warning" title={data.blockedReason} />}
@@ -286,13 +356,16 @@ function ReceivedTab({ env }: { env: EnvironmentInfo | undefined }) {
                 <tbody>
                   {data.map((p) => (
                     <tr key={p.id}>
-                      <td><div style={{ fontWeight: 500 }}>{p.name}</div><div className="subtle mono" style={{ fontSize: 'var(--text-xs)' }}>{p.packageId}</div></td>
-                      <td className="mono" style={{ whiteSpace: 'nowrap' }}>{p.previousVersion ? `${p.previousVersion} → ` : ''}{p.version}</td>
+                      <td>
+                        <div style={{ fontWeight: 500 }}>{p.kind === 'revert' ? <><Undo2 size={13} aria-hidden /> Reversión de {p.name}</> : p.name}</div>
+                        <div className="subtle mono" style={{ fontSize: 'var(--text-xs)' }}>{p.packageId}</div>
+                      </td>
+                      <td className="mono" style={{ whiteSpace: 'nowrap' }}>{versionText(p)}</td>
                       <td><Badge tone={statusTone[p.status]}>{statusLabel[p.status]}</Badge></td>
                       <td className="mono" style={{ fontSize: 'var(--text-sm)' }} title={p.hash}>{shortHash(p.hash)}</td>
                       <td>{p.uploadedBy}<div className="subtle" style={{ fontSize: 'var(--text-sm)' }}>{formatDateTime(p.uploadedAt)}</div></td>
                       <td style={{ textAlign: 'right' }}>
-                        <Button size="sm" variant="ghost" icon={Eye} onClick={() => setReviewing(p.id)} aria-label={`Revisar ${p.name} v${p.version}`}>Revisar</Button>
+                        <Button size="sm" variant="ghost" icon={Eye} onClick={() => setReviewing(p.id)} aria-label={`Revisar ${importTitle(p)}`}>Revisar</Button>
                       </td>
                     </tr>
                   ))}
@@ -302,7 +375,7 @@ function ReceivedTab({ env }: { env: EnvironmentInfo | undefined }) {
           )}
         </div>
       )}
-      <ReviewDialog id={reviewing} env={env} onClose={() => setReviewing(null)} onChanged={() => setTick((t) => t + 1)} />
+      <ReviewDialog id={reviewing} env={env} onClose={() => setReviewing(null)} onChanged={() => setTick((t) => t + 1)} onOpen={setReviewing} />
     </div>
   );
 }
