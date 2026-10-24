@@ -20,10 +20,10 @@ public sealed class AssistantProviderException(string code, Exception? inner = n
 /// <summary>Spec 011: el LLM visto por el ERP. Recibe texto y devuelve texto: no tiene herramientas ni acceso al entorno.</summary>
 public interface IAssistantModel
 {
-    Task<ModelReply> CompleteAsync(string apiKey, string contextJson, IReadOnlyList<AssistantTurn> messages, CancellationToken ct);
+    Task<ModelReply> CompleteAsync(AssistantCredential credential, string contextJson, IReadOnlyList<AssistantTurn> messages, CancellationToken ct);
 
     /// <summary>Comprueba que el proveedor acepta la clave (consulta el modelo configurado; no genera texto).</summary>
-    Task VerifyAsync(string apiKey, CancellationToken ct);
+    Task VerifyAsync(AssistantCredential credential, CancellationToken ct);
 }
 
 /// <summary>Claude por el SDK oficial de Anthropic, con salida estructurada <c>{ explanation, plan }</c>.</summary>
@@ -32,7 +32,7 @@ public sealed class AnthropicAssistantModel : IAssistantModel, IDisposable
     private readonly AssistantOptions options;
     private readonly ILogger<AnthropicAssistantModel> log;
     private readonly Lock gate = new();
-    private (string Key, IAnthropicClient Client)? current;
+    private (AssistantCredential Credential, IAnthropicClient Client)? current;
 
     private static readonly Dictionary<string, JsonElement> Schema = new()
     {
@@ -56,24 +56,27 @@ public sealed class AnthropicAssistantModel : IAssistantModel, IDisposable
     /// Un cliente por clave (la clave puede cambiar desde la app). Siempre con la clave explícita: así el SDK no toma
     /// credenciales del equipo (variables o perfiles).
     /// </summary>
-    private IAnthropicClient Client(string apiKey)
+    private IAnthropicClient Client(AssistantCredential credential)
     {
         lock (gate)
         {
-            if (current is { } c && c.Key == apiKey) return c.Client;
+            if (current is { } c && c.Credential == credential) return c.Client;
             IAnthropicClient client = new AnthropicClient
             {
-                ApiKey = apiKey,
+                ApiKey = credential.ApiKey,
                 MaxRetries = 1,
                 Timeout = TimeSpan.FromSeconds(options.TimeoutSeconds),
             };
+            // Una clave de organización (no ligada a un espacio de trabajo) exige elegir uno en cada petición.
+            if (credential.WorkspaceId is { } workspace)
+                client = client.WithOptions(o => o with { ExtraHeaders = new Dictionary<string, string> { ["anthropic-workspace-id"] = workspace } });
             if (options.BaseUrl is not null) client = client.WithOptions(o => o with { BaseUrl = options.BaseUrl.ToString().TrimEnd('/') });
-            current = (apiKey, client);
+            current = (credential, client);
             return client;
         }
     }
 
-    public async Task<ModelReply> CompleteAsync(string apiKey, string contextJson, IReadOnlyList<AssistantTurn> messages, CancellationToken ct)
+    public async Task<ModelReply> CompleteAsync(AssistantCredential credential, string contextJson, IReadOnlyList<AssistantTurn> messages, CancellationToken ct)
     {
         var parameters = new MessageCreateParams
         {
@@ -90,7 +93,7 @@ public sealed class AnthropicAssistantModel : IAssistantModel, IDisposable
         };
         try
         {
-            var response = await Client(apiKey).Messages.Create(parameters, ct);
+            var response = await Client(credential).Messages.Create(parameters, ct);
             var text = string.Concat(response.Content.Select(b => b.Value).OfType<TextBlock>().Select(t => t.Text));
             return new ModelReply(text, response.StopReason?.ToString(), response.Usage.InputTokens, response.Usage.OutputTokens);
         }
@@ -98,9 +101,9 @@ public sealed class AnthropicAssistantModel : IAssistantModel, IDisposable
         catch (Exception ex) { throw Fail(ex); }
     }
 
-    public async Task VerifyAsync(string apiKey, CancellationToken ct)
+    public async Task VerifyAsync(AssistantCredential credential, CancellationToken ct)
     {
-        try { await Client(apiKey).Models.Retrieve(options.Model, new ModelRetrieveParams(), ct); }
+        try { await Client(credential).Models.Retrieve(options.Model, new ModelRetrieveParams(), ct); }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (Exception ex) { throw Fail(ex); }
     }
@@ -111,7 +114,10 @@ public sealed class AnthropicAssistantModel : IAssistantModel, IDisposable
         {
             AnthropicUnauthorizedException or AnthropicForbiddenException => "auth",
             AnthropicRateLimitException => "rate_limit",
-            AnthropicBadRequestException or AnthropicNotFoundException or AnthropicUnprocessableEntityException => "bad_request",
+            // Regresión F-06: una clave de organización sin espacio de trabajo responde 400 pidiendo esta cabecera.
+            AnthropicBadRequestException when ex.Message.Contains("anthropic-workspace-id", StringComparison.OrdinalIgnoreCase) => "workspace",
+            AnthropicNotFoundException => "model",
+            AnthropicBadRequestException or AnthropicUnprocessableEntityException => "bad_request",
             Anthropic5xxException => "provider",
             AnthropicIOException or HttpRequestException => "network",
             OperationCanceledException or TimeoutException => "timeout",

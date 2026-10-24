@@ -8,7 +8,7 @@ proyecto pidió usar la API de Anthropic. La constitución nombraba a MiniMax so
 (la IA solo propone Planes de Cambios, su salida no es confiable, la clave fuera del repositorio) no dependen del proveedor.
 
 ## Decisión
-- Proveedor: **Anthropic**, por el SDK oficial para .NET (`Anthropic` en NuGet), modelo `claude-opus-5-5` por defecto
+- Proveedor: **Anthropic**, por el SDK oficial para .NET (`Anthropic` en NuGet), modelo `claude-sonnet-5-5` por defecto (elegido por el dueño para cuidar el costo; Opus es configurable)
   (`Assistant:Model`), con salida estructurada (esquema JSON `{ explanation, plan }`) y sin herramientas.
 - Clave: la captura un administrador en *Configuración › Asistente IA* (pedido del dueño): se prueba con el proveedor,
   se guarda cifrada con Data Protection y no se vuelve a mostrar. Opcionalmente el servidor la trae por configuración

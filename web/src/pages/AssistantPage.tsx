@@ -220,7 +220,7 @@ export function AssistantPage() {
                 onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) void send(); }}
                 hint={
                   <>
-                    Se envía a Anthropic junto con la estructura del modelo (nunca tus registros) y queda en la auditoría: no escribas
+                    {st.model && <>Modelo: {st.model}. </>}Se envía a Anthropic junto con la estructura del modelo (nunca tus registros) y queda en la auditoría: no escribas
                     datos personales ni contraseñas. {prompt.length}/{max} · Ctrl+Enter para enviar · te quedan {st.remaining} de {st.requestsPerHour} solicitudes esta hora.
                   </>
                 }
@@ -328,20 +328,23 @@ function Turn({ p, onApply, onDiscard }: { p: Proposal; onApply: () => void; onD
 }
 
 /** Captura de la clave: campo de contraseña, nunca se rellena con la guardada. */
-function KeyForm({ onSaved, label = 'Clave de API de Anthropic' }: { onSaved: () => void; label?: string }) {
+function KeyForm({ onSaved, label = 'Clave de API de Anthropic', currentWorkspace }: { onSaved: () => void; label?: string; currentWorkspace?: string }) {
   const [key, setKey] = useState('');
+  const [workspace, setWorkspace] = useState(currentWorkspace ?? '');
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ apiKey?: string; workspaceId?: string; general?: string }>({});
   async function save(e: FormEvent) {
     e.preventDefault();
     setSaving(true);
-    setError(null);
+    setError({});
     try {
-      await assistantApi.setKey(key.trim());
+      await assistantApi.setKey(key.trim(), workspace.trim() || undefined);
       setKey('');
       onSaved();
     } catch (err) {
-      setError(err instanceof ApiError ? problemText(err) : 'No se pudo guardar la clave. Revisa tu conexión.');
+      if (err instanceof ApiError && (err.fieldErrors.apiKey || err.fieldErrors.workspaceId))
+        setError({ apiKey: err.fieldErrors.apiKey?.join(' '), workspaceId: err.fieldErrors.workspaceId?.join(' ') });
+      else setError({ general: err instanceof ApiError ? problemText(err) : 'No se pudo guardar la clave. Revisa tu conexión.' });
     } finally {
       setSaving(false);
     }
@@ -355,10 +358,22 @@ function KeyForm({ onSaved, label = 'Clave de API de Anthropic' }: { onSaved: ()
         spellCheck={false}
         placeholder="sk-ant-…"
         value={key}
-        error={error ?? undefined}
+        error={error.apiKey ?? error.general}
         onChange={(e) => setKey(e.target.value)}
       />
-      <Button type="submit" variant="primary" icon={Save} loading={saving} disabled={!key.trim()}>Guardar y probar</Button>
+      <Input
+        label="ID del espacio de trabajo (opcional)"
+        autoComplete="off"
+        spellCheck={false}
+        placeholder="wrkspc_…"
+        value={workspace}
+        error={error.workspaceId}
+        hint="Solo si la clave es de la organización y no de un espacio de trabajo. Está en console.anthropic.com › Settings › Workspaces."
+        onChange={(e) => setWorkspace(e.target.value)}
+      />
+      <div className="row" style={{ justifyContent: 'flex-end' }}>
+        <Button type="submit" variant="primary" icon={Save} loading={saving} disabled={!key.trim()}>Guardar y probar</Button>
+      </div>
     </form>
   );
 }
@@ -385,7 +400,7 @@ function KeyDialog({ open, status, onClose, onChanged }: { open: boolean; status
         open={open && !confirmClear}
         onClose={onClose}
         title="Clave de Anthropic"
-        description={status.keyUpdatedAt ? `Guardada por ${status.keyUpdatedBy} el ${formatDateTime(status.keyUpdatedAt)}.` : undefined}
+        description={status.keyUpdatedAt ? `Guardada por ${status.keyUpdatedBy} el ${formatDateTime(status.keyUpdatedAt)}${status.workspaceId ? ` · espacio de trabajo ${status.workspaceId}` : ''}.` : undefined}
         footer={
           <>
             <Button variant="danger" icon={Trash2} onClick={() => setConfirmClear(true)}>Quitar clave</Button>
@@ -395,7 +410,7 @@ function KeyDialog({ open, status, onClose, onChanged }: { open: boolean; status
       >
         <div className="stack">
           <p className="muted" style={{ margin: 0 }}>Por seguridad la clave guardada no se muestra. Para cambiarla, pega una nueva: se prueba antes de reemplazar la actual.</p>
-          <KeyForm label="Nueva clave de API" onSaved={() => onChanged('Clave reemplazada')} />
+          <KeyForm label="Nueva clave de API" currentWorkspace={status.workspaceId} onSaved={() => onChanged('Clave reemplazada')} />
         </div>
       </Dialog>
       <ConfirmDialog

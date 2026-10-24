@@ -8,9 +8,11 @@ namespace Erp.Api.Assistant;
 /// </summary>
 public sealed record AssistantOptions
 {
-    public const string DefaultModel = "claude-opus-5-5";
+    public const string DefaultModel = "claude-sonnet-5-5";
 
     public string? ApiKey { get; init; }
+    /// <summary>Con una clave de organización del servidor: espacio de trabajo (cabecera <c>anthropic-workspace-id</c>).</summary>
+    public string? WorkspaceId { get; init; }
     public string Model { get; init; } = DefaultModel;
     /// <summary>Solo pruebas: proveedor simulado. Fuera de loopback debe ser https (la clave no viaja en claro).</summary>
     public Uri? BaseUrl { get; init; }
@@ -32,6 +34,7 @@ public sealed record AssistantOptions
         var o = new AssistantOptions
         {
             ApiKey = s["AnthropicApiKey"]?.Trim(),
+            WorkspaceId = string.IsNullOrWhiteSpace(s["AnthropicWorkspaceId"]) ? null : s["AnthropicWorkspaceId"]!.Trim(),
             Model = string.IsNullOrEmpty(model) ? DefaultModel : model,
             BaseUrl = ParseBaseUrl(s["BaseUrl"]),
             MaxPromptChars = Clamp(s.GetValue("MaxPromptChars", 4000), 100, 20_000),
@@ -41,6 +44,8 @@ public sealed record AssistantOptions
             RepairAttempts = Clamp(s.GetValue("RepairAttempts", 2), 0, 5),
             MaxContextChars = Clamp(s.GetValue("MaxContextChars", 200_000), 10_000, 2_000_000),
         };
+        if (o.WorkspaceId is not null && !AssistantKeys.IsWorkspaceId(o.WorkspaceId))
+            throw new InvalidOperationException("Assistant:AnthropicWorkspaceId no es un id de espacio de trabajo válido.");
         if (o.Model.Length > 100 || o.Model.Any(c => !(char.IsAsciiLetterOrDigit(c) || c is '-' or '.' or '_')))
             throw new InvalidOperationException("Assistant:Model no es un identificador de modelo válido.");
         return o;

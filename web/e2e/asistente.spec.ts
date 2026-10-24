@@ -13,6 +13,9 @@ const PWD = 'frase larga del asistente 2026';
 const SECRET_VALUE = 'DATO-PRIVADO-7781';
 const VIEW_LABEL = 'Etiqueta de registro 4711';
 const API_KEY = 'sk-ant-e2e-clave-ficticia-0123456789';
+// Clave de organización (no ligada a un espacio de trabajo): Anthropic exige la cabecera anthropic-workspace-id.
+const ORG_KEY = 'sk-ant-e2e-clave-de-organizacion-0000';
+const WORKSPACE = 'wrkspc_e2e01';
 
 // ---------------- Proveedor simulado ----------------
 type Captured = { headers: Record<string, string | string[] | undefined>; body: {
@@ -35,10 +38,17 @@ test.beforeAll(async () => {
       // Verificación de la clave al guardarla: GET /v1/models/{id}. Solo la clave de la suite es válida.
       if (req.method === 'GET') {
         verified.push(req.headers.authorization ?? '');
+        const ok = { type: 'model', id: 'claude-sonnet-5-5', display_name: 'Claude Sonnet 5.5', created_at: '2026-01-01T00:00:00Z' };
+        if (req.headers.authorization === `Bearer ${ORG_KEY}`) {
+          // El mensaje que devuelve Anthropic (hallazgo F-06) para una clave de organización sin espacio de trabajo.
+          const workspace = req.headers['anthropic-workspace-id'];
+          res.statusCode = workspace === WORKSPACE ? 200 : 400;
+          res.end(JSON.stringify(workspace === WORKSPACE ? ok : { type: 'error', error: { type: 'invalid_request_error',
+            message: 'This API key is not scoped to a workspace, so this request must include the anthropic-workspace-id header with the ID of the workspace to use. Add the header, or use an API key that is scoped to a workspace.' } }));
+          return;
+        }
         res.statusCode = req.headers.authorization === `Bearer ${API_KEY}` ? 200 : 401;
-        res.end(JSON.stringify(res.statusCode === 200
-          ? { type: 'model', id: 'claude-opus-5-5', display_name: 'Claude Opus 5.5', created_at: '2026-01-01T00:00:00Z' }
-          : { type: 'error', error: { type: 'authentication_error', message: 'invalid x-api-key' } }));
+        res.end(JSON.stringify(res.statusCode === 200 ? ok : { type: 'error', error: { type: 'authentication_error', message: 'invalid x-api-key' } }));
         return;
       }
       captured.push({ headers: req.headers, body: JSON.parse(raw) });
@@ -53,7 +63,7 @@ test.beforeAll(async () => {
         plan: next.plan === undefined ? '' : typeof next.plan === 'string' ? next.plan : JSON.stringify(next.plan),
       });
       res.end(JSON.stringify({
-        id: `msg_e2e_${captured.length}`, type: 'message', role: 'assistant', model: 'claude-opus-5-5',
+        id: `msg_e2e_${captured.length}`, type: 'message', role: 'assistant', model: 'claude-sonnet-5-5',
         content: [{ type: 'text', text: output }], stop_reason: next.stop ?? 'end_turn', stop_sequence: null,
         usage: { input_tokens: 1500, output_tokens: 250 },
       }));
@@ -155,7 +165,7 @@ test('H3 CA4: sin clave el asistente lo explica; solo el administrador la guarda
   await expect(page.getByText('Clave guardada')).toBeVisible();
   await expect(page.getByLabel('Describe el cambio')).toBeVisible();
   const status = await (await admin.get('/api/assistant')).json();
-  expect(status).toMatchObject({ configured: true, model: 'claude-opus-5-5', keySource: 'app', keyUpdatedBy: 'Administrador', requestsPerHour: 30 });
+  expect(status).toMatchObject({ configured: true, model: 'claude-sonnet-5-5', keySource: 'app', keyUpdatedBy: 'Administrador', requestsPerHour: 30 });
   expect(JSON.stringify(status)).not.toContain(API_KEY);
   expect((await modelador.get('/api/assistant').then((r) => r.json())).configured).toBe(true);
 
@@ -165,7 +175,7 @@ test('H3 CA4: sin clave el asistente lo explica; solo el administrador la guarda
     { encoding: 'utf8' }).trim();
   expect(stored).toMatch(/^cifrada:\d{2,}$/);
   const audit = (await (await admin.get('/api/audit', { params: { action: 'assistant.key' } })).json()).items;
-  expect(audit[0].after).toEqual({ action: 'set' });
+  expect(audit[0].after).toMatchObject({ action: 'set' });
   expect(JSON.stringify(audit)).not.toContain('e2e-clave-ficticia');
 });
 
@@ -192,7 +202,7 @@ test('H1 CA1 · CA2 + H3 CA2: propone con la vista previa del modelador y solo e
   // El SDK oficial (v13) envía la clave como «Authorization: Bearer».
   expect(req.headers.authorization).toBe(`Bearer ${API_KEY}`);
   expect(req.headers['anthropic-version']).toBeTruthy();
-  expect(req.body.model).toBe('claude-opus-5-5');
+  expect(req.body.model).toBe('claude-sonnet-5-5');
   expect(req.body.output_config?.format?.type).toBe('json_schema');
   const system = req.body.system.map((s) => s.text).join('\n');
   expect(system).toContain('<modelo>');
@@ -438,7 +448,7 @@ test('H4 CA1 · CA2 · CA3: cada solicitud queda registrada con su resultado, mo
   expect(details.some((d: { status: string; errorCode?: string }) => d.status === 'failed' && d.errorCode === 'provider')).toBe(true);
   expect(details.some((d: { status: string }) => d.status === 'answer')).toBe(true);
   for (const d of details) {
-    expect(d.model).toBe('claude-opus-5-5');
+    expect(d.model).toBe('claude-sonnet-5-5');
     expect(d.contextHash).toMatch(/^[0-9a-f]{64}$/);
   }
   expect(details.find((d: { attempts: number }) => d.attempts === 2)).toMatchObject({ inputTokens: 3000, outputTokens: 500 });
@@ -463,12 +473,13 @@ test('Asistente sin desbordes ni elementos tapados de 320 a 760 px', async ({ pa
     expect(overflow, `desborde a ${width}px`).toBeLessThanOrEqual(0);
     const button = page.getByRole('button', { name: 'Pedir propuesta' });
     await button.scrollIntoViewIfNeeded();
-    const visible = await button.evaluate((el) => {
+    // Al angostar la ventana el menú lateral se cierra con una transición: se mide cuando terminó.
+    await expect(page.getByLabel('Navegación principal').getByRole('link', { name: 'Inicio' })).not.toBeInViewport();
+    await expect.poll(() => button.evaluate((el) => {
       const r = el.getBoundingClientRect();
       const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
       return !!hit && (hit === el || el.contains(hit));
-    });
-    expect(visible, `«Pedir propuesta» visible a ${width}px`).toBe(true);
+    }), { message: `«Pedir propuesta» visible a ${width}px` }).toBe(true);
   }
   await page.setViewportSize({ width: 1280, height: 800 });
 });
@@ -521,6 +532,25 @@ test('H3 CA4: el administrador reemplaza o quita la clave desde un diálogo; la 
   await dialog.getByLabel('Nueva clave de API').fill('sk-ant-otra-clave-rechazada-000000');
   await dialog.getByRole('button', { name: 'Guardar y probar' }).click();
   await expect(dialog.getByText('Anthropic rechazó la clave')).toBeVisible();
+
+  // Regresión (prueba real del dueño, F-06): con una clave de organización Anthropic pide un espacio de trabajo, y la
+  // pantalla decía «no tiene acceso al modelo». Ahora lo explica junto al campo del espacio de trabajo y, con él, guarda
+  // la clave y envía la cabecera anthropic-workspace-id en cada petición.
+  await dialog.getByLabel('Nueva clave de API').fill(ORG_KEY);
+  await dialog.getByRole('button', { name: 'Guardar y probar' }).click();
+  await expect(dialog.getByText(/no está ligada a un espacio de trabajo/)).toBeVisible();
+  await expect(dialog.getByText(/no tiene acceso al modelo/)).toHaveCount(0);
+  await dialog.getByLabel('ID del espacio de trabajo (opcional)').fill(WORKSPACE);
+  await dialog.getByRole('button', { name: 'Guardar y probar' }).click();
+  await expect(page.getByText('Clave reemplazada')).toBeVisible();
+  expect(await (await admin.get('/api/assistant')).json()).toMatchObject({ configured: true, keySource: 'app', workspaceId: WORKSPACE });
+  script.push({ explanation: 'Con espacio de trabajo.' });
+  expect((await admin.post('/api/assistant/requests', { data: { prompt: 'prueba con espacio de trabajo' } })).status()).toBe(200);
+  expect(captured.at(-1)!.headers['anthropic-workspace-id']).toBe(WORKSPACE);
+  expect(captured.at(-1)!.headers.authorization).toBe(`Bearer ${ORG_KEY}`);
+
+  await page.getByRole('button', { name: 'Clave de Anthropic' }).click();
+  await expect(dialog.getByText(`espacio de trabajo ${WORKSPACE}`)).toBeVisible();
   await dialog.getByRole('button', { name: 'Quitar clave' }).click();
   await page.getByRole('dialog', { name: 'Quitar la clave de Anthropic' }).getByRole('button', { name: 'Quitar clave' }).click();
   await expect(page.getByText('Clave quitada')).toBeVisible();
@@ -528,7 +558,7 @@ test('H3 CA4: el administrador reemplaza o quita la clave desde un diálogo; la 
   expect((await (await admin.get('/api/assistant')).json()).configured).toBe(false);
   expect((await admin.post('/api/assistant/requests', { data: { prompt: 'hola' } })).status()).toBe(503);
   const audit = (await (await admin.get('/api/audit', { params: { action: 'assistant.key' } })).json()).items;
-  expect(audit[0].after).toEqual({ action: 'clear' });
+  expect(audit[0].after).toMatchObject({ action: 'clear' });
 });
 
 test('limpieza: los catálogos de prueba se archivan para no alargar el menú de las suites siguientes', async () => {

@@ -525,7 +525,9 @@ export interface PackageImport {
 export interface AssistantStatus {
   configured: boolean; model: string | null; maxPromptChars: number; requestsPerHour: number; remaining: number;
   /** server: user-secrets o variable de entorno; app: guardada por un administrador desde esta pantalla. */
-  keySource: 'server' | 'app' | null; keyUpdatedAt?: string; keyUpdatedBy?: string; canConfigure: boolean;
+  keySource: 'server' | 'app' | null; keyUpdatedAt?: string; keyUpdatedBy?: string;
+  /** Espacio de trabajo de Anthropic (solo con claves de organización). */
+  workspaceId?: string; canConfigure: boolean;
 }
 export type ProposalStatus = 'proposed' | 'invalid' | 'answer' | 'failed' | 'applied' | 'discarded' | 'superseded';
 export interface Proposal {

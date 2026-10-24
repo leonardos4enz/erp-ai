@@ -442,6 +442,7 @@ public static class Bootstrap
             UpdatedBy int NOT NULL REFERENCES meta.[User](Id),
             UpdatedAt datetime2(3) NOT NULL DEFAULT SYSUTCDATETIME()
         );
+        IF COL_LENGTH('meta.AssistantKey', 'WorkspaceId') IS NULL ALTER TABLE meta.AssistantKey ADD WorkspaceId nvarchar(100) NULL;
         IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_AssistantRequest_User')
             CREATE INDEX IX_AssistantRequest_User ON meta.AssistantRequest (UserId, CreatedAt);
         IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_AssistantRequest_Conversation')

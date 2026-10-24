@@ -71,7 +71,7 @@ Sesión sin interlocutor para las preguntas de diseño; el dueño decidió el pr
 para revisión.
 
 - **Proveedor: Anthropic (Claude), no MiniMax.** El dueño lo pidió al arrancar la spec (2026-10-23). Se usa el SDK
-  oficial de Anthropic para .NET con el modelo `claude-opus-5-5` (configurable) y salida estructurada (JSON con esquema).
+  oficial de Anthropic para .NET con el modelo `claude-sonnet-5-5` (configurable; el dueño eligió Sonnet por costo) y salida estructurada (JSON con esquema).
   La constitución nombraba a MiniMax solo como ejemplo de secreto; el cambio queda en [ADR-0003](../../../adr/0003-asistente-ia-anthropic.md).
 - **La clave se configura en la app** (decisión del dueño, a mitad de la sesión): el superusuario la captura en
   *Configuración › Asistente IA*; se guarda cifrada con Data Protection en `meta.AssistantKey`, como los secretos de

@@ -22,9 +22,9 @@ public sealed record AssistantRequestBody(string? Prompt, int? ConversationId);
 /// <param name="KeySource"><c>server</c> (user-secrets o variable de entorno), <c>app</c> (guardada por un administrador) o nulo.</param>
 /// <param name="CanConfigure">Quien consulta puede poner o quitar la clave desde la app (superusuario, sin clave del servidor).</param>
 public sealed record AssistantStatus(bool Configured, string? Model, int MaxPromptChars, int RequestsPerHour, int Remaining,
-    string? KeySource, DateTime? KeyUpdatedAt, string? KeyUpdatedBy, bool CanConfigure);
+    string? KeySource, DateTime? KeyUpdatedAt, string? KeyUpdatedBy, string? WorkspaceId, bool CanConfigure);
 
-public sealed record AssistantKeyBody(string? ApiKey);
+public sealed record AssistantKeyBody(string? ApiKey, string? WorkspaceId = null);
 
 public sealed record ConversationSummary(int Id, string Title, int Turns, DateTime UpdatedAt, string LastStatus);
 
@@ -66,7 +66,7 @@ public sealed class AssistantService(Db db, MetadataStore store, PlanService pla
         var key = await keys.InfoAsync(ct);
         var configured = key.Source is not null;
         return new(configured, configured ? options.Model : null, options.MaxPromptChars, options.RequestsPerHour,
-            Math.Max(0, options.RequestsPerHour - used), key.Source, key.UpdatedAt, key.UpdatedBy,
+            Math.Max(0, options.RequestsPerHour - used), key.Source, key.UpdatedAt, key.UpdatedBy, key.WorkspaceId,
             user.IsSuperuser && key.Source != AssistantKeyInfo.Server);
     }
 
@@ -81,20 +81,34 @@ public sealed class AssistantService(Db db, MetadataStore store, PlanService pla
         var key = body.ApiKey?.Trim();
         if (!AssistantKeys.IsWellFormed(key))
             throw Invalid("apiKey", $"Pega la clave completa de Anthropic (entre {AssistantKeys.MinLength} y {AssistantKeys.MaxLength} caracteres, sin espacios).");
-        try { await llm.VerifyAsync(key!, ct); }
+        var workspace = string.IsNullOrWhiteSpace(body.WorkspaceId) ? null : body.WorkspaceId.Trim();
+        if (workspace is not null && !AssistantKeys.IsWorkspaceId(workspace))
+            throw Invalid("workspaceId", "El ID del espacio de trabajo solo lleva letras, números, guiones y guiones bajos (p. ej. wrkspc_01AbC…).");
+        var credential = new AssistantCredential(key!, workspace);
+        try { await llm.VerifyAsync(credential, ct); }
         catch (AssistantProviderException ex) when (ex.Code == "auth")
         {
             throw Invalid("apiKey", "Anthropic rechazó la clave. Revisa que esté completa y activa en console.anthropic.com.");
         }
-        catch (AssistantProviderException ex) when (ex.Code == "bad_request")
+        catch (AssistantProviderException ex) when (ex.Code == "workspace")
+        {
+            throw Invalid("workspaceId", workspace is null
+                ? "Esta clave es de la organización y no está ligada a un espacio de trabajo: escribe el ID del espacio de trabajo (console.anthropic.com › Settings › Workspaces) o crea la clave dentro de un espacio de trabajo."
+                : "Anthropic no aceptó ese espacio de trabajo para esta clave. Revisa el ID en console.anthropic.com › Settings › Workspaces.");
+        }
+        catch (AssistantProviderException ex) when (ex.Code == "model")
         {
             throw Invalid("apiKey", $"La clave funciona, pero no tiene acceso al modelo {options.Model}.");
+        }
+        catch (AssistantProviderException ex) when (ex.Code == "bad_request")
+        {
+            throw Invalid("apiKey", "Anthropic rechazó la verificación de la clave. Revisa la clave y el espacio de trabajo.");
         }
         catch (AssistantProviderException)
         {
             throw new AppException(StatusCodes.Status502BadGateway, "No se pudo comprobar la clave con Anthropic. Intenta de nuevo en unos minutos.");
         }
-        await SaveKeyAsync(http, key, "set", ct);
+        await SaveKeyAsync(http, credential, "set", ct);
         return await StatusAsync(user, ct);
     }
 
@@ -106,12 +120,12 @@ public sealed class AssistantService(Db db, MetadataStore store, PlanService pla
         return await StatusAsync(user, ct);
     }
 
-    private async Task SaveKeyAsync(HttpContext http, string? key, string action, CancellationToken ct)
+    private async Task SaveKeyAsync(HttpContext http, AssistantCredential? credential, string action, CancellationToken ct)
     {
         await using var cn = await db.OpenAsync(ct);
         await using var tx = await cn.BeginTransactionAsync(ct);
-        await keys.SaveAsync(cn, tx, key, http.CurrentUser().Id);
-        await Audit.WriteAsync(cn, tx, http, AuditActions.AssistantKey, entity: "assistant", after: new { action });
+        await keys.SaveAsync(cn, tx, credential, http.CurrentUser().Id);
+        await Audit.WriteAsync(cn, tx, http, AuditActions.AssistantKey, entity: "assistant", after: new { action, workspaceId = credential?.WorkspaceId });
         await tx.CommitAsync(ct);
         keys.Invalidate();
     }
@@ -152,7 +166,7 @@ public sealed class AssistantService(Db db, MetadataStore store, PlanService pla
     {
         var user = http.CurrentUser();
         Require(user);
-        var apiKey = await keys.GetAsync(ct)
+        var credential = await keys.GetAsync(ct)
             ?? throw new AppException(StatusCodes.Status503ServiceUnavailable, "El asistente no está configurado: un administrador debe guardar la clave de Anthropic.");
         var prompt = body.Prompt?.Trim() ?? "";
         if (prompt.Length == 0) throw Invalid("prompt", "Describe el cambio que necesitas.");
@@ -191,7 +205,7 @@ public sealed class AssistantService(Db db, MetadataStore store, PlanService pla
         var outcome = new Outcome();
         try
         {
-            await RunAsync(apiKey, messages, context.Json, model, roles, boards, outcome, ct);
+            await RunAsync(credential, messages, context.Json, model, roles, boards, outcome, ct);
         }
         catch (AssistantProviderException ex)
         {
@@ -210,12 +224,12 @@ public sealed class AssistantService(Db db, MetadataStore store, PlanService pla
     }
 
     /// <summary>Llama al modelo y, si el plan no se interpreta o no compila, le devuelve los errores para que lo corrija.</summary>
-    private async Task RunAsync(string apiKey, List<AssistantTurn> messages, string context, IReadOnlyDictionary<string, EntityDef> model,
+    private async Task RunAsync(AssistantCredential credential, List<AssistantTurn> messages, string context, IReadOnlyDictionary<string, EntityDef> model,
         IReadOnlySet<string> roles, IReadOnlyDictionary<string, DashboardDef> boards, Outcome outcome, CancellationToken ct)
     {
         for (var attempt = 0; ; attempt++)
         {
-            var reply = await llm.CompleteAsync(apiKey, context, messages, ct);
+            var reply = await llm.CompleteAsync(credential, context, messages, ct);
             outcome.Attempts = attempt + 1;
             outcome.InputTokens += reply.InputTokens;
             outcome.OutputTokens += reply.OutputTokens;
@@ -400,6 +414,8 @@ public sealed class AssistantService(Db db, MetadataStore store, PlanService pla
         "rate_limit" => "El proveedor del asistente está limitando las solicitudes. Intenta en unos minutos.",
         "timeout" or "network" => "El asistente no respondió a tiempo. Intenta de nuevo.",
         "refusal" => "El asistente no pudo atender esta solicitud. Reformúlala en términos del modelo del ERP.",
+        "workspace" => "La clave del asistente necesita un espacio de trabajo de Anthropic. Un administrador debe indicarlo en Configuración › Asistente IA.",
+        "model" => "La clave del asistente no tiene acceso al modelo configurado.",
         "truncated" => "La respuesta del asistente quedó incompleta. Pide un cambio más acotado.",
         _ => "El asistente no está disponible en este momento. Intenta más tarde.",
     };

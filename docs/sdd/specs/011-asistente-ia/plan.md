@@ -27,7 +27,7 @@ El LLM no tiene herramientas, ni acceso a la base, ni credenciales del ERP: reci
 que llega al modelo pasa por el mismo compilador que el modelador, los módulos y los paquetes.
 
 ## Proveedor (`Assistant/AnthropicAssistantModel.cs`)
-- SDK oficial `Anthropic` (NuGet). `client.Messages.Create` con `Model` (`claude-opus-5-5` por defecto), `MaxTokens`,
+- SDK oficial `Anthropic` (NuGet). `client.Messages.Create` con `Model` (`claude-sonnet-5-5` por defecto), `MaxTokens`,
   `System` (instrucciones + contexto) y `OutputConfig.Format` = esquema JSON
   `{ explanation: string, plan: string }` (`plan` es el Plan de Cambios serializado, o `""` si no hay plan).
 - El cliente se crea con la clave de `Assistant:AnthropicApiKey`, `MaxRetries` 1 y `Timeout` de la configuración; con
@@ -50,7 +50,7 @@ que llega al modelo pasa por el mismo compilador que el modelador, los módulos 
 | Clave | Por defecto | Uso |
 |---|---|---|
 | `Assistant:AnthropicApiKey` | vacío | Opcional: si existe, manda sobre la de la app y no se cambia desde la UI |
-| `Assistant:Model` | `claude-opus-5-5` | Modelo de Claude |
+| `Assistant:Model` | `claude-sonnet-5-5` | Modelo de Claude |
 | `Assistant:BaseUrl` | vacío (API pública) | Solo pruebas; `https` o `http` a loopback, si no el servidor no arranca |
 | `Assistant:MaxPromptChars` | 4000 | Longitud máxima de la solicitud |
 | `Assistant:RequestsPerHour` | 20 | Por usuario, contadas en `meta.AssistantRequest` (sobrevive reinicios) |

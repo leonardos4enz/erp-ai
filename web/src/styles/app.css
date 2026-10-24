@@ -596,8 +596,7 @@ code, pre, .mono { font-family: var(--font-mono); font-size: 0.8125rem; }
 /* ---------- Spec 011: asistente IA ---------- */
 .inline-code { font-family: var(--font-mono, ui-monospace, monospace); font-size: 0.92em; background: var(--surface-2); border-radius: var(--radius-sm, 4px); padding: 1px 5px; margin: 0 3px; overflow-wrap: anywhere; }
 .assistant-setup { display: flex; flex-direction: column; gap: var(--space-3); max-width: 640px; }
-.assistant-key-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-3); align-items: start; }
-.assistant-key-form > .btn { margin-top: 1.6rem; }
+.assistant-key-form { display: flex; flex-direction: column; gap: var(--space-3); }
 .assistant-layout { display: grid; grid-template-columns: minmax(200px, 260px) minmax(0, 1fr); gap: var(--space-4); align-items: start; }
 .assistant-history { padding: var(--space-3); position: sticky; top: 0; max-height: calc(100vh - 140px); overflow-y: auto; }
 .assistant-history ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
@@ -619,7 +618,6 @@ code, pre, .mono { font-family: var(--font-mono); font-size: 0.8125rem; }
 .assistant-examples { display: grid; gap: var(--space-2); margin-top: var(--space-3); max-width: 560px; width: 100%; }
 .assistant-example { text-align: left; padding: var(--space-2) var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); color: var(--text); cursor: pointer; font: inherit; }
 .assistant-example:hover { border-color: var(--accent); }
-@media (max-width: 560px) { .assistant-key-form { grid-template-columns: minmax(0, 1fr); } .assistant-key-form > .btn { margin-top: 0; } }
 /* Regresión F-04 (011): fijo, el redactor tapaba casi media pantalla en móvil o en ventanas bajas. */
 @media (max-width: 900px), (max-height: 720px) { .assistant-composer { position: static; } }
 @media (max-width: 900px) {

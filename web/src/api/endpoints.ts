@@ -220,7 +220,7 @@ export const environmentsApi = {
 export const assistantApi = {
   status: (signal?: AbortSignal) => api<AssistantStatus>('/assistant', { signal }),
   /** El servidor la prueba con Anthropic antes de guardarla; nunca la devuelve. */
-  setKey: (apiKey: string) => api<AssistantStatus>('/assistant/key', { method: 'PUT', body: { apiKey } }),
+  setKey: (apiKey: string, workspaceId?: string) => api<AssistantStatus>('/assistant/key', { method: 'PUT', body: { apiKey, workspaceId } }),
   clearKey: () => api<AssistantStatus>('/assistant/key', { method: 'DELETE' }),
   conversations: (signal?: AbortSignal) => api<ConversationSummary[]>('/assistant/conversations', { signal }),
   conversation: (id: number, signal?: AbortSignal) => api<Conversation>(`/assistant/conversations/${id}`, { signal }),
