@@ -97,3 +97,14 @@ base desechable.
 - Con la regla `PolizaConCuentas` quitada, la póliza pendiente se captura a mano; generarla después queda pendiente.
 - El rol *Contador* no lee recepciones (la vista «Pólizas pendientes» la ve quien sí las lee); es dato del entorno (ADR-0004):
   el dueño lo asigna en *Seguridad › Roles* de cada entorno.
+
+## Estado del entorno de desarrollo (`ErpAi`, 2026-10-24)
+Lo hizo el dueño desde la UI (la sesión solo lo verificó, en modo lectura):
+- Inventario actualizado a 1.6.1; Contabilidad 1.1.0 y Costeo 1.1.0 instalados.
+- Rol *Contador* con lectura de *Recepción* (además de cuentas, periodos y pólizas del módulo).
+
+Pendiente **por decisión del dueño** (nadie usa todavía la contabilidad en este entorno): no hay periodo contable abierto y
+el almacén ALM-01 no tiene *Cuenta de inventario* ni *Cuenta de entradas por facturar*. Mientras sigan así, confirmar una
+recepción con costo en ALM-01 se rechaza (regla `PolizaConCuentas`; sin la regla, la póliza fallaría por falta de periodo).
+Para empezar a usarla: crear el periodo del mes en *Periodos contables* y asignar al almacén las cuentas 1200 y 2150 del
+catálogo inicial.
