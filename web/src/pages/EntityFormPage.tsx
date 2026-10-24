@@ -300,8 +300,9 @@ export function EntityFormPage() {
 
   function renderField(f: FieldDef, wide = false) {
     const fid = `f-${f.name}`;
-    const required = isRequiredFor(f, roles);
-    const roleHint = lockHint(f, def) ?? (!f.required && required && isEditableField(f) ? 'Obligatorio para tu rol' : undefined);
+    // Spec 013 (F-02): en un formulario de solo lectura no hay obligatorios ni pistas de edición; el aviso general explica.
+    const required = !readOnly && isRequiredFor(f, roles);
+    const roleHint = readOnly ? undefined : lockHint(f, def) ?? (!f.required && required && isEditableField(f) ? 'Obligatorio para tu rol' : undefined);
     return (
       <FieldInput
         key={f.name}

@@ -111,7 +111,8 @@ etiqueta de una referencia fuera de alcance es «(sin acceso)».
 ### 013 — Formulario en solo lectura fuera del alcance de escritura
 Origen: hallazgo F-05 de la verificación 012. El registro trae `_access` (`update`, `delete`, `reason`) con el permiso del
 rol, el alcance de escritura por registro (006/010) y el catálogo del sistema; el formulario se muestra en solo lectura,
-sin «Guardar cambios» ni «Eliminar» y con el motivo, cuando la persona solo puede consultar ese registro. El servidor
+sin «Guardar cambios» ni «Eliminar» y con el motivo, cuando la persona solo puede consultar ese registro (también
+si una transición lo saca de su alcance). El servidor
 sigue rechazando con 403. Pendiente: el listado no lo calcula por fila (no ofrece edición en línea).
 
 ## Decisión: ¿extensión con código?

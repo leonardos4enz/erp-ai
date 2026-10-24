@@ -361,6 +361,11 @@ test('Spec 013 · H1: un registro que solo se puede ver se muestra en solo lectu
   await expect(page.getByRole('button', { name: 'Guardar cambios' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Eliminar' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: /Agregar/ })).toHaveCount(0);
+  // F-02: sin marcas de obligatorio ni pistas de edición campo por campo (el aviso general lo explica).
+  await expect(page.locator('.field-required')).toHaveCount(0);
+  await expect(page.getByLabel(/^Nombre/)).not.toHaveAttribute('required');
+  await expect(page.getByText('Solo lectura para tu rol')).toHaveCount(0);
+  await expect(page.getByText('Se captura al ejecutar «Perder»')).toHaveCount(0);
   await expectAccessible(page);
   await page.context().close();
 

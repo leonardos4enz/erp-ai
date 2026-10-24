@@ -49,7 +49,7 @@ export function LinesEditor({ field, child, lines, roles, readOnly, parent, serv
                 <th className="lines-num" scope="col">#</th>
                 {columns.map((c) => (
                   <th key={c.name} scope="col" className={isNumericField(c) ? 'td-num' : undefined}>
-                    {c.label}{isRequiredFor(c, roles) && !totalsOnly(c) && <span className="field-required" aria-hidden>*</span>}
+                    {c.label}{!readOnly && isRequiredFor(c, roles) && !totalsOnly(c) && <span className="field-required" aria-hidden>*</span>}
                   </th>
                 ))}
                 {!readOnly && <th className="td-actions" scope="col"><span className="sr-only">Acciones</span></th>}
