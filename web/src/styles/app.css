@@ -420,6 +420,11 @@ code, pre, .mono { font-family: var(--font-mono); font-size: 0.8125rem; }
 .totals-row dt { color: var(--text-muted); }
 .totals-row dd { margin: 0; font-variant-numeric: tabular-nums; text-align: right; }
 .totals-grand { padding-top: var(--space-3); }
+
+/* Spec 016: datos de una ejecución (etiqueta y valor) en el detalle de la bitácora. */
+.detail-list { margin: 0; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: var(--space-2) var(--space-4); }
+.detail-list dt { color: var(--text-muted); }
+.detail-list dd { margin: 0; overflow-wrap: anywhere; }
 .totals-grand dt { color: var(--text); font-weight: 600; }
 .totals-grand dd { font-size: var(--text-lg); font-weight: 600; }
 

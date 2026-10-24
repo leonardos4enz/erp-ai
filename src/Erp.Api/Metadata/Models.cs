@@ -148,6 +148,14 @@ public static class AutomationEvents
     public static readonly IReadOnlySet<string> All = new HashSet<string> { Create, Update, EnterState, Transition };
 }
 
+/// <summary>Spec 016: cuándo corren las acciones (en la transacción del evento o después, desde la bandeja).</summary>
+public static class AutomationModes
+{
+    public const string Sync = "sync";
+    public const string Async = "async";
+    public static readonly IReadOnlySet<string> All = new HashSet<string> { Sync, Async };
+}
+
 public static class AutomationActions
 {
     public const string Update = "update";
@@ -186,6 +194,51 @@ public sealed record Automation
     public string? Transition { get; init; }
     public string? When { get; init; }
     public IReadOnlyList<AutomationAction> Actions { get; init; } = [];
+    /// <summary>Spec 016: <c>async</c> = las acciones corren después, desde la bandeja. Omitido = <c>sync</c> (005).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Mode { get; init; }
+
+    [JsonIgnore]
+    public bool IsAsync => Mode == AutomationModes.Async;
+}
+
+// ---------- Spec 016: tareas programadas ----------
+
+public static class ScheduleFrequencies
+{
+    public const string Minutes = "minutes";
+    public const string Hour = "hour";
+    public const string Day = "day";
+    public const string Week = "week";
+    public const string Month = "month";
+    public static readonly IReadOnlySet<string> All = new HashSet<string> { Minutes, Hour, Day, Week, Month };
+}
+
+/// <summary>
+/// Qué hace la tarea y con qué permisos (<c>Role</c>: rol de servicio). Si corre o no es decisión de cada entorno
+/// (<c>meta.ScheduleState</c>), como el destino de un webhook. Ver plan 016.
+/// </summary>
+public sealed record ScheduleDef
+{
+    public required string Name { get; init; }
+    public required string Label { get; init; }
+    public string? Description { get; init; }
+    public required string Every { get; init; }
+    public int? Interval { get; init; }
+    public int? Minute { get; init; }
+    public string? At { get; init; }
+    public IReadOnlyList<int>? Weekdays { get; init; }
+    public int? Day { get; init; }
+    /// <summary>Consulta: qué registros procesa cada ocurrencia (traducible a SQL).</summary>
+    public required string Where { get; init; }
+    public required string Role { get; init; }
+    public int? BatchSize { get; init; }
+    public IReadOnlyList<AutomationAction> Actions { get; init; } = [];
+
+    public const int DefaultBatchSize = 100;
+    public const int MaxBatchSize = 1000;
+    [JsonIgnore]
+    public int EffectiveBatchSize => BatchSize ?? DefaultBatchSize;
 }
 
 // ---------- Spec 006: seguridad por campo y por registro ----------
@@ -442,6 +495,8 @@ public sealed record EntityDef
     public IReadOnlyList<ReportDef>? Reports { get; init; }
     /// <summary>Spec 008: webhooks salientes (solo se envían a modeladores; el destino se configura por entorno).</summary>
     public IReadOnlyList<WebhookDef>? Webhooks { get; init; }
+    /// <summary>Spec 016: tareas programadas (solo se envían a modeladores; si corren se decide por entorno).</summary>
+    public IReadOnlyList<ScheduleDef>? Schedules { get; init; }
     /// <summary>Spec 010: cada registro pertenece a una empresa (columna de sistema <c>CompanyId</c>). Las partidas siguen a su documento.</summary>
     public bool PerCompany { get; init; }
 
@@ -489,7 +544,15 @@ public sealed record ChangePlan
 [JsonDerivedType(typeof(SetDashboardOp), "setDashboard")]
 [JsonDerivedType(typeof(ArchiveDashboardOp), "archiveDashboard")]
 [JsonDerivedType(typeof(SetWebhooksOp), "setWebhooks")]
+[JsonDerivedType(typeof(SetSchedulesOp), "setSchedules")]
 public abstract record Operation;
+
+/// <summary>Spec 016. Reemplaza las tareas programadas del catálogo.</summary>
+public sealed record SetSchedulesOp : Operation
+{
+    public required string Entity { get; init; }
+    public IReadOnlyList<ScheduleDef> Schedules { get; init; } = [];
+}
 
 /// <summary>Spec 008. Reemplaza los webhooks del catálogo.</summary>
 public sealed record SetWebhooksOp : Operation

@@ -16,7 +16,7 @@ public static class AssistantPrompt
         campo y por registro, layouts, vistas, reportes, tableros, webhooks, catálogos por empresa (perCompany) y fórmulas.
         Qué no existe en el plan y por lo tanto no puedes proponer: usuarios, roles, permisos por catálogo, empresas, tipos
         de cambio, registros o datos, módulos, paquetes de entornos ni destinos o secretos de webhooks. Si te piden algo de
-        eso, explica brevemente dónde se hace en el ERP (Usuarios y roles, Empresas, Integraciones, Módulos, Entornos) y
+        eso, explica brevemente dónde se hace en el ERP (Usuarios y roles, Empresas, Integraciones, Automatizaciones, Módulos, Entornos) y
         deja "plan" vacío. Si la solicitud es ambigua, haz la propuesta más razonable y menciona lo que supusiste; si de
         plano no se puede proponer nada útil, pregunta y deja "plan" vacío.
 
@@ -55,7 +55,8 @@ public static class AssistantPrompt
         - setRules { entity, rules: [{ name, message, assert, when?, field? }] }   (reemplaza todas; assert debe ser verdadero)
         - setAutomations { entity, merge?, automations: [{ name, label, on: create|update|enterState|transition, state?,
           transition?, when?, actions: [{ type: update|transition|create|rollup, lines?, when?, target?, set?,
-          transition?, entity?, match?: [{ field, source }], createMissing?, field?, sum?, filter? }] }] }
+          transition?, entity?, match?: [{ field, source }], createMissing?, field?, sum?, filter? }], mode?: sync|async }] }
+          mode async: las acciones corren después, fuera de la transacción del evento (no detienen a quien guarda).
         - setSecurity { entity, security: { owner?, teamOwners?, systemManaged?, fields?: [{ field, read?: string[], edit?: string[],
           editableIn?: string[] }], records?: [{ roles?, scope?: all|unitTree|unit|own, where?, access?: read|write }] } }
           (o security: null para quitarla). Los roles deben existir (lista "roles" del modelo). unitTree = la unidad del
@@ -71,6 +72,12 @@ public static class AssistantPrompt
           entity, report, label?, measure?, wide? }] } }   - archiveDashboard { name }
         - setWebhooks { entity, webhooks: [{ name, label, description?, events: [{ on, state?, transition? }], when?,
           role, fields? }] }   role: rol existente con el que se arma la carga.
+        - setSchedules { entity, schedules: [{ name, label, description?, every: minutes|hour|day|week|month, interval?
+          (minutes: 5, 10, 12, 15, 20, 30 o 60), minute? (hour), at?: "HH:mm" (day|week|month), weekdays?: 1-7 (week, 1 =
+          lunes), day?: 1-31 (month), where, role, batchSize?: 1-1000, actions: (las de setAutomations) }] }
+          where: qué registros procesa; solo campos del catálogo o de un nivel (Orden.Estado), =, <>, <, >, IN, AND/OR/NOT,
+          ISBLANK, TODAY() y ADDDAYS(TODAY(), n). Debe dejar de cumplirse cuando la acción termina (p. ej. cambia el estado).
+          role: rol de servicio existente. Llega pausada: el administrador la activa en Configuración › Automatizaciones.
 
         Field: { name, label, type, required?, unique?, maxLength?, precision?, scale?, options?, referenceEntity?,
         showInList?, requiredForRoles?, displayOrder?, defaultValue?, formula?, resultType?, prefix?, padding?,

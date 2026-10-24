@@ -22,6 +22,8 @@ public static class AutomationRules
     {
         if (a.Type == AutomationActions.Create || (a.Type == AutomationActions.Rollup && a.Target is null))
             return model.TryGetValue(a.Entity ?? "", out var t) && !t.IsArchived ? t : null;
+        // Spec 016: sin target (y sin lines), asignar o transicionar el propio registro: lo que hace una tarea programada.
+        if (a is { Target: null, Lines: null, Type: AutomationActions.Update or AutomationActions.Transition } && !scope.IsChild) return scope;
         return scope.FindField(a.Target ?? "") is { Type: FieldTypes.Reference, IsArchived: false, ReferenceEntity: { } r } &&
                model.TryGetValue(r, out var target) && !target.IsArchived ? target : null;
     }
@@ -49,20 +51,36 @@ public static class AutomationRules
             if (auto.On == AutomationEvents.Transition && e.Workflow?.Transitions.Any(t => string.Equals(t.Name, auto.Transition, StringComparison.OrdinalIgnoreCase)) != true)
                 msgs.Add($"{where}: la transición '{auto.Transition}' no existe en el proceso de {e.Name}.");
             Check(auto.When, e, "cuándo");
-            if (auto.Actions.Count is 0 or > MaxActions) msgs.Add($"{where}: necesita de 1 a {MaxActions} acciones.");
+            if (auto.Mode is not null && !AutomationModes.All.Contains(auto.Mode))
+                msgs.Add($"{where}: modo '{auto.Mode}' no válido ({string.Join(", ", AutomationModes.All)}).");
+            msgs.AddRange(ValidateActions(e, auto.Actions, model, roles, where));
+        }
+        return msgs;
+    }
 
-            for (var i = 0; i < auto.Actions.Count && i < MaxActions; i++)
-            {
-                var a = auto.Actions[i];
-                var at = $"acción {i + 1}";
-                if (!AutomationActions.All.Contains(a.Type ?? "")) { msgs.Add($"{where} › {at}: tipo '{a.Type}' no válido ({string.Join(", ", AutomationActions.All)})."); continue; }
-                var scope = Scope(e, a, model);
-                if (scope is null) { msgs.Add($"{where} › {at}: '{a.Lines}' no es un campo de partidas de {e.Name}."); continue; }
-                Check(a.When, scope, $"{at} (cuándo)");
-                msgs.AddRange(ValidateAction(a, scope, model).Select(m => $"{where} › {at}: {m}"));
-                foreach (var s in a.Set ?? []) Check(s.Value, scope, $"{at} › {s.Field}");
-                Check(a.Filter, scope, $"{at} (filtro)");
-            }
+    /// <summary>Acciones de una automatización o de una tarea programada (spec 016): mismas reglas en ambos casos.</summary>
+    public static IEnumerable<string> ValidateActions(EntityDef e, IReadOnlyList<AutomationAction> actions,
+        IReadOnlyDictionary<string, EntityDef> model, IReadOnlySet<string> roles, string where)
+    {
+        var msgs = new List<string>();
+        void Check(string? expr, EntityDef scope, string what)
+        {
+            if (string.IsNullOrWhiteSpace(expr)) return;
+            foreach (var err in ExprAnalyzer.Analyze(expr, scope, model, roles).Errors) msgs.Add($"{where} › {what}: {err}");
+        }
+        if (actions.Count is 0 or > MaxActions) msgs.Add($"{where}: necesita de 1 a {MaxActions} acciones.");
+
+        for (var i = 0; i < actions.Count && i < MaxActions; i++)
+        {
+            var a = actions[i];
+            var at = $"acción {i + 1}";
+            if (!AutomationActions.All.Contains(a.Type ?? "")) { msgs.Add($"{where} › {at}: tipo '{a.Type}' no válido ({string.Join(", ", AutomationActions.All)})."); continue; }
+            var scope = Scope(e, a, model);
+            if (scope is null) { msgs.Add($"{where} › {at}: '{a.Lines}' no es un campo de partidas de {e.Name}."); continue; }
+            Check(a.When, scope, $"{at} (cuándo)");
+            msgs.AddRange(ValidateAction(a, scope, model).Select(m => $"{where} › {at}: {m}"));
+            foreach (var s in a.Set ?? []) Check(s.Value, scope, $"{at} › {s.Field}");
+            Check(a.Filter, scope, $"{at} (filtro)");
         }
         return msgs;
     }

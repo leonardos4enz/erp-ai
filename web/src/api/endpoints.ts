@@ -1,6 +1,6 @@
 import { api } from './client';
 import type {
-  AuditEntry, ChangePlan, Company, ExchangeRate, ChangeSetSummary, DashboardResult, DashboardSummary, EntityDef, HistoryEntry, LayoutState, LookupItem, Me,
+  AuditEntry, AutomationRun, AutomationRunDetail, ScheduleSummary, ChangePlan, Company, ExchangeRate, ChangeSetSummary, DashboardResult, DashboardSummary, EntityDef, HistoryEntry, LayoutState, LookupItem, Me,
   ApiKey, AssistantStatus, BusinessUnit, PendingChange, SecurityChange, Team, Conversation, ConversationSummary, Proposal, EnvironmentInfo, ExportableCatalogs, ExportPreview, ExportRequest, ImportResult, ModuleInfo, PackageImport, ModulePreview, WebhookDelivery, WebhookSummary, Paged, PlanPreview, ReportResult, ReportSummary, Role, Row, RowList, SavedView, User, ViewFilter, ViewList,
 } from './types';
 
@@ -203,6 +203,18 @@ export const integrationsApi = {
   rotateKey: (id: number, graceHours: 0 | 24) =>
     api<{ key: ApiKey; secret: string }>(`/admin/api-keys/${id}/rotate`, { method: 'POST', body: { graceHours } }),
   revokeKey: (id: number) => api<void>(`/admin/api-keys/${id}/revoke`, { method: 'POST' }),
+};
+
+/** Spec 016: tareas programadas y bitácora de automatizaciones (solo superusuario). */
+export const automationsApi = {
+  schedules: (signal?: AbortSignal) => api<ScheduleSummary[]>('/admin/automations/schedules', { signal }),
+  setActive: (entity: string, name: string, active: boolean) =>
+    api<ScheduleSummary>(`/admin/automations/schedules/${enc(entity)}/${enc(name)}`, { method: 'PUT', body: { active } }),
+  runNow: (entity: string, name: string) => api<{ runId: number }>(`/admin/automations/schedules/${enc(entity)}/${enc(name)}/run`, { method: 'POST' }),
+  runs: (q: { kind?: string; status?: string; entity?: string; name?: string }, signal?: AbortSignal) =>
+    api<AutomationRun[]>('/admin/automations/runs', { query: q, signal }),
+  run: (id: number, signal?: AbortSignal) => api<AutomationRunDetail>(`/admin/automations/runs/${id}`, { signal }),
+  retry: (id: number) => api<void>(`/admin/automations/runs/${id}/retry`, { method: 'POST' }),
 };
 
 export const auditApi = {

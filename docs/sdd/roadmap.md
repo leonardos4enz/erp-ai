@@ -21,7 +21,7 @@ en orden, no en paralelo: casi todas tocan el núcleo del motor (`PlanCompiler`,
 | 013 Formulario en solo lectura | Implementado ([spec](specs/013-formulario-solo-lectura/spec.md)) |
 | 014 Pendientes menores y riesgos residuales | Implementado ([spec](specs/014-pendientes-menores/spec.md)) |
 | 015 Jerarquía de roles, equipos y unidades | Implementado ([spec](specs/015-jerarquia-roles-equipos/spec.md)) |
-| 016 Automatizaciones asíncronas y programadas | Planeada |
+| 016 Automatizaciones asíncronas y programadas | Implementado ([spec](specs/016-automatizaciones-asincronas/spec.md)) |
 | 017 Rollback de entornos | Planeada |
 | 018 OAuth2 (client credentials) y API OData | Planeada |
 | 019 Contabilidad y costeo | Planeada |
@@ -159,6 +159,15 @@ Señaladas por la misma auditoría. Cada una es capacidad nueva del motor y va e
   (`schedule`) con consulta declarativa de registros; ejecución con un principal de servicio y su alcance; bitácora de
   ejecuciones, reintentos y límite de lotes.
 - **Depende de:** 005, 008, 015 (con qué identidad corre una tarea programada).
+- Implementado. `mode: "async"` en una automatización deja su trabajo en `meta.AutomationRun` dentro de la transacción del
+  evento; un servicio en segundo plano lo ejecuta a nombre de quien lo disparó (recargado: dado de baja → se cancela), con
+  reintentos solo de lo transitorio y un máximo de 5 generaciones. Tareas `setSchedules` (cada N minutos, hora, día,
+  semana o mes) con consulta `where` traducida a SQL (`ADDDAYS(TODAY(), n)` nuevo), lote ≤ 1000, una transacción por
+  registro y el alcance de lectura de su rol de servicio; lo que cambian queda a nombre de la cuenta de sistema «Tareas
+  programadas» y la auditoría nombra la tarea. Llegan en pausa: el superusuario las activa por entorno en
+  *Configuración › Automatizaciones*, donde está también la bitácora. `update`/`transition` sin `target` actúan sobre el propio registro.
+  Para la 019: los cierres pueden ser tareas mensuales. Pendiente: tareas sin consulta (crear un registro «cierre del
+  día»), asignar a un equipo por nombre, zonas horarias por tarea y continuar el siguiente lote sin esperar la ocurrencia.
 
 ### 017 — Rollback de entornos
 - **Problema:** un paquete aplicado (009) no se puede revertir: volver atrás exige otro paquete hecho a mano, y los

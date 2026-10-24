@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
-  BarChart3, Blocks, Building2, Check, ChevronDown, ChevronRight, Gauge, GitCompareArrows, History, LayoutDashboard, LogOut, Moon, PanelLeftClose, PanelLeftOpen,
+  BarChart3, Blocks, Building2, CalendarClock, Check, ChevronDown, ChevronRight, Gauge, GitCompareArrows, History, LayoutDashboard, LogOut, Moon, PanelLeftClose, PanelLeftOpen,
   ShieldCheck, Sparkles, Sun, Webhook, Workflow,
 } from 'lucide-react';
 import { dashboardsApi, reportsApi } from '../api/endpoints';
@@ -57,7 +57,7 @@ function useBreadcrumb(): { label: string; to?: string }[] {
     if (parts[1]) crumbs.push({ label: reports ? 'Reporte' : decodeURIComponent(parts[1]) });
   } else if (parts[0] === 'admin') {
     crumbs.push({ label: 'Configuración' });
-    const map: Record<string, string> = { model: 'Modelador', security: 'Usuarios y roles', audit: 'Auditoría', modules: 'Módulos', integrations: 'Integraciones', environments: 'Entornos', companies: 'Empresas', assistant: 'Asistente IA' };
+    const map: Record<string, string> = { model: 'Modelador', security: 'Usuarios y roles', audit: 'Auditoría', modules: 'Módulos', integrations: 'Integraciones', automations: 'Automatizaciones', environments: 'Entornos', companies: 'Empresas', assistant: 'Asistente IA' };
     if (parts[1]) crumbs.push({ label: map[parts[1]] ?? parts[1] });
   }
   return crumbs;
@@ -322,6 +322,12 @@ export function Layout() {
               {canModel && (
                 <NavLink to="/admin/assistant" className="nav-link" title="Asistente IA">
                   <Sparkles size={17} aria-hidden /><span>Asistente IA</span>
+                </NavLink>
+              )}
+              {/* Spec 016: también al final, por la misma razón. */}
+              {me?.isSuperuser && (
+                <NavLink to="/admin/automations" className="nav-link" title="Automatizaciones">
+                  <CalendarClock size={17} aria-hidden /><span>Automatizaciones</span>
                 </NavLink>
               )}
             </div>

@@ -4,7 +4,7 @@ import {
 } from 'lucide-react';
 import { ApiError } from '../../api/client';
 import { adminApi } from '../../api/endpoints';
-import type { Automation, ChangePlan, EntityDef, FieldDef, FieldType, FormulaResultType, Layout, Operation, ReportDef, Rule, SecurityPolicy, ViewDef, WebhookDef, Workflow } from '../../api/types';
+import type { Automation, ChangePlan, EntityDef, FieldDef, FieldType, FormulaResultType, Layout, Operation, ReportDef, Rule, ScheduleDef, SecurityPolicy, ViewDef, WebhookDef, Workflow } from '../../api/types';
 import { Dialog } from '../../components/Dialog';
 import { CURATED_ICONS, DynamicIcon } from '../../components/DynamicIcon';
 import { TagInput } from '../../components/TagInput';
@@ -70,6 +70,7 @@ interface Draft {
   viewsJson: string;
   reportsJson: string;
   webhooksJson: string;
+  schedulesJson: string;
 }
 
 let keySeq = 0;
@@ -87,7 +88,7 @@ function draftFrom(def?: EntityDef): Draft {
   if (!def) {
     const f = blankField(0);
     f.label = 'Nombre'; f.name = 'Nombre'; f.required = true; f.maxLength = 150;
-    return { name: '', label: '', labelPlural: '', icon: 'package', description: '', displayField: '', group: '', perCompany: false, fields: [f], rulesJson: '', workflowJson: '', automationsJson: '', securityJson: '', layoutJson: '', viewsJson: '', reportsJson: '', webhooksJson: '' };
+    return { name: '', label: '', labelPlural: '', icon: 'package', description: '', displayField: '', group: '', perCompany: false, fields: [f], rulesJson: '', workflowJson: '', automationsJson: '', securityJson: '', layoutJson: '', viewsJson: '', reportsJson: '', webhooksJson: '', schedulesJson: '' };
   }
   const fields = def.fields
     .slice()
@@ -104,6 +105,7 @@ function draftFrom(def?: EntityDef): Draft {
     viewsJson: def.views?.length ? pretty(def.views) : '',
     reportsJson: def.reports?.length ? pretty(def.reports) : '',
     webhooksJson: def.webhooks?.length ? pretty(def.webhooks) : '',
+    schedulesJson: def.schedules?.length ? pretty(def.schedules) : '',
   };
 }
 
@@ -169,6 +171,11 @@ function behaviourOperations(entity: string, original: EntityDef | undefined, d:
   const webhooks = parseJson<WebhookDef[]>(d.webhooksJson, 'array');
   if (webhooks.ok && canonical(webhooks.value ?? []) !== canonical(original?.webhooks ?? [])) {
     ops.push({ op: 'setWebhooks', entity, webhooks: webhooks.value ?? [] });
+  }
+  // Spec 016: si la tarea corre en este entorno se decide en Configuración › Automatizaciones (llega en pausa).
+  const schedules = parseJson<ScheduleDef[]>(d.schedulesJson, 'array');
+  if (schedules.ok && canonical(schedules.value ?? []) !== canonical(original?.schedules ?? [])) {
+    ops.push({ op: 'setSchedules', entity, schedules: schedules.value ?? [] });
   }
   return ops;
 }
@@ -277,6 +284,8 @@ function validate(d: Draft, isNew: boolean, existingNames: string[]): Record<str
   if (!reports.ok) e.reportsJson = reports.error;
   const webhooks = parseJson<WebhookDef[]>(d.webhooksJson, 'array');
   if (!webhooks.ok) e.webhooksJson = webhooks.error;
+  const schedules = parseJson<ScheduleDef[]>(d.schedulesJson, 'array');
+  if (!schedules.ok) e.schedulesJson = schedules.error;
   return e;
 }
 
@@ -600,7 +609,7 @@ export function EntityEditor({ original, entities, onCancel, onReview }: EntityE
         </div>
       </section>
 
-      <details className="card card-pad advanced-section" open={!!(original?.perCompany || original?.rules?.length || original?.workflow || original?.automations?.length || original?.security || original?.layout || original?.views?.length || original?.reports?.length || original?.webhooks?.length) || undefined}>
+      <details className="card card-pad advanced-section" open={!!(original?.perCompany || original?.rules?.length || original?.workflow || original?.automations?.length || original?.security || original?.layout || original?.views?.length || original?.reports?.length || original?.webhooks?.length || original?.schedules?.length) || undefined}>
         <summary className="advanced-summary">
           <span className="section-title">Reglas, proceso, automatizaciones, seguridad e interfaz</span>
           <span className="subtle">Avanzado · validaciones de negocio, estados del documento, efectos en otros registros y quién ve o edita qué</span>
@@ -650,7 +659,7 @@ export function EntityEditor({ original, entities, onCancel, onReview }: EntityE
             rows={12}
             spellCheck={false}
             placeholder={'[\n  { "name": "AlConfirmar", "label": "Al confirmar", "on": "enterState", "state": "Confirmada",\n    "actions": [{ "type": "transition", "target": "OrdenCompra", "transition": "recibir" }] }\n]'}
-            hint="Efectos en otros registros: on (create, update, enterState, transition) y acciones update, transition, create o rollup. Corren en la misma transacción; se validan en la vista previa."
+            hint="Efectos en otros registros: on (create, update, enterState, transition) y acciones update, transition, create o rollup. Corren en la misma transacción, o después con mode: async; se validan en la vista previa."
             error={visibleErrors.automationsJson ?? (d.automationsJson ? parseJsonError(d.automationsJson, 'array') : undefined)}
             value={d.automationsJson}
             onChange={(e) => setD((s) => ({ ...s, automationsJson: e.target.value }))}
@@ -709,6 +718,17 @@ export function EntityEditor({ original, entities, onCancel, onReview }: EntityE
             error={visibleErrors.webhooksJson ?? (d.webhooksJson ? parseJsonError(d.webhooksJson, 'array') : undefined)}
             value={d.webhooksJson}
             onChange={(e) => setD((s) => ({ ...s, webhooksJson: e.target.value }))}
+          />
+          <Textarea
+            className="mono json-editor"
+            label="Tareas programadas (JSON)"
+            rows={10}
+            spellCheck={false}
+            placeholder={'[\n  { "name": "Vencer", "label": "Vencer pedidos", "every": "day", "at": "07:00",\n    "where": "Estado = \'Abierto\' AND Vence < TODAY()", "role": "Cobranza",\n    "actions": [{ "type": "transition", "transition": "vencer" }] }\n]'}
+            hint="every (minutes con interval, hour con minute, day, week con weekdays 1–7, month con day) y at 'HH:mm'; where (qué registros, traducible a SQL); role (rol de servicio); acciones como las automatizaciones (sin target, el propio registro); batchSize (máx. 1000). Llegan en pausa: se activan en Configuración › Automatizaciones."
+            error={visibleErrors.schedulesJson ?? (d.schedulesJson ? parseJsonError(d.schedulesJson, 'array') : undefined)}
+            value={d.schedulesJson}
+            onChange={(e) => setD((s) => ({ ...s, schedulesJson: e.target.value }))}
           />
         </div>
       </details>

@@ -12,6 +12,7 @@ import { SecurityPage } from './pages/SecurityPage';
 import { AuditPage } from './pages/AuditPage';
 import { ModulesPage } from './pages/ModulesPage';
 import { IntegrationsPage } from './pages/IntegrationsPage';
+import { AutomationsPage } from './pages/AutomationsPage';
 import { EnvironmentsPage } from './pages/EnvironmentsPage';
 import { CompaniesPage } from './pages/CompaniesPage';
 import { AssistantPage } from './pages/AssistantPage';
@@ -55,6 +56,7 @@ export function App() {
         <Route path="admin/security" element={<Guard allow={!!(me?.canManageUsers || me?.isSuperuser)}><SecurityPage /></Guard>} />
         <Route path="admin/modules" element={<Guard allow={!!me?.isSuperuser}><ModulesPage /></Guard>} />
         <Route path="admin/integrations" element={<Guard allow={!!me?.isSuperuser}><IntegrationsPage /></Guard>} />
+        <Route path="admin/automations" element={<Guard allow={!!me?.isSuperuser}><AutomationsPage /></Guard>} />
         <Route path="admin/environments" element={<Guard allow={!!me?.isSuperuser}><EnvironmentsPage /></Guard>} />
         <Route path="admin/companies" element={<Guard allow={!!me?.isSuperuser}><CompaniesPage /></Guard>} />
         <Route path="admin/assistant" element={<Guard allow={!!(me?.canManageModel || me?.isSuperuser)}><AssistantPage /></Guard>} />

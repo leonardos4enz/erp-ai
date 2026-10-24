@@ -11,8 +11,12 @@ using static Erp.Api.Metadata.Identifiers;
 namespace Erp.Api.Data;
 
 /// <summary>Una acción falló: se revierte todo y el usuario ve qué automatización fue.</summary>
-public sealed class AutomationFailed(string label, string message)
-    : AppException(StatusCodes.Status400BadRequest, $"No se pudo completar «{label}»: {message}");
+/// <param name="transient">Spec 016: la causa fue otra operación sobre el mismo registro (409): repetirlo puede funcionar.</param>
+public sealed class AutomationFailed(string label, string message, bool transient = false)
+    : AppException(StatusCodes.Status400BadRequest, $"No se pudo completar «{label}»: {message}")
+{
+    public bool Transient { get; } = transient;
+}
 
 /// <summary>
 /// Spec 005 · automatizaciones entre registros. Corren dentro de la transacción del evento que las dispara,
@@ -25,8 +29,10 @@ public sealed partial class RecordService
     public const int MaxRollupSources = 10_000;
 
     /// <summary>Contexto de ejecución: la transacción del evento, quién lo disparó y la cadena de automatizaciones.</summary>
+    /// <param name="Generation">Spec 016: cuántos trabajos asíncronos encadenados llevaron hasta aquí (0 = una persona).</param>
     private sealed record AutoCtx(SqlConnection Cn, SqlTransaction Tx, IReadOnlyDictionary<string, EntityDef> Model,
-        UserContext User, HttpContext Http, int Depth, IReadOnlyList<string> Chain, CancellationToken Ct, FolioSource? Folios = null);
+        UserContext User, HttpContext Http, int Depth, IReadOnlyList<string> Chain, CancellationToken Ct, FolioSource? Folios = null,
+        int Generation = 0);
 
     /// <summary>Corre las automatizaciones de <paramref name="e"/> para el evento (y estado o transición, si aplica).</summary>
     private async Task FireAsync(AutoCtx c, EntityDef e, long id, string ev, string? key)
@@ -53,17 +59,28 @@ public sealed partial class RecordService
             var loader = new RelatedLoader(c.Cn, c.Tx, c.Model);
             if (auto.When is not null && !ExprEvaluator.Test(auto.When, HeaderScope(draft, e, c.Model, loader), Env(c.User, draft, loader), whenNull: false))
                 continue;
-            var inner = c with { Depth = c.Depth + 1, Chain = [.. c.Chain, $"{e.Label}: {auto.Label}"] };
-            try
+            // Spec 016: la asíncrona deja su trabajo en la bandeja, en esta misma transacción; sus acciones corren después.
+            if (auto.IsAsync)
             {
-                foreach (var action in auto.Actions) await RunActionAsync(inner, e, id, auto, action);
+                await EnqueueAutomationAsync(c, e, id, auto, ev, key);
+                continue;
             }
-            catch (AutomationFailed) { throw; } // ya nombra la automatización más interna
-            catch (AppException ex) { throw new AutomationFailed(auto.Label, FirstMessage(ex)); }
-            catch (ExprException ex) { throw new AutomationFailed(auto.Label, $"error al calcular: {ex.Message}"); }
+            await RunActionsAsync(c with { Depth = c.Depth + 1, Chain = [.. c.Chain, $"{e.Label}: {auto.Label}"] }, e, id, auto);
         }
         // Spec 008: la carga del webhook ya refleja lo que hicieron las automatizaciones de este mismo evento.
         await EnqueueWebhooksAsync(c, e, id, ev, key);
+    }
+
+    /// <summary>Acciones de una automatización (o de una tarea, spec 016) con el error nombrando a la más interna.</summary>
+    private async Task RunActionsAsync(AutoCtx c, EntityDef e, long id, Automation auto)
+    {
+        try
+        {
+            foreach (var action in auto.Actions) await RunActionAsync(c, e, id, auto, action);
+        }
+        catch (AutomationFailed) { throw; } // ya nombra la automatización más interna
+        catch (AppException ex) { throw new AutomationFailed(auto.Label, FirstMessage(ex), ex is Conflict); }
+        catch (ExprException ex) { throw new AutomationFailed(auto.Label, $"error al calcular: {ex.Message}"); }
     }
 
     private static string FirstMessage(AppException ex) =>
@@ -93,7 +110,7 @@ public sealed partial class RecordService
             {
                 case AutomationActions.Update:
                 {
-                    if (TargetOf(scopeEntity, a.Target!, values, c.Model) is not { } tgt) break;
+                    if (SelfOrTarget(e, id, scopeEntity, a, values, c.Model) is not { } tgt) break;
                     var (target, tid) = tgt;
                     var set = a.Set!.Select(s => (Field: target.FindField(s.Field)!, Value: ExprEvaluator.Evaluate(s.Value, scope, env))).ToList();
                     await SystemUpdateAsync(c, target, tid, set.Select(s => (s.Field, Coerce(s.Field, s.Value))).ToList());
@@ -101,7 +118,7 @@ public sealed partial class RecordService
                 }
                 case AutomationActions.Transition:
                 {
-                    if (TargetOf(scopeEntity, a.Target!, values, c.Model) is not { } tgt) break;
+                    if (SelfOrTarget(e, id, scopeEntity, a, values, c.Model) is not { } tgt) break;
                     var (target, tid) = tgt;
                     var t = target.Workflow!.Transitions.First(x => string.Equals(x.Name, a.Transition, StringComparison.OrdinalIgnoreCase));
                     await SystemTransitionAsync(c, target, tid, t, $"Automática: {auto.Label} ({origin}).");
@@ -125,6 +142,11 @@ public sealed partial class RecordService
 
     private static string DisplayOf(EntityDef e, Values v, long id) =>
         e.EffectiveDisplayField is { } d && v.GetValueOrDefault(d) is { } x ? Convert.ToString(x, CultureInfo.InvariantCulture)! : $"#{id}";
+
+    /// <summary>Spec 016: sin <c>target</c>, el propio registro (ver <see cref="AutomationRules.Target"/>).</summary>
+    private static (EntityDef Target, long Id)? SelfOrTarget(EntityDef e, long id, EntityDef scope, AutomationAction a,
+        Values values, IReadOnlyDictionary<string, EntityDef> model) =>
+        a.Target is null ? (e, id) : TargetOf(scope, a.Target, values, model);
 
     private static (EntityDef Target, long Id)? TargetOf(EntityDef scope, string targetField, Values values, IReadOnlyDictionary<string, EntityDef> model)
     {

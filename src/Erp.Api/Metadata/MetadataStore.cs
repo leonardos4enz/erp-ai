@@ -53,7 +53,7 @@ public sealed class MetadataStore(Db db)
     internal static async Task<IReadOnlyDictionary<string, EntityDef>> LoadAsync(DbConnection cn, DbTransaction? tx)
     {
         var entities = await cn.QueryAsync<EntityRow>(
-            "SELECT Id, Name, Label, LabelPlural, Icon, Description, DisplayField, IsArchived, WorkflowJson, RulesJson, GroupName, AutomationsJson, SecurityJson, LayoutJson, ViewsJson, ReportsJson, WebhooksJson, PerCompany FROM meta.Entity",
+            "SELECT Id, Name, Label, LabelPlural, Icon, Description, DisplayField, IsArchived, WorkflowJson, RulesJson, GroupName, AutomationsJson, SecurityJson, LayoutJson, ViewsJson, ReportsJson, WebhooksJson, SchedulesJson, PerCompany FROM meta.Entity",
             transaction: tx);
         var fields = (await cn.QueryAsync<FieldRow>("""
             SELECT EntityId, Name, Label, Type, IsRequired, IsUnique, MaxLength, [Precision], Scale, OptionsJson,
@@ -74,6 +74,7 @@ public sealed class MetadataStore(Db db)
             Views = e.ViewsJson is null ? null : JsonSerializer.Deserialize<List<ViewDef>>(e.ViewsJson, Json),
             Reports = e.ReportsJson is null ? null : JsonSerializer.Deserialize<List<ReportDef>>(e.ReportsJson, Json),
             Webhooks = e.WebhooksJson is null ? null : JsonSerializer.Deserialize<List<WebhookDef>>(e.WebhooksJson, Json),
+            Schedules = e.SchedulesJson is null ? null : JsonSerializer.Deserialize<List<ScheduleDef>>(e.SchedulesJson, Json),
             PerCompany = e.PerCompany,
             Fields = fields[e.Id].OrderBy(f => f.DisplayOrder).Select(f => new FieldDef
             {
@@ -97,7 +98,7 @@ public sealed class MetadataStore(Db db)
 
     private sealed record EntityRow(int Id, string Name, string Label, string LabelPlural, string Icon,
         string? Description, string? DisplayField, bool IsArchived, string? WorkflowJson, string? RulesJson, string? GroupName, string? AutomationsJson, string? SecurityJson,
-        string? LayoutJson, string? ViewsJson, string? ReportsJson, string? WebhooksJson, bool PerCompany);
+        string? LayoutJson, string? ViewsJson, string? ReportsJson, string? WebhooksJson, string? SchedulesJson, bool PerCompany);
 
     private sealed record FieldRow(int EntityId, string Name, string Label, string Type, bool IsRequired, bool IsUnique,
         int? MaxLength, int? Precision, int? Scale, string? OptionsJson, string? ReferenceEntity, int DisplayOrder,

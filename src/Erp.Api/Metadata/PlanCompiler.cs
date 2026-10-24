@@ -82,6 +82,7 @@ public static partial class PlanCompiler
                 SetViewsOp op => SetViews(ctx, op),
                 SetReportsOp op => SetReports(ctx, op),
                 SetWebhooksOp op => SetWebhooks(ctx, op),
+                SetSchedulesOp op => SetSchedules(ctx, op),
                 _ => ctx.Fail("Operación desconocida."),
             };
             // Solo se registra el efecto si la operación fue válida; así las siguientes ven un modelo coherente.
@@ -134,6 +135,9 @@ public static partial class PlanCompiler
                 // Spec 008: un campo archivado, un estado eliminado o un cambio de seguridad no puede romper un webhook en silencio.
                 if (e.Webhooks is { } hooks)
                     foreach (var m in WebhookRules.Validate(e, hooks, working, knownRoles)) errors.Add(new(at, $"{e.Label} › {m}"));
+                // Spec 016: igual con las tareas programadas (consulta, rol y acciones dependen de otros catálogos).
+                if (e.Schedules is { } schedules)
+                    foreach (var m in ScheduleRules.Validate(e, schedules, working, knownRoles)) errors.Add(new(at, $"{e.Label} › {m}"));
             }
             foreach (var d in boards.Values.Where(d => !d.IsArchived))
                 foreach (var m in InterfaceRules.ValidateDashboard(d, working, knownRoles))
@@ -555,6 +559,18 @@ public static partial class PlanCompiler
         var text = op.Reports.Count == 0 ? $"Quitar los reportes de '{e.Label}'"
             : $"Definir {op.Reports.Count} reporte(s) en '{e.Label}': {string.Join(", ", op.Reports.Select(r => r.Label))}";
         return new(e with { Reports = op.Reports.Count == 0 ? null : op.Reports }, text, []);
+    }
+
+    // ---------------- Spec 016: tareas programadas ----------------
+    // La forma completa se valida en la pasada final (ScheduleRules): las acciones pueden usar catálogos creados después.
+
+    private static OpResult? SetSchedules(Ctx ctx, SetSchedulesOp op)
+    {
+        var e = ctx.Active(op.Entity);
+        if (e is null) return null;
+        var text = op.Schedules.Count == 0 ? $"Quitar las tareas programadas de '{e.Label}'"
+            : $"Definir {op.Schedules.Count} tarea(s) programada(s) en '{e.Label}': {string.Join(", ", op.Schedules.Select(s => s.Label))}";
+        return new(e with { Schedules = op.Schedules.Count == 0 ? null : op.Schedules }, text, []);
     }
 
     // ---------------- Spec 008: webhooks ----------------

@@ -48,6 +48,11 @@ public static class PlanWarnings
                     if (a.Automations.Count > 0)
                         list.Add($"Las automatizaciones de «{Label(a.Entity)}» modifican o crean otros registros al ocurrir un evento.");
                     break;
+                case SetSchedulesOp s:
+                    Removed(s.Entity, Current(s.Entity)?.Schedules, s.Schedules, x => x.Name, "tareas programadas existentes");
+                    if (s.Schedules.Count > 0)
+                        list.Add($"Las tareas programadas de «{Label(s.Entity)}» modifican registros solas, con su rol de servicio, cuando el administrador las activa.");
+                    break;
                 case SetWebhooksOp w:
                     Removed(w.Entity, Current(w.Entity)?.Webhooks, w.Webhooks, x => x.Name, "webhooks existentes");
                     if (w.Webhooks.Count > 0)

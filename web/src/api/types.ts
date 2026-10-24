@@ -133,6 +133,63 @@ export interface WebhookSummary {
   lastAt?: string | null;
 }
 export type DeliveryStatus = 'pending' | 'delivered' | 'failed' | 'canceled';
+
+// ---------- Spec 016: automatizaciones asíncronas y programadas ----------
+export interface ScheduleDef {
+  name: string;
+  label: string;
+  description?: string;
+  every: 'minutes' | 'hour' | 'day' | 'week' | 'month';
+  interval?: number;
+  minute?: number;
+  at?: string;
+  weekdays?: number[];
+  day?: number;
+  where: string;
+  role: string;
+  batchSize?: number;
+  actions: AutomationAction[];
+}
+export type RunStatus = 'pending' | 'running' | 'succeeded' | 'partial' | 'failed' | 'canceled';
+export interface ScheduleSummary {
+  entity: string;
+  entityLabel: string;
+  name: string;
+  label: string;
+  description?: string | null;
+  calendar: string;
+  role: string;
+  batchSize: number;
+  active: boolean;
+  nextRunAt?: string | null;
+  lastRun?: { id: number; status: RunStatus; finishedAt?: string | null; processed: number; succeeded: number; failed: number; more: boolean; error?: string | null } | null;
+}
+export interface AutomationRun {
+  id: number;
+  kind: 'async' | 'schedule';
+  entity: string;
+  entityLabel: string;
+  name: string;
+  label: string;
+  recordId?: number | null;
+  event?: string | null;
+  eventKey?: string | null;
+  runAs: string;
+  manual: boolean;
+  status: RunStatus;
+  attempts: number;
+  processed: number;
+  succeeded: number;
+  failed: number;
+  skipped: number;
+  more: boolean;
+  createdAt: string;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  nextAttemptAt?: string | null;
+  lastError?: string | null;
+}
+export interface AutomationRunDetail { run: AutomationRun; errors: { recordId: number; message: string }[] }
 export interface WebhookDelivery {
   id: number;
   deliveryId: string;
@@ -250,6 +307,8 @@ export interface Automation {
   transition?: string;
   when?: string;
   actions: AutomationAction[];
+  /** Spec 016: async = las acciones corren después, desde la bandeja. */
+  mode?: 'sync' | 'async';
 }
 
 export interface Rule { name: string; message: string; assert: string; when?: string; field?: string }
@@ -279,6 +338,8 @@ export interface EntityDef {
   reports?: ReportDef[] | null;
   /** Spec 008: solo la reciben los modeladores. */
   webhooks?: WebhookDef[] | null;
+  /** Spec 016: solo la reciben los modeladores. */
+  schedules?: ScheduleDef[] | null;
   /** Spec 010: un registro por empresa (las partidas siguen a su documento). */
   perCompany?: boolean;
   isChild?: boolean;
@@ -323,6 +384,7 @@ export type Operation =
   | { op: 'setViews'; entity: string; views: ViewDef[] }
   | { op: 'setReports'; entity: string; reports: ReportDef[] }
   | { op: 'setWebhooks'; entity: string; webhooks: WebhookDef[] }
+  | { op: 'setSchedules'; entity: string; schedules: ScheduleDef[] }
   | { op: 'setDashboard'; dashboard: DashboardDef }
   | { op: 'archiveDashboard'; name: string };
 

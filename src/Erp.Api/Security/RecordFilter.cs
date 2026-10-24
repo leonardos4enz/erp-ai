@@ -214,8 +214,18 @@ public static class RecordFilter
             Call { Name: "CURRENTUSER", Args.Count: 0 } => bag.Add(who.UserId),
             Call { Name: "CURRENTUNIT", Args.Count: 0 } => bag.Add(who.Unit),
             Call { Name: "TODAY", Args.Count: 0 } => bag.Add(DateTime.Today),
+            // Spec 016: vencimientos y recordatorios («entrega en los próximos 3 días»): la fecha se calcula aquí.
+            Call { Name: "ADDDAYS", Args: [Call { Name: "TODAY", Args.Count: 0 }, var days] } when Days(days) is { } d => bag.Add(DateTime.Today.AddDays(d)),
+            Call { Name: "ADDDAYS" } => throw new ExprException("ADDDAYS() solo se puede usar como ADDDAYS(TODAY(), n), con n un número entero."),
             Call c => throw new ExprException($"{c.Name}() no se puede usar en una regla de acceso."),
             _ => throw new ExprException("Las reglas de acceso solo comparan campos del catálogo con valores, CURRENTUSER(), CURRENTUNIT() o TODAY()."),
+        };
+
+        private static int? Days(Node n) => n switch
+        {
+            Literal { Value: decimal d } when d == decimal.Truncate(d) && Math.Abs(d) <= 36_500 => (int)d,
+            Unary { Op: "-", Operand: Literal { Value: decimal d } } when d == decimal.Truncate(d) && d <= 36_500 => -(int)d,
+            _ => null,
         };
 
         private (string Sql, FieldDef Field) Column(PathRef p)

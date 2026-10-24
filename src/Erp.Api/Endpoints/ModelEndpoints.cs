@@ -95,6 +95,7 @@ public static class ModelEndpoints
             Views = u.CanManageModel ? e.Views : null,
             Reports = u.CanManageModel ? e.Reports : null,
             Webhooks = u.CanManageModel ? e.Webhooks : null,
+            Schedules = u.CanManageModel ? e.Schedules : null,
         };
     }
 }

@@ -18,6 +18,21 @@ public static class Bootstrap
         await using var cn = await db.OpenAsync();
         await cn.ExecuteAsync(SchemaSql);
         await SeedAsync(cn, services.GetRequiredService<PasswordService>(), config, log);
+        await EnsureScheduleAccountAsync(cn, services.GetRequiredService<PasswordService>());
+    }
+
+    /// <summary>
+    /// Spec 016: cuenta de sistema a cuyo nombre quedan los registros que crean o modifican las tareas programadas. Es de
+    /// servicio (login la rechaza), no tiene roles y su contraseña aleatoria nunca se conoce. Se crea después del
+    /// administrador inicial, que solo se siembra en una base sin usuarios.
+    /// </summary>
+    private static async Task EnsureScheduleAccountAsync(SqlConnection cn, PasswordService passwords)
+    {
+        if (await cn.ExecuteScalarAsync<int?>("SELECT 1 FROM meta.[User] WHERE Username = @u", new { u = ScheduleAccount.Username }) is not null) return;
+        await cn.ExecuteAsync("""
+            INSERT meta.[User] (Username, DisplayName, PasswordHash, IsService) VALUES (@u, @name, @hash, 1);
+            INSERT meta.UserCompany (UserId, CompanyId) SELECT u.Id, c.Id FROM meta.[User] u CROSS JOIN meta.Company c WHERE u.Username = @u AND c.IsDefault = 1;
+            """, new { u = ScheduleAccount.Username, name = ScheduleAccount.DisplayName, hash = passwords.Hash(GeneratePassword() + GeneratePassword()) });
     }
 
     private static async Task EnsureDatabaseAsync(string cs, ILogger log)
@@ -502,6 +517,57 @@ public static class Bootstrap
         );
         IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_SecurityChange_Status')
             CREATE INDEX IX_SecurityChange_Status ON meta.SecurityChange (Status, Id);
+
+        -- Spec 016: tareas programadas (qué hacen es metadato; si corren, de cada entorno) y bandeja de automatizaciones.
+        IF COL_LENGTH('meta.Entity', 'SchedulesJson') IS NULL ALTER TABLE meta.Entity ADD SchedulesJson nvarchar(max) NULL;
+
+        IF OBJECT_ID('meta.ScheduleState') IS NULL
+        CREATE TABLE meta.ScheduleState (
+            EntityName nvarchar(63) NOT NULL,
+            ScheduleName nvarchar(63) NOT NULL,
+            IsActive bit NOT NULL DEFAULT 0,
+            CalendarJson nvarchar(400) NULL,
+            NextRunAt datetime2(3) NULL,
+            LastRunId bigint NULL,
+            UpdatedAt datetime2(3) NOT NULL DEFAULT SYSUTCDATETIME(),
+            UpdatedBy int NULL REFERENCES meta.[User](Id),
+            PRIMARY KEY (EntityName, ScheduleName)
+        );
+
+        IF OBJECT_ID('meta.AutomationRun') IS NULL
+        CREATE TABLE meta.AutomationRun (
+            Id bigint IDENTITY PRIMARY KEY,
+            Kind nvarchar(10) NOT NULL,
+            EntityName nvarchar(63) NOT NULL,
+            Name nvarchar(63) NOT NULL,
+            RecordId bigint NULL,
+            Event nvarchar(20) NULL,
+            EventKey nvarchar(63) NULL,
+            TriggeredBy int NULL REFERENCES meta.[User](Id),
+            RunAsRole nvarchar(100) NULL,
+            RunAsName nvarchar(150) NOT NULL,
+            CompanyId int NULL,
+            Generation int NOT NULL DEFAULT 0,
+            Manual bit NOT NULL DEFAULT 0,
+            Status nvarchar(12) NOT NULL,
+            Attempts int NOT NULL DEFAULT 0,
+            NextAttemptAt datetime2(3) NOT NULL DEFAULT SYSUTCDATETIME(),
+            LeaseUntil datetime2(3) NULL,
+            StartedAt datetime2(3) NULL,
+            FinishedAt datetime2(3) NULL,
+            Processed int NOT NULL DEFAULT 0,
+            Succeeded int NOT NULL DEFAULT 0,
+            Failed int NOT NULL DEFAULT 0,
+            Skipped int NOT NULL DEFAULT 0,
+            More bit NOT NULL DEFAULT 0,
+            LastError nvarchar(500) NULL,
+            ErrorsJson nvarchar(max) NULL,
+            CreatedAt datetime2(3) NOT NULL DEFAULT SYSUTCDATETIME()
+        );
+        IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_AutomationRun_Pending')
+            CREATE INDEX IX_AutomationRun_Pending ON meta.AutomationRun (Status, NextAttemptAt);
+        IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_AutomationRun_Name')
+            CREATE INDEX IX_AutomationRun_Name ON meta.AutomationRun (Kind, EntityName, Name, Id);
 
         -- Constitución II.4: la auditoría es de solo inserción, incluso para la propia aplicación.
         IF OBJECT_ID('meta.TR_AuditLog_Immutable') IS NULL

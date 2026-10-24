@@ -30,6 +30,16 @@ public sealed class UserContext
     /// <summary>Spec 010: empresas activas que puede elegir (el superusuario, todas); la predeterminada primero.</summary>
     public IReadOnlyList<CompanyInfo> Companies { get; init; } = [];
     public IReadOnlyDictionary<string, EntityAccess> Entities { get; init; } = new Dictionary<string, EntityAccess>();
+    /// <summary>Spec 016: rol de servicio con el que actúa una tarea programada (null para personas y claves).</summary>
+    public string? ServiceRoleName { get; init; }
+
+    /// <summary>Spec 016: el mismo contexto en otra empresa (la del evento que encoló un trabajo asíncrono).</summary>
+    public UserContext WithCompany(CompanyInfo? company) => new()
+    {
+        Id = Id, Username = Username, DisplayName = DisplayName, Unit = Unit, SecurityStamp = SecurityStamp, Roles = Roles,
+        IsSuperuser = IsSuperuser, CanManageModel = CanManageModel, CanManageUsers = CanManageUsers, CanViewAudit = CanViewAudit,
+        IsService = IsService, Company = company, Companies = Companies, Entities = Entities, ServiceRoleName = ServiceRoleName,
+    };
 
     public EntityAccess Access(string entity) =>
         IsSuperuser ? EntityAccess.Full
@@ -68,6 +78,32 @@ public static class ServiceRole
         {
             Id = user.Id, Username = user.Username, DisplayName = user.DisplayName, SecurityStamp = user.SecurityStamp,
             Roles = [role, .. inherited], Entities = user.Entities, Company = user.Company, Companies = user.Companies,
+        };
+    }
+}
+
+/// <summary>
+/// Spec 016: identidad de una tarea programada. Los permisos y el alcance son los del rol de servicio (con herencia, sin
+/// superusuario); lo que crea o modifica queda a nombre de la cuenta de sistema «Tareas programadas», y la auditoría
+/// nombra la tarea (<c>tarea:Catálogo.Nombre</c>).
+/// </summary>
+public static class ScheduleAccount
+{
+    public const string Username = "sistema.tareas";
+    public const string DisplayName = "Tareas programadas";
+
+    public static string RunAs(string entity, string schedule) => $"tarea:{entity}.{schedule}";
+
+    public static async Task<UserContext> LoadAsync(System.Data.Common.DbConnection cn, System.Data.Common.DbTransaction? tx, string role,
+        CompanyInfo? company, string runAs)
+    {
+        var id = await cn.ExecuteScalarAsync<int?>("SELECT Id FROM meta.[User] WHERE Username = @u AND IsService = 1", new { u = Username }, tx)
+                 ?? throw new InvalidOperationException("Falta la cuenta de sistema de las tareas programadas.");
+        var svc = await ServiceRole.LoadAsync(cn, tx, role, company);
+        return new UserContext
+        {
+            Id = id, Username = runAs[..Math.Min(runAs.Length, 150)], DisplayName = DisplayName, SecurityStamp = Guid.Empty,
+            Roles = svc.Roles, Entities = svc.Entities, Company = company, Companies = svc.Companies, IsService = true, ServiceRoleName = role,
         };
     }
 }

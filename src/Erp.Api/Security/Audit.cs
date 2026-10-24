@@ -47,6 +47,9 @@ public static class AuditActions
     public const string SecurityRequest = "security.request";
     public const string SecurityApprove = "security.approve";
     public const string SecurityReject = "security.reject";
+    /// <summary>Spec 016: activar, pausar o ejecutar ahora una tarea programada; reintentar un trabajo asíncrono.</summary>
+    public const string ScheduleChange = "automation.schedule";
+    public const string AutomationRetry = "automation.retry";
 }
 
 public static class Audit

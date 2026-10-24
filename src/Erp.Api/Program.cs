@@ -2,6 +2,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using System.Threading.RateLimiting;
 using Erp.Api.Assistant;
+using Erp.Api.Automations;
 using Erp.Api.Data;
 using Erp.Api.Endpoints;
 using Erp.Api.Environments;
@@ -58,6 +59,10 @@ builder.Services.AddSingleton<WebhookSender>();
 builder.Services.AddScoped<WebhookService>();
 builder.Services.AddScoped<ApiKeyService>();
 builder.Services.AddHostedService<WebhookDispatcher>();
+// Spec 016: automatizaciones asíncronas y tareas programadas.
+builder.Services.AddSingleton(AutomationOptions.From(builder.Configuration));
+builder.Services.AddScoped<AutomationService>();
+builder.Services.AddHostedService<AutomationDispatcher>();
 // Spec 009: entornos. Nombre, aprobación obligatoria y clave de firma son configuración del servidor, no de la aplicación.
 builder.Services.AddSingleton(EnvironmentOptions.From(builder.Configuration));
 builder.Services.AddScoped<EnvironmentService>();
@@ -167,6 +172,7 @@ app.MapSecurityChanges(); // spec 015
 app.MapAudit();
 app.MapAnalytics();
 app.MapIntegrations();
+app.MapAutomations();
 app.MapEnvironments();
 app.MapCompanies();
 app.MapAssistant();
