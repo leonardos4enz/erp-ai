@@ -34,7 +34,7 @@ public sealed partial class RecordService(Db db, MetadataStore store)
 
     private static readonly HashSet<string> IgnoredKeys = new(StringComparer.OrdinalIgnoreCase)
     {
-        "id", "_rowVersion", "_workflow", "_layout", "createdAt", "createdBy", "updatedAt", "updatedBy",
+        "id", "_rowVersion", "_workflow", "_layout", "_access", "createdAt", "createdBy", "updatedAt", "updatedBy",
     };
 
     // ======================= Lectura =======================
@@ -1019,10 +1019,12 @@ public sealed partial class RecordService(Db db, MetadataStore store)
             row[lf.Name] = lines;
         }
 
+        // Spec 013: el cliente sabe si este registro se puede modificar (alcance de escritura por registro).
+        var canWrite = RecordFilter.For(e, user, write: true) is not { } w || await MatchesAsync(cn, tx, e, id, w, ct);
+        row["_access"] = AccessOf(e, user.Access(e.Name), canWrite);
         if (e.Workflow is { } wf)
         {
             var draft = (await LoadDraftAsync(cn, tx, e, model, id, ct))!;
-            var canWrite = RecordFilter.For(e, user, write: true) is not { } w || await MatchesAsync(cn, tx, e, id, w, ct);
             var loader = new RelatedLoader(cn, tx, model);
             var env = Env(user, draft, loader);
             var stateName = draft.Header.GetValueOrDefault(Workflow.StateField) as string;
@@ -1217,6 +1219,12 @@ public sealed partial class RecordService(Db db, MetadataStore store)
     }
 
     private const string CannotWrite = "Puedes consultar este registro, pero tu rol no puede modificarlo.";
+
+    /// <summary>Spec 013: qué puede hacer el usuario con un registro que ve (rol, administrado por el sistema y alcance).</summary>
+    public static RecordAccess AccessOf(EntityDef e, EntityAccess role, bool canWrite) =>
+        new(!e.SystemManaged && role.Update && canWrite, !e.SystemManaged && role.Delete && canWrite, canWrite ? null : CannotWrite);
+
+    public sealed record RecordAccess(bool Update, bool Delete, string? Reason);
 
     private static async Task<bool> MatchesAsync(SqlConnection cn, SqlTransaction? tx, EntityDef e, long id, SqlPredicate p, CancellationToken ct)
     {

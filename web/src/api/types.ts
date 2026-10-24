@@ -368,6 +368,13 @@ export interface RecordTransition {
   requiredFields: string[];
 }
 
+/** Spec 013: lo que el usuario puede hacer con este registro (rol, alcance de escritura y catálogo del sistema). */
+export interface RecordAccess {
+  update: boolean;
+  delete: boolean;
+  reason: string | null;
+}
+
 export interface RecordWorkflow {
   state: string;
   stateLabel: string;

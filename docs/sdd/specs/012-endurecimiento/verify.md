@@ -29,7 +29,7 @@
 | F-02 | Baja | (prueba) `integraciones › H5 CA1` simula Compras 1.4.0 sobre un modelo ya actualizado y restauraba la versión a 1.5.0 en lugar de la instalada; con 1.7.0 la cadena repite un `addField` y la vista previa deja de ser válida | La prueba restaura la versión real y verifica solo la lista de roles (lo que protege) |
 | F-03 | Baja | (prueba) La limpieza no podía archivar documentos con partidas (se referencian entre sí) | La limpieza archiva primero el campo de partidas |
 | F-04 | Baja | (exploratoria) En un entorno con aprobación el modelador se enteraba de que la propuesta no se aplica aquí **después** de gastar una solicitud | Corregido: el redactor lo avisa cuando `directChanges` es falso. Solo texto: la regla la aplica el servidor (409), cubierta por `endurecimiento › H4` |
-| F-05 | Media | (exploratoria, previo a 012, de la 006) Un vendedor que solo puede **ver** una oportunidad ajena recibe el formulario con campos editables y «Guardar cambios»; el servidor rechaza con 403 al guardar. No es una fuga, pero confunde | Fuera de alcance de esta spec: propuesto como tarea aparte (el registro debe decir al cliente si se puede modificar) |
+| F-05 | Media | (exploratoria, previo a 012, de la 006) Un vendedor que solo puede **ver** una oportunidad ajena recibe el formulario con campos editables y «Guardar cambios»; el servidor rechaza con 403 al guardar. No es una fuga, pero confunde | Fuera de alcance de esta spec; resuelto en la [013](../013-formulario-solo-lectura/verify.md) |
 
 ## Decisiones y diferidos
 Ver [spec](spec.md#decisiones-clarify): transiciones con roles siguen sin exigir escritura; superusuario sin filtro en la

@@ -18,6 +18,7 @@ en orden, no en paralelo: casi todas tocan el núcleo del motor (`PlanCompiler`,
 | 010 Multi-empresa / multi-moneda | Implementado ([spec](specs/010-multi-empresa-moneda/spec.md)) |
 | 011 Asistente IA (Claude) | Implementado ([spec](specs/011-asistente-ia/spec.md)) |
 | 012 Endurecimiento | Implementado ([spec](specs/012-endurecimiento/spec.md)) |
+| 013 Formulario en solo lectura | Implementado ([spec](specs/013-formulario-solo-lectura/spec.md)) |
 
 ## Diagnóstico
 | Brecha señalada | Situación actual | Spec |
@@ -106,6 +107,12 @@ paquetes; el límite del asistente se reserva antes de llamar al proveedor y apl
 etiqueta de una referencia fuera de alcance es «(sin acceso)».
 - Diferidos (con razón en la spec): acumulado en SQL en lugar de memoria, folios fuera de la transacción de importación,
   y que un paquete no archive campos locales sin decisión explícita.
+
+### 013 — Formulario en solo lectura fuera del alcance de escritura
+Origen: hallazgo F-05 de la verificación 012. El registro trae `_access` (`update`, `delete`, `reason`) con el permiso del
+rol, el alcance de escritura por registro (006/010) y el catálogo del sistema; el formulario se muestra en solo lectura,
+sin «Guardar cambios» ni «Eliminar» y con el motivo, cuando la persona solo puede consultar ese registro. El servidor
+sigue rechazando con 403. Pendiente: el listado no lo calcula por fila (no ofrece edición en línea).
 
 ## Decisión: ¿extensión con código?
 La auditoría tiene razón en el costo: cada necesidad nueva exige una capacidad del motor. Se mantiene

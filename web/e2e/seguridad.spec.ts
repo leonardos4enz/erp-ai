@@ -347,6 +347,37 @@ test('H1 CA4: el formulario y el listado no muestran lo oculto y explican lo blo
   await page.context().close();
 });
 
+test('Spec 013 · H1: un registro que solo se puede ver se muestra en solo lectura y explica por qué', async ({ browser }) => {
+  const o = (await create('vend1', 'Oportunidad', { Nombre: 'Expo solo lectura', Publica: true, Partidas: [{ Concepto: 'Mesa' }] })).body;
+  // CA2: vend2 la ve sin campos editables, sin «Guardar cambios» ni «Eliminar», y con el motivo.
+  const page = await pageAs(browser, username('vend2'));
+  await page.goto(`/c/Oportunidad/${o.id}`);
+  await expect(page.getByLabel(/^Nombre/)).toHaveValue('Expo solo lectura');
+  await expect(page.getByLabel(/^Nombre/)).toBeDisabled();
+  // Las partidas en solo lectura se muestran como texto, sin celdas capturables.
+  await expect(page.getByRole('cell', { name: 'Mesa' })).toBeVisible();
+  await expect(page.getByLabel('Concepto, partida 1')).toHaveCount(0);
+  await expect(page.getByText('Puedes consultar este registro, pero tu rol no puede modificarlo.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Guardar cambios' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Eliminar' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /Agregar/ })).toHaveCount(0);
+  await expectAccessible(page);
+  await page.context().close();
+
+  // CA3: el dueño la sigue editando.
+  const owner = await pageAs(browser, username('vend1'));
+  await owner.goto(`/c/Oportunidad/${o.id}`);
+  await expect(owner.getByLabel(/^Nombre/)).toBeEditable();
+  await expect(owner.getByRole('button', { name: 'Guardar cambios' })).toBeVisible();
+  await expect(owner.getByRole('button', { name: 'Eliminar', exact: true })).toBeVisible();
+  await owner.context().close();
+
+  // CA1: la API dice qué puede hacer cada quien con el registro.
+  const seen = (await get('vend2', 'Oportunidad', o.id)).body;
+  expect(seen._access).toEqual({ update: false, delete: false, reason: expect.stringContaining('no puede modificarlo') });
+  expect((await get('vend1', 'Oportunidad', o.id)).body._access).toEqual({ update: true, delete: true, reason: null });
+});
+
 test('H5: el modelador ve y edita la seguridad como JSON validado', async ({ page }) => {
   await page.goto('/admin/model?edit=Oportunidad');
   const box = page.getByLabel('Seguridad (JSON)');

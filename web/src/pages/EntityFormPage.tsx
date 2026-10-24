@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, RefreshCw, Save, Trash2 } from 'lucide-react';
 import { ApiError, fieldError } from '../api/client';
 import { dataApi } from '../api/endpoints';
-import type { EntityDef, FieldDef, LayoutState, RecordTransition, RecordWorkflow, Row } from '../api/types';
+import type { EntityDef, FieldDef, LayoutState, RecordAccess, RecordTransition, RecordWorkflow, Row } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { ConfirmDialog } from '../components/Dialog';
 import { resolveIcon } from '../components/DynamicIcon';
@@ -160,7 +160,10 @@ export function EntityFormPage() {
 
   const wf = (!isNew ? (row?._workflow as RecordWorkflow | undefined) : undefined) ?? undefined;
   const lockedByState = !!wf && wf.editable === false;
-  const readOnly = !isNew && (!p.update || lockedByState || !!def.systemManaged);
+  // Spec 013: el servidor dice si este registro está en el alcance de escritura del usuario.
+  const access = !isNew ? (row?._access as RecordAccess | undefined) : undefined;
+  const outOfScope = !!access?.reason;
+  const readOnly = !isNew && (!p.update || lockedByState || !!def.systemManaged || access?.update === false);
   const listPath = `/c/${encodeURIComponent(def.name)}`;
   const Icon = resolveIcon(def.icon);
   const linesFields = fields.filter((f) => f.type === 'lines');
@@ -353,7 +356,7 @@ export function EntityFormPage() {
   const subtitle = !isNew && row
     ? `Creado ${formatDateTime(row.createdAt)}${row.createdBy ? ` por ${row.createdBy}` : ''}${row.updatedAt ? ` · Actualizado ${formatDateTime(row.updatedAt)}${row.updatedBy ? ` por ${row.updatedBy}` : ''}` : ''}`
     : def.description;
-  const canDelete = !isNew && p.delete && !lockedByState && !def.systemManaged;
+  const canDelete = !isNew && p.delete && !lockedByState && !def.systemManaged && access?.delete !== false;
 
   const alerts: ReactNode = (
     <>
@@ -377,7 +380,9 @@ export function EntityFormPage() {
       )}
       {!lockedByState && readOnly && (def.systemManaged
         ? <Alert tone="info" title="Lo administra el sistema">Estos registros los crea y actualiza el sistema; solo se consultan.</Alert>
-        : <Alert tone="info" title="Solo lectura">Tu rol no tiene permiso para editar este catálogo.</Alert>)}
+        : p.update && outOfScope
+          ? <Alert tone="info" title="Solo lectura">{access!.reason}</Alert>
+          : <Alert tone="info" title="Solo lectura">Tu rol no tiene permiso para editar este catálogo.</Alert>)}
     </>
   );
 
