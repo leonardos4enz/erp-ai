@@ -172,7 +172,7 @@ public class AccountingTests
         var inventario = Package("inventario.json");
         roles.UnionWith(compras.AllRoles.Select(r => r.Name));
         roles.UnionWith(inventario.AllRoles.Select(r => r.Name));
-        foreach (var (_, plan) in compras.FullChain.Concat(inventario.FullChain.Where(x => x.Label is not ("v1.5.0" or "v1.6.0"))))
+        foreach (var (_, plan) in compras.FullChain.Concat(inventario.FullChain.Where(x => x.Label is not ("v1.5.0" or "v1.6.0" or "v1.6.1"))))
         {
             var c = PlanCompiler.Compile(plan, model, roles, boards);
             Assert.True(c.Preview.Valid, Errors(c));
@@ -181,7 +181,7 @@ public class AccountingTests
         Assert.Null(model["MovimientoInventario"].FindField("CostoUnitario"));
 
         var pending = inventario.PendingAfter("1.4.0");
-        Assert.Equal(["1.5.0", "1.6.0"], pending.Select(u => u.Version)); // 1.6.0: spec 022
+        Assert.Equal(["1.5.0", "1.6.0", "1.6.1"], pending.Select(u => u.Version)); // 1.6.x: spec 022
         var up = PlanCompiler.Compile(pending[0].Plan, model, roles, boards);
         Assert.True(up.Preview.Valid, Errors(up));
         var after = up.ResultingModel;

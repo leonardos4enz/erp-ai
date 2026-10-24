@@ -8,7 +8,8 @@
 | E2E | 299/299 en dos corridas completas limpias seguidas (+10 en `valuacion-politicas.spec.ts`). La primera corrida falló en `valuacion-contable` porque la vista previa de Costeo ahora muestra «Valuar» en `[base]` y en `[v1.1.0]` (la prueba esperaba una sola línea): se ajustó para pedir las dos. `valuacion-contable` `H5 CA3` cambia al defecto nuevo (bloquear sin cuentas) |
 | Contra el código anterior | Las pruebas nuevas se corrieron contra `HEAD` (28166b0) en un *worktree* aparte con `E2E_INDEPENDENT=1`: las 11 fallaron por la razón esperada (abajo) |
 | Visual | Sin cambios en las referencias: los campos nuevos no aparecen en las pantallas capturadas |
-| Accesibilidad | axe sin violaciones serias en el diálogo de confirmación con el error de H3, y en la vista «Pólizas pendientes» |
+| Accesibilidad | axe sin violaciones serias en el diálogo de confirmación con el error de H3, y en la vista «Pólizas pendientes»; pasada solo con teclado (abajo) |
+| Cierre completo (después del primer cierre) | E2E de H3 CA2 y segunda revisión exploratoria (teclado y modelador): F-02, F-03 y F-04 corregidos con regresión. Unitarias 497/497 y E2E 301/301 en dos corridas seguidas; las regresiones de F-03 y F-04 fallan con el código anterior |
 
 ## Cobertura
 | Criterio | Prueba |
@@ -21,7 +22,7 @@
 | H2 CA2 defecto `fallback` | `H2 CA2` (ajuste sin costo → 4 × 12.50) |
 | H2 CA3 alternativa `require` | `H2 CA1 · CA3` (sin respaldo se rechaza con el defecto; con `require`, también con respaldo; restaurado al terminar) |
 | H3 CA1 sin tipo de cambio | `H3 CA1 · CA3` (borrador sí; confirmar desde la UI muestra el mensaje; API 400 en `Fecha`) |
-| H3 CA2 ninguna partida sin costo | Regla `CostoCalculado` (unitaria de módulos). Sin E2E: con moneda base MXN siempre hay respaldo, y una empresa con otra moneda base exige todo el flujo de Compras en ella; ver riesgos |
+| H3 CA2 ninguna partida sin costo | `H3 CA2` (empresa propia con base USD, orden en euros sin tipo EUR→USD: costo de la partida vacío; sin la regla `TipoCambioDeLaRecepcion`, `CostoCalculado` rechaza con 400 en `Partidas[0].CostoUnitario`; la empresa se desactiva y el gerente recupera sus empresas al terminar). Agregada después del cierre (F-04) |
 | H3 CA3 alternativa | `H3 CA1 · CA3` (sin la regla: costo 90 = tipo de la orden; póliza y movimiento 180) |
 | H4 CA1 fecha | `H4 CA1` (recepción con otra fecha del mes: movimiento y póliza en esa fecha); traspaso: `H1 CA1` |
 | H5 CA1 opción del motor | `Promedio_con_varias_capas_las_funde_o_las_conserva…` (`merge` y `keep`) |
@@ -62,14 +63,30 @@ prueba de la suite.
 - El rechazo al confirmar sin tipo de cambio y sin cuentas se revisó en el diálogo de la UI dentro de la suite
   (`H3 CA1 · CA3`, `H7 CA1 · CA3`), con axe sin violaciones serias.
 
+**Segunda pasada (después del cierre, a pedido del dueño): teclado y modelador**, en el mismo servidor aparte y la misma
+base desechable.
+- *Modelador de pruebas* (`e2e-ia-modelador`), solo teclado: «Editar» de *Movimientos de inventario* con Enter; el JSON de
+  automatizaciones muestra `uncostedEntry`, `methodChange`, `totalCost` y `quantityField` de `Valuar`. Cambiar
+  `uncostedEntry` a `"cero"` y «Revisar cambios»: el plan es inválido con «uncostedEntry 'cero' no válido (average,
+  fallback, require)» y «Aplicar cambios» deshabilitado; el foco queda atrapado en el diálogo y Esc lo cierra y devuelve el
+  foco a «Revisar cambios». Se descartó sin aplicar. La ayuda del campo no mencionaba `cost` ni las opciones (F-02).
+- *Almacenista*, solo teclado: Tab hasta «Confirmar recepción» en una recepción de un almacén sin cuentas, Enter; el
+  diálogo abre con el foco en «Cancelar» (seguro por defecto); Tab y Enter en «Confirmar recepción». El mensaje aparecía,
+  pero el foco caía al `body` y el error no se anunciaba (F-03). Corregido: el foco vuelve al botón, el motivo está en
+  `role="alert"` y Esc cierra y regresa el foco.
+- Al escribir la E2E de H3 CA2 apareció F-04.
+
 ## Hallazgos
 | ID | Sev. | Hallazgo | Estado |
 |---|---|---|---|
 | F-01 | Baja | `GET /api/data/{catálogo}?sort=Id` responde 500: `ResolveSort` arma `ORDER BY t.[Id] DESC, t.[Id] DESC` (columna repetida). Lo mismo en OData con `$orderby=Id` o una propiedad repetida (`$orderby=Folio,Folio desc`). La SPA no envía esos órdenes; existe desde las specs 001 y 018 | Resuelto después del cierre, a pedido del dueño: ordenar por `Id` no agrega el desempate y en OData gana el primer criterio de cada columna (el desempate sigue al último criterio conservado). Regresiones: `SortTests.cs` (8 de 12 fallaban con el código anterior, ya con `ResolveSort` y `ODataOrderClause` expuestos sin cambiar su lógica), `api-security` «ordena por Id en los dos sentidos» (listado y exportación) y `oauth-odata` H4 CA1 · CA2. Unitarias 497/497 y E2E 300/300 dos veces |
+| F-02 | Baja | La ayuda de «Automatizaciones (JSON)» en el modelador listaba solo `update, transition, create o rollup`: faltaban `cost` (desde la 020), `createLines`, `capture` y las políticas | Corregido en `EntityEditor.tsx` (texto de ayuda) |
+| F-03 | Media | Diálogo de confirmación de una acción del proceso: si el servidor la rechaza (p. ej. `PolizaConCuentas`), el botón se deshabilita mientras espera y el foco caía al `body`; el motivo se pintaba sin `role="alert"`. Una persona con teclado quedaba fuera del diálogo y un lector de pantalla no anunciaba por qué | Corregido en el genérico: `useFocusTrap` (`Dialog.tsx`) devuelve el foco al último elemento del diálogo cuando se rehabilita, y `Workflow.tsx` pone el motivo en `role="alert"`. Regresión en `valuacion-politicas` `H7 CA1 · CA3` (falla con la UI anterior: no hay `alert`) |
+| F-04 | Alta | En expresiones un vacío cuenta como 0 en la aritmética y `ROUND(vacío)` da 0: sin tipo de cambio ni respaldo, `RecepcionPartida.CostoUnitario` era **0**, no vacío. La regla `CostoCalculado` nunca se disparaba y la recepción se valuaba a cero (lo que la 020 describía como «`Costo` nulo» era en realidad un cero silencioso) | Corregido en **Inventario 1.6.1** (actualización nueva; la 1.6.0 ya estaba publicada): la fórmula deja el costo vacío si no hay fuente. No se cambió la semántica de `ROUND` en el motor (afectaría a todas las fórmulas). Regresión `H3 CA2` (con Inventario 1.6.0: *Expected null, Received 0*) y unitaria de módulos |
 
 ## Riesgos residuales
-- **H3 CA2 sin E2E.** Con moneda base MXN el costo siempre tiene respaldo; probarlo exige una empresa con otra moneda base y
-  todo el flujo de Compras en ella (usuarios asignados, orden autorizada). La regla está en la unitaria de módulos.
+- En expresiones, un vacío vale 0 en la aritmética y en `ROUND`/`ABS`/`MIN`/`MAX` (F-04): una fórmula que deba distinguir
+  «sin dato» de cero tiene que protegerse con `IF(ISBLANK(...), NULL, ...)`. Cambiarlo en el motor sería otra spec.
 - Las recepciones en borrador creadas antes de Inventario 1.5.0 no tienen `Moneda`: la regla del tipo de cambio usa la de
   la orden (`COALESCE`), pero la fórmula del costo de la partida no (rutas de tres niveles): con base MXN toma el costo de
   la orden; con otra base, `CostoCalculado` la detiene con mensaje.
@@ -78,4 +95,5 @@ prueba de la suite.
 - Las existencias anteriores a Costeo 1.1.0 no tienen cantidad costeada hasta su siguiente movimiento: se marcan
   «Costeo incompleto» y sin promedio.
 - Con la regla `PolizaConCuentas` quitada, la póliza pendiente se captura a mano; generarla después queda pendiente.
-- El rol *Contador* no lee recepciones (la vista «Pólizas pendientes» la ve quien sí las lee); es dato del entorno (ADR-0004).
+- El rol *Contador* no lee recepciones (la vista «Pólizas pendientes» la ve quien sí las lee); es dato del entorno (ADR-0004):
+  el dueño lo asigna en *Seguridad › Roles* de cada entorno.

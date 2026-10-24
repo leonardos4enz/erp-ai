@@ -37,10 +37,24 @@ function useFocusTrap(open: boolean, onClose: () => void) {
       if (e.shiftKey && document.activeElement === firstEl) { e.preventDefault(); lastEl.focus(); }
       else if (!e.shiftKey && document.activeElement === lastEl) { e.preventDefault(); firstEl.focus(); }
     }
+    // Regresión (revisión exploratoria 022, F-03): el botón que se deshabilita mientras espera al servidor saca el foco al
+    // body; si la acción falla, una persona con teclado quedaba fuera del diálogo. Al rehabilitarse, el foco regresa a él.
+    let last: HTMLElement | null = null;
+    const onFocusIn = (e: FocusEvent) => { if (node?.contains(e.target as Node)) last = e.target as HTMLElement; };
+    const watcher = new MutationObserver(() => {
+      const lostFocus = document.activeElement === null || document.activeElement === document.body;
+      if (!lostFocus || !node) return;
+      if (last?.isConnected && node.contains(last) && !last.matches(':disabled')) last.focus();
+      else if (last && !last.isConnected) node.querySelector<HTMLElement>(FOCUSABLE)?.focus();
+    });
+    if (node) watcher.observe(node, { attributes: true, attributeFilter: ['disabled'], subtree: true, childList: true });
+    document.addEventListener('focusin', onFocusIn);
     document.addEventListener('keydown', onKey);
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => {
+      watcher.disconnect();
+      document.removeEventListener('focusin', onFocusIn);
       document.removeEventListener('keydown', onKey);
       document.body.style.overflow = prevOverflow;
       previouslyFocused?.focus?.();

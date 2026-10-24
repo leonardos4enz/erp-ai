@@ -141,9 +141,11 @@ export function TransitionDialog({ def, row, transition: t, onClose, onDone, onC
         open
         title={t.label}
         danger={t.variant === 'danger'}
-        message={<>El documento pasará al estado <strong>{toLabel}</strong>. El cambio queda registrado en el historial.{error && (otherMessages.length
-          ? otherMessages.map((m) => <span key={m}><br /><span className="field-error">{m}</span></span>)
-          : <><br /><span className="field-error">{error.title}</span></>)}</>}
+        /* Regresión (revisión exploratoria 022, F-03): el motivo del rechazo se anuncia (role="alert"), no solo se pinta. */
+        message={<>El documento pasará al estado <strong>{toLabel}</strong>. El cambio queda registrado en el historial.{error && (
+          <span role="alert">{otherMessages.length
+            ? otherMessages.map((m) => <span key={m}><br /><span className="field-error">{m}</span></span>)
+            : <><br /><span className="field-error">{error.title}</span></>}</span>)}</>}
         confirmLabel={t.label}
         loading={busy}
         onConfirm={run}

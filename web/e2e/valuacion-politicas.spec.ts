@@ -123,7 +123,7 @@ async function pageAs(browser: Browser, w: keyof typeof users): Promise<Page> {
 
 test('H8: Inventario 1.6.0 y Costeo 1.1.0 están instalados con las políticas por defecto', async () => {
   const mods = (await get('admin', '/api/admin/modules')) as { id: string; installedVersion?: string; version: string }[];
-  expect(mods.find((m) => m.id === 'inventario')).toMatchObject({ installedVersion: '1.6.0' });
+  expect(mods.find((m) => m.id === 'inventario')).toMatchObject({ installedVersion: '1.6.1' });
   expect(mods.find((m) => m.id === 'costeo')).toMatchObject({ installedVersion: '1.1.0' });
   const valuar = (await model('MovimientoInventario')).automations!.find((a) => a.name === 'Valuar')!.actions[0];
   expect(valuar).toMatchObject({ uncostedEntry: 'fallback', methodChange: 'merge', totalCost: 'CostoTotal', quantityField: 'CantidadCosteada' });
@@ -231,6 +231,58 @@ test('H3 CA1 · CA3: sin tipo de cambio a su fecha la recepción no se confirma;
   });
 });
 
+test('H3 CA2: en una empresa con otra moneda base, sin tipo de cambio ninguna partida se confirma sin costo (aun sin la regla)', async () => {
+  // Con base MXN siempre hay respaldo (el costo de la orden); en base USD no: la regla invariante CostoCalculado detiene la
+  // confirmación aunque se quite la política TipoCambioDeLaRecepcion. Empresa propia, que se desactiva al terminar.
+  const admin = await apiAs(ADMIN.username, ADMIN.password); // sesión propia: cambia de empresa
+  const created = await admin.post('/api/admin/companies', { data: { code: 'e2e-usd-22', name: 'Dólares E2E 022', baseCurrency: 'USD' } });
+  expect(created.status(), await created.text()).toBe(200);
+  const company = await created.json();
+  const gerente = ((await (await admin.get('/api/admin/users')).json()) as { id: number; username: string; displayName: string; roleIds: number[]; unit?: string; companyIds: number[] }[])
+    .find((u) => u.username === users.gerente)!;
+  const setCompanies = (companyIds: number[]) => admin.put(`/api/admin/users/${gerente.id}`, { data: {
+    displayName: gerente.displayName, isActive: true, roleIds: gerente.roleIds, unit: gerente.unit, companyIds } });
+  try {
+    expect((await setCompanies([...gerente.companyIds, company.id])).status()).toBe(200);
+    expect((await admin.post('/api/auth/company', { data: { companyId: company.id } })).status()).toBe(200);
+    const g = await apiAs(users.gerente, PWD);
+    expect((await g.post('/api/auth/company', { data: { companyId: company.id } })).status()).toBe(200);
+
+    const alm = await (await admin.post('/api/data/Almacen', { data: { Clave: 'ALM-USD', Nombre: 'Almacén en dólares' } })).json();
+    const eur = ((await (await admin.get('/api/data/Moneda', { params: { pageSize: 50 } })).json()).items as Row[]).find((m) => m.Clave === 'EUR')!;
+    const oc = await (await admin.post('/api/data/OrdenCompra', { data: { Proveedor: ids.proveedor, Almacen: alm.id, Moneda: eur.id, TipoCambio: 20,
+      Partidas: [{ Producto: ids.b, Cantidad: 2, PrecioUnitario: 5, DescuentoPct: 0 }] } })).json();
+    expect(oc.Folio, JSON.stringify(oc)).toBeTruthy();
+    const step = async (who: APIRequestContext, row: Row, name: string) => {
+      const r = await who.post(`/api/data/OrdenCompra/${row.id}/transition`, { data: { transition: name, _rowVersion: row._rowVersion } });
+      expect(r.status(), await r.text()).toBe(200);
+      return (await r.json()) as Row;
+    };
+    const sent = await step(admin, await step(g, await step(admin, oc, 'enviar'), 'autorizar'), 'enviarProveedor');
+    const rec = await (await admin.post('/api/data/Recepcion', { data: { OrdenCompra: sent.id, Factura: 'F-USD',
+      Partidas: [{ PartidaOrden: (sent.Partidas as Row[])[0].id }] } })).json();
+    expect((rec.Partidas as Row[])[0].CostoUnitario).toBeNull(); // no hay EUR→USD ni respaldo en pesos
+    const confirm = async () => {
+      const fresh = await (await admin.get(`/api/data/Recepcion/${rec.id}`)).json();
+      const r = await admin.post(`/api/data/Recepcion/${rec.id}/transition`, { data: { transition: 'confirmar', _rowVersion: fresh._rowVersion } });
+      return { status: r.status(), body: (await r.json()) as Body };
+    };
+    await withoutRule('Recepcion', 'TipoCambioDeLaRecepcion', async () => {
+      const blocked = await confirm();
+      expect(blocked.status).toBe(400);
+      expect(blocked.body.errors!['Partidas[0].CostoUnitario'][0]).toMatch(/no tiene costo en la moneda base/);
+    });
+    expect(((await (await admin.get(`/api/data/Recepcion/${rec.id}`)).json()) as Row).Estado).toBe('Borrador');
+    await g.dispose();
+  } finally {
+    await setCompanies(gerente.companyIds);
+    await api.gerente?.dispose(); // cambiar sus empresas revoca sus sesiones: las pruebas siguientes inician otra
+    delete api.gerente;
+    await admin.put(`/api/admin/companies/${company.id}`, { data: { name: company.name, baseCurrency: 'USD', isActive: false } });
+    await admin.dispose();
+  }
+});
+
 test('H4 CA1: la entrada al almacén lleva la fecha de la recepción, igual que su póliza', async () => {
   const oc = await ordenEnviada({ Proveedor: ids.proveedor, Almacen: ids.almacen1, Partidas: [{ Producto: ids.b, Cantidad: 1, PrecioUnitario: 20, DescuentoPct: 0 }] });
   const rec = await recepcion(oc, { Factura: 'F-FECHA', Fecha: OTHER_DAY });
@@ -263,7 +315,9 @@ test('H7 CA1 · CA3: sin cuentas en el almacén la recepción con costo no se co
   await page.goto(`/c/Recepcion/${rec.id}`);
   await page.getByRole('button', { name: 'Confirmar recepción' }).click();
   await page.getByRole('dialog').getByRole('button', { name: 'Confirmar recepción' }).click();
-  await expect(page.getByRole('dialog').getByText(/no tiene la cuenta de inventario y la cuenta de entradas por facturar/)).toBeVisible();
+  // Regresión (revisión exploratoria 022, F-03): el motivo se anuncia y el foco vuelve al botón, dentro del diálogo.
+  await expect(page.getByRole('dialog').getByRole('alert')).toContainText('no tiene la cuenta de inventario y la cuenta de entradas por facturar');
+  await expect(page.getByRole('dialog').getByRole('button', { name: 'Confirmar recepción' })).toBeFocused();
   await page.context().close();
 
   // CA3: costo cero no necesita póliza (no cuadraría), así que no se bloquea ni se marca.

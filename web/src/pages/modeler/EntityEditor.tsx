@@ -728,7 +728,7 @@ export function EntityEditor({ original, entities, onCancel, onReview }: EntityE
             rows={12}
             spellCheck={false}
             placeholder={'[\n  { "name": "AlConfirmar", "label": "Al confirmar", "on": "enterState", "state": "Confirmada",\n    "actions": [{ "type": "transition", "target": "OrdenCompra", "transition": "recibir" }] }\n]'}
-            hint="Efectos en otros registros: on (create, update, enterState, transition) y acciones update, transition, create o rollup. Corren en la misma transacción, o después con mode: async; se validan en la vista previa."
+            hint="Efectos en otros registros: on (create, update, enterState, transition) y acciones update, transition, create (con createLines y capture), rollup o cost (políticas: uncostedEntry average/fallback/require, methodChange merge/keep). Corren en la misma transacción, o después con mode: async; se validan en la vista previa."
             error={visibleErrors.automationsJson ?? (d.automationsJson ? parseJsonError(d.automationsJson, 'array') : undefined)}
             value={d.automationsJson}
             onChange={(e) => setD((s) => ({ ...s, automationsJson: e.target.value }))}

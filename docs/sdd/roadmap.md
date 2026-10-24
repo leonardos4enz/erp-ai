@@ -258,7 +258,10 @@ reglas de negocio** (constitución I.1), configurables por metadatos con valores
   confirmada sin costo, el movimiento con la fecha de la recepción) y Costeo 1.1.0 (entrada sin costo al costo último,
   fundir capas al pasar a Promedio, cantidad costeada y «Costeo incompleto», regla `PolizaConCuentas` o, sin ella, *Póliza
   pendiente*). La tabla de la spec dice qué metadato cambia cada política.
-- **Pendiente:** reglas de advertencia (avisar sin bloquear); generar la póliza de una recepción pendiente cuando el almacén
+- **Corrección posterior:** Inventario 1.6.1 (sin tipo de cambio ni respaldo el costo queda vacío, no en cero: en expresiones
+  `ROUND` de un vacío da 0) y foco y anuncio del error en el diálogo de confirmación de una acción (ver `verify.md`, F-03/F-04).
+- **Pendiente:** decidir si el motor debe propagar el vacío en la aritmética y en `ROUND` (hoy vale 0: cada fórmula se
+  protege con `IF(ISBLANK(...))`); reglas de advertencia (avisar sin bloquear); generar la póliza de una recepción pendiente cuando el almacén
   ya tenga cuentas; dar al rol *Contador* lectura de recepciones (dato del entorno, ADR-0004); póliza de salidas (costo de
   ventas) y revaluación, que siguen de la 020.
 

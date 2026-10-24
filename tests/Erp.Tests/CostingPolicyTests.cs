@@ -124,12 +124,16 @@ public class CostingPolicyTests
         var model = before.Model;
         foreach (var (file, from) in new[] { ("costeo.json", "1.0.0"), ("inventario.json", "1.5.0") }) // el orden no importa
         {
-            var up = Assert.Single(Package(file).PendingAfter(from));
-            var c = PlanCompiler.Compile(up.Plan, model, before.Roles, before.Boards);
-            Assert.True(c.Preview.Valid, $"{file}: {Errors(c)}");
-            model = c.ResultingModel;
+            foreach (var up in Package(file).PendingAfter(from))
+            {
+                var c = PlanCompiler.Compile(up.Plan, model, before.Roles, before.Boards);
+                Assert.True(c.Preview.Valid, $"{file} {up.Version}: {Errors(c)}");
+                model = c.ResultingModel;
+            }
         }
-        Assert.Equal(["1.6.0", "1.1.0"], new[] { Package("inventario.json").Version, Package("costeo.json").Version });
+        Assert.Equal(["1.6.1", "1.1.0"], new[] { Package("inventario.json").Version, Package("costeo.json").Version });
+        // 1.6.1: sin fuente de costo la fórmula queda vacía (ROUND de un vacío da 0 y CostoCalculado no lo detendría).
+        Assert.StartsWith("IF(ISBLANK(COALESCE(", model["RecepcionPartida"].FindField("CostoUnitario")!.Formula);
 
         // Las reglas de Compras se conservan (setRules con merge) y se agregan las políticas.
         Assert.Equal(["CantidadPositiva", "PartidaDeLaOrden", "ProductoDeLaPartida", "NoExcederPendiente", "CostoCalculado"],

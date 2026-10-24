@@ -1,7 +1,7 @@
 {
   "id": "inventario",
   "name": "Inventario",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "icon": "boxes",
   "description": "Existencias por almacén y producto, y movimientos de entrada, salida, ajuste y traspaso. Las recepciones confirmadas de Compras generan sus entradas solas.",
   "requires": ["compras"],
@@ -240,6 +240,12 @@
                     { "field": "CostoUnitario", "value": "CostoUnitario" } ] }
               ] }
           ] }
+      ] } },
+    { "version": "1.6.1",
+      "description": "Corrección (spec 022): sin tipo de cambio ni respaldo, el costo unitario de la partida queda vacío en lugar de cero (ROUND de un vacío daba 0), así la regla «CostoCalculado» detiene la confirmación en vez de valuar la entrada a cero.",
+      "plan": { "description": "Inventario 1.6.1: costo vacío sin tipo de cambio", "operations": [
+        { "op": "updateField", "entity": "RecepcionPartida", "field": "CostoUnitario",
+          "formula": "IF(ISBLANK(COALESCE(CONVERT(PartidaOrden.PrecioUnitario * (1 - PartidaOrden.DescuentoPct / 100), Recepcion.Moneda, BASECURRENCY(), Recepcion.Fecha), IF(BASECURRENCY() = 'MXN', PartidaOrden.CostoMXN, NULL))), NULL, ROUND(COALESCE(CONVERT(PartidaOrden.PrecioUnitario * (1 - PartidaOrden.DescuentoPct / 100), Recepcion.Moneda, BASECURRENCY(), Recepcion.Fecha), IF(BASECURRENCY() = 'MXN', PartidaOrden.CostoMXN, NULL)), 4))" }
       ] } }
   ],
   "roles": [
