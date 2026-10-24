@@ -189,16 +189,21 @@ public sealed partial class RecordService(Db db, MetadataStore store)
         return list;
     }
 
-    public async Task<IReadOnlyList<LookupItem>> UserLookupAsync(string? search, CancellationToken ct)
+    /// <param name="teams">Spec 015: también equipos activos (para el campo dueño con <c>teamOwners</c>).</param>
+    public async Task<IReadOnlyList<LookupItem>> UserLookupAsync(string? search, CancellationToken ct, bool teams = false)
     {
         await using var cn = await db.OpenAsync(ct);
-        await using var cmd = new SqlCommand(
-            "SELECT TOP 20 Id, DisplayName FROM meta.[User] WHERE IsActive = 1 AND IsService = 0 AND (@s IS NULL OR DisplayName LIKE @s ESCAPE '\\' OR Username LIKE @s ESCAPE '\\') ORDER BY DisplayName", cn);
+        await using var cmd = new SqlCommand("""
+            SELECT TOP 20 Id, DisplayName, IsTeam FROM meta.[User]
+             WHERE IsActive = 1 AND IsService = 0 AND (IsTeam = 0 OR @teams = 1)
+               AND (@s IS NULL OR DisplayName LIKE @s ESCAPE '\' OR Username LIKE @s ESCAPE '\') ORDER BY IsTeam, DisplayName
+            """, cn);
         var term = string.IsNullOrWhiteSpace(search) ? null : "%" + EscapeLike(search.Trim()[..Math.Min(search.Trim().Length, MaxSearchLength)]) + "%";
         cmd.Parameters.Add(new SqlParameter("@s", (object?)term ?? DBNull.Value));
+        cmd.Parameters.Add(new SqlParameter("@teams", teams));
         var list = new List<LookupItem>();
         await using var r = await cmd.ExecuteReaderAsync(ct);
-        while (await r.ReadAsync(ct)) list.Add(new LookupItem(r.GetInt32(0), r.GetString(1)));
+        while (await r.ReadAsync(ct)) list.Add(new LookupItem(r.GetInt32(0), r.GetBoolean(2) ? $"{r.GetString(1)} (equipo)" : r.GetString(1)));
         return list;
     }
 
@@ -396,7 +401,7 @@ public sealed partial class RecordService(Db db, MetadataStore store)
                 try
                 {
                     var value = await ParseValueAsync(f, prop.Value, loader, ct);
-                    CheckReferenceVisible(f, value, draft.Header.GetValueOrDefault(f.Name), loader, user);
+                    CheckReferenceVisible(e, f, value, draft.Header.GetValueOrDefault(f.Name), loader, user);
                     draft.Header[f.Name] = value;
                 }
                 catch (FieldError ex) { errors[f.Name] = [ex.Message]; }
@@ -655,7 +660,7 @@ public sealed partial class RecordService(Db db, MetadataStore store)
                         try
                         {
                             var value = await ParseValueAsync(lf, lp.Value, loader, ct);
-                            CheckReferenceVisible(lf, value, line.Values.GetValueOrDefault(lf.Name), loader, writer.User);
+                            CheckReferenceVisible(child, lf, value, line.Values.GetValueOrDefault(lf.Name), loader, writer.User);
                             line.Values[lf.Name] = value;
                         }
                         catch (FieldError ex) { if (!lenient) errors[$"{f.Name}[{i}].{lf.Name}"] = [ex.Message]; }
@@ -670,7 +675,7 @@ public sealed partial class RecordService(Db db, MetadataStore store)
             try
             {
                 var value = await ParseValueAsync(f, prop.Value, loader, ct);
-                CheckReferenceVisible(f, value, d.Header.GetValueOrDefault(f.Name), loader, writer.User);
+                CheckReferenceVisible(e, f, value, d.Header.GetValueOrDefault(f.Name), loader, writer.User);
                 d.Header[f.Name] = value;
             }
             catch (FieldError ex) { if (!lenient) errors[f.Name] = [ex.Message]; }
@@ -682,8 +687,13 @@ public sealed partial class RecordService(Db db, MetadataStore store)
     /// Spec 006: elegir un registro que no se puede ver permitiría leerlo con fórmulas o valores por defecto
     /// (<c>Ref.Campo</c>). Conservar la referencia que ya tenía el documento sí se permite.
     /// </summary>
-    private static void CheckReferenceVisible(FieldDef f, object? value, object? current, RelatedLoader loader, UserContext user)
+    private static void CheckReferenceVisible(EntityDef e, FieldDef f, object? value, object? current, RelatedLoader loader, UserContext user)
     {
+        // Spec 015: un equipo solo es valor válido del campo dueño con «teamOwners», y activo.
+        if (value is int principal && f.Type == FieldTypes.User && loader.Principal(principal) is { IsTeam: true } team
+            && !(current is not null && Convert.ToInt32(current, CultureInfo.InvariantCulture) == principal)
+            && !(team.IsActive && e.Security?.AcceptsTeams(f.Name) == true))
+            throw new FieldError("El usuario seleccionado no existe.");
         if (value is not long id || f.Type != FieldTypes.Reference) return;
         if (current is not null && Convert.ToInt64(current, CultureInfo.InvariantCulture) == id) return;
         if (!loader.Visible(f.ReferenceEntity!, id, user)) throw new FieldError("El registro seleccionado no existe.");

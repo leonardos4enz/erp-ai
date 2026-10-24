@@ -23,6 +23,12 @@ public sealed record EnvironmentOptions(string Name, bool RequireApproval, strin
     /// </summary>
     public bool DirectChanges => !RequireApproval || AllowDirectChanges;
 
+    /// <summary>Spec 015 (H4): además del modelo, los cambios de seguridad que amplían acceso esperan aprobación.</summary>
+    public bool RequireSecurityApproval { get; init; }
+
+    /// <summary>Solo en un entorno con aprobación; <c>AllowDirectChanges</c> no la omite (es del modelo).</summary>
+    public bool SecurityChangesNeedApproval => RequireApproval && RequireSecurityApproval;
+
     /// <summary>Spec 012: 409 si el entorno exige aprobación (H4). Se llama antes de tocar la base.</summary>
     public void RequireDirectChange(string what)
     {
@@ -33,7 +39,11 @@ public sealed record EnvironmentOptions(string Name, bool RequireApproval, strin
 
     public static EnvironmentOptions From(IConfiguration config) =>
         Create(config["Environments:Name"], config.GetValue("Environments:RequireApproval", false), config["Environments:SigningKey"])
-            with { AllowDirectChanges = config.GetValue("Environments:AllowDirectChanges", false) };
+            with
+            {
+                AllowDirectChanges = config.GetValue("Environments:AllowDirectChanges", false),
+                RequireSecurityApproval = config.GetValue("Environments:RequireSecurityApproval", false),
+            };
 
     /// <summary>Una clave corta o un nombre largo detienen el arranque: mejor no arrancar que firmar con una clave débil.</summary>
     public static EnvironmentOptions Create(string? name, bool requireApproval, string? signingKey)

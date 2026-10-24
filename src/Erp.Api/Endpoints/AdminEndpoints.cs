@@ -1,3 +1,4 @@
+using System.Data.Common;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Dapper;
@@ -19,13 +20,20 @@ public static partial class AdminEndpoints
     /// <param name="CompanyIds">Spec 010: omitido = sin cambio.</param>
     public sealed record UpdateUserRequest(string? DisplayName, bool IsActive, int[]? RoleIds, string? Password, string? Unit = null, int[]? CompanyIds = null);
 
+    /// <summary>
+    /// Spec 015: la petición ya validada, como se guarda si espera aprobación. La contraseña va solo como hash PBKDF2.
+    /// <c>CompanyIds</c> null = sin cambio (en un alta, la empresa predeterminada).
+    /// </summary>
+    public sealed record UserPayload(string? Username, string DisplayName, int[] RoleIds, string? Unit, int[]? CompanyIds, bool IsActive, string? PasswordHash);
+
     public const int MaxUnit = 100;
 
     public sealed record EntityPermissionDto(string Entity, bool CanRead, bool CanCreate, bool CanUpdate, bool CanDelete);
+    /// <param name="InheritsRoleIds">Spec 015: roles de los que hereda.</param>
     public sealed record RoleDto(int Id, string Name, string? Description, bool IsSystem, bool IsSuperuser,
-        bool CanManageModel, bool CanManageUsers, bool CanViewAudit, IReadOnlyList<EntityPermissionDto> Permissions);
+        bool CanManageModel, bool CanManageUsers, bool CanViewAudit, IReadOnlyList<EntityPermissionDto> Permissions, IReadOnlyList<int> InheritsRoleIds);
     public sealed record RoleRequest(string? Name, string? Description, bool CanManageModel, bool CanManageUsers,
-        bool CanViewAudit, EntityPermissionDto[]? Permissions);
+        bool CanViewAudit, EntityPermissionDto[]? Permissions, int[]? InheritsRoleIds = null);
 
     public static void MapAdmin(this IEndpointRouteBuilder app)
     {
@@ -39,13 +47,7 @@ public static partial class AdminEndpoints
         });
         g.MapPost("/users", CreateUser);
         g.MapPut("/users/{id:int}", UpdateUser);
-        // Spec 006: unidades en uso, como sugerencias al asignar la unidad de un usuario.
-        g.MapGet("/units", async (HttpContext http, Db db) =>
-        {
-            RequireUserAdmin(http);
-            await using var cn = await db.OpenAsync();
-            return await cn.QueryAsync<string>("SELECT DISTINCT Unit FROM meta.[User] WHERE Unit IS NOT NULL ORDER BY Unit");
-        });
+        MapOrg(g);
 
         // Los modeladores también leen los roles para configurar reglas "obligatorio para rol".
         g.MapGet("/roles", async (HttpContext http, Db db) =>
@@ -76,8 +78,10 @@ public static partial class AdminEndpoints
         g.MapPost("/modules/{id}/upgrade", async (string id, HttpContext http, ModuleService modules, CancellationToken ct) =>
             new { changeSetId = await modules.UpgradeAsync(id, http, ct) });
 
-        g.MapPost("/roles", (RoleRequest req, HttpContext http, Db db, MetadataStore store, CancellationToken ct) => SaveRole(null, req, http, db, store, ct));
-        g.MapPut("/roles/{id:int}", (int id, RoleRequest req, HttpContext http, Db db, MetadataStore store, CancellationToken ct) => SaveRole(id, req, http, db, store, ct));
+        g.MapPost("/roles", (RoleRequest req, HttpContext http, Db db, MetadataStore store, SecurityApproval gate, CancellationToken ct) =>
+            SaveRole(null, req, http, db, store, gate, null, ct));
+        g.MapPut("/roles/{id:int}", (int id, RoleRequest req, HttpContext http, Db db, MetadataStore store, SecurityApproval gate, CancellationToken ct) =>
+            SaveRole(id, req, http, db, store, gate, null, ct));
     }
 
     private static void RequireUserAdmin(HttpContext http)
@@ -87,7 +91,7 @@ public static partial class AdminEndpoints
 
     // ---------------- Usuarios ----------------
 
-    private static async Task<IResult> CreateUser(CreateUserRequest req, HttpContext http, Db db, PasswordService passwords)
+    private static async Task<IResult> CreateUser(CreateUserRequest req, HttpContext http, Db db, PasswordService passwords, SecurityApproval gate)
     {
         RequireUserAdmin(http);
         var errors = new Dictionary<string, string[]>();
@@ -98,25 +102,45 @@ public static partial class AdminEndpoints
         if (!PasswordService.MeetsPolicy(req.Password, out var pwdError, username)) errors["password"] = [pwdError];
         var unit = NormalizeUnit(req.Unit, errors);
         if (errors.Count > 0) throw new ValidationFailed(errors);
+        var payload = new UserPayload(username, displayName, (req.RoleIds ?? []).Distinct().ToArray(), unit, req.CompanyIds?.Distinct().ToArray(),
+            true, passwords.Hash(req.Password!));
+        return await CreateUserCore(payload, http, db, gate, null);
+    }
 
+    internal static async Task<IResult> CreateUserCore(UserPayload p, HttpContext http, Db db, SecurityApproval gate, SecurityChangeApproval? approving)
+    {
         await using var cn = await db.OpenAsync();
         await using var tx = await cn.BeginTransactionAsync();
+        var username = p.Username!;
         if (await cn.ExecuteScalarAsync<int?>("SELECT 1 FROM meta.[User] WHERE Username = @username", new { username }, tx) is not null)
             throw new ValidationFailed(new Dictionary<string, string[]> { ["username"] = ["Ese usuario ya existe."] });
+        await RequireUnitAsync(cn, tx, p.Unit);
+        await RequireRolesAsync(cn, tx, p.RoleIds);
+        var companyIds = p.CompanyIds ?? (await cn.QueryAsync<int>("SELECT Id FROM meta.Company WHERE IsDefault = 1", transaction: tx)).ToArray();
+        await RequireCompaniesAsync(cn, tx, companyIds);
+
+        // Spec 015 (H4): un alta siempre amplía acceso.
+        if (gate.MustWait(approving, expands: true))
+        {
+            var change = await gate.RequestAsync(cn, tx, http, SecurityChangeKinds.UserCreate, null, $"Alta del usuario {username}",
+                p with { CompanyIds = companyIds }, null);
+            await tx.CommitAsync();
+            return SecurityApproval.Accepted(change);
+        }
 
         var id = await cn.ExecuteScalarAsync<int>(
-            "INSERT meta.[User] (Username, DisplayName, PasswordHash, Unit) OUTPUT inserted.Id VALUES (@username, @displayName, @hash, @unit)",
-            new { username, displayName, hash = passwords.Hash(req.Password!), unit }, tx);
-        await SetRolesAsync(cn, tx, id, req.RoleIds ?? []);
-        var companyIds = req.CompanyIds ?? await cn.QueryAsync<int>("SELECT Id FROM meta.Company WHERE IsDefault = 1", transaction: tx);
+            "INSERT meta.[User] (Username, DisplayName, PasswordHash, Unit) OUTPUT inserted.Id VALUES (@username, @DisplayName, @PasswordHash, @Unit)",
+            new { username, p.DisplayName, p.PasswordHash, p.Unit }, tx);
+        await SetRolesAsync(cn, tx, id, p.RoleIds);
         await SetCompaniesAsync(cn, tx, id, companyIds);
         await Audit.WriteAsync(cn, tx, http, AuditActions.UserChange, "Usuario", id.ToString(),
-            after: new { username, displayName, roleIds = req.RoleIds, unit, companyIds });
+            after: new { username, displayName = p.DisplayName, roleIds = p.RoleIds, unit = p.Unit, companyIds, securityChange = approving?.Id });
+        if (approving is not null) await SecurityApproval.MarkAppliedAsync(cn, tx, approving, http);
         await tx.CommitAsync();
         return Results.Created($"/api/admin/users/{id}", (await LoadUsersAsync(cn)).First(u => u.Id == id));
     }
 
-    private static async Task<UserDto> UpdateUser(int id, UpdateUserRequest req, HttpContext http, Db db, PasswordService passwords)
+    private static async Task<IResult> UpdateUser(int id, UpdateUserRequest req, HttpContext http, Db db, PasswordService passwords, SecurityApproval gate)
     {
         RequireUserAdmin(http);
         var me = http.CurrentUser();
@@ -126,40 +150,67 @@ public static partial class AdminEndpoints
         if (id == me.Id && !req.IsActive) errors["isActive"] = ["No puedes desactivar tu propia cuenta."];
         var unit = NormalizeUnit(req.Unit, errors);
 
-        await using var cn = await db.OpenAsync();
-        var before = (await LoadUsersAsync(cn)).FirstOrDefault(u => u.Id == id) ?? throw new NotFound("El usuario no existe.");
-        if (!string.IsNullOrEmpty(req.Password) && !PasswordService.MeetsPolicy(req.Password, out var pwdError, before.Username))
-            errors["password"] = [pwdError];
+        await using (var cn = await db.OpenAsync())
+        {
+            var before = (await LoadUsersAsync(cn)).FirstOrDefault(u => u.Id == id) ?? throw new NotFound("El usuario no existe.");
+            if (!string.IsNullOrEmpty(req.Password) && !PasswordService.MeetsPolicy(req.Password, out var pwdError, before.Username))
+                errors["password"] = [pwdError];
+        }
         if (errors.Count > 0) throw new ValidationFailed(errors);
+        var payload = new UserPayload(null, displayName, (req.RoleIds ?? []).Distinct().ToArray(), unit, req.CompanyIds?.Distinct().ToArray(),
+            req.IsActive, string.IsNullOrEmpty(req.Password) ? null : passwords.Hash(req.Password));
+        return await UpdateUserCore(id, payload, http, db, gate, null);
+    }
 
+    private static UserAccessSnapshot Snapshot(UserDto u) =>
+        new(u.DisplayName, u.IsActive, u.RoleIds.Order().ToList(), u.Unit, u.CompanyIds.Order().ToList());
+
+    internal static async Task<IResult> UpdateUserCore(int id, UserPayload p, HttpContext http, Db db, SecurityApproval gate, SecurityChangeApproval? approving)
+    {
+        var me = http.CurrentUser();
+        await using var cn = await db.OpenAsync();
         await using var tx = await cn.BeginTransactionAsync();
-        var roleIds = req.RoleIds ?? [];
-        var rolesChanged = !before.RoleIds.Order().SequenceEqual(roleIds.Distinct().Order());
-        var companyIds = req.CompanyIds ?? before.CompanyIds;
-        var companiesChanged = !before.CompanyIds.Order().SequenceEqual(companyIds.Distinct().Order());
+        var before = (await LoadUsersAsync(cn, tx)).FirstOrDefault(u => u.Id == id) ?? throw new NotFound("El usuario no existe.");
+        var snapshot = Snapshot(before);
+        approving?.Verify(snapshot);
+        await RequireUnitAsync(cn, tx, p.Unit);
+        await RequireRolesAsync(cn, tx, p.RoleIds);
+        var companyIds = p.CompanyIds ?? before.CompanyIds.ToArray();
+        await RequireCompaniesAsync(cn, tx, companyIds);
+
+        var after = new UserAccessSnapshot(p.DisplayName, p.IsActive, p.RoleIds.Order().ToList(), p.Unit, companyIds.Order().ToList());
+        // Spec 015 (H4): agregar roles o empresas, cambiar la unidad, reactivar o poner contraseña a otro espera aprobación.
+        var requester = approving is null ? me.Id : (int?)null;
+        if (gate.MustWait(approving, SecurityGrants.User(snapshot, after, p.PasswordHash is not null && id != requester)))
+        {
+            var change = await gate.RequestAsync(cn, tx, http, SecurityChangeKinds.UserUpdate, id, $"Cambios al usuario {before.Username}", p, snapshot);
+            await tx.CommitAsync();
+            return SecurityApproval.Accepted(change);
+        }
+
+        var rolesChanged = !before.RoleIds.Order().SequenceEqual(p.RoleIds.Order());
+        var companiesChanged = !before.CompanyIds.Order().SequenceEqual(companyIds.Order());
         // Cambiar contraseña, roles, unidad, empresas o desactivar invalida las sesiones abiertas (nuevo SecurityStamp):
         // la unidad (spec 006) y las empresas (spec 010) deciden qué registros ve.
-        var revoke = !string.IsNullOrEmpty(req.Password) || rolesChanged || companiesChanged || (before.IsActive && !req.IsActive) || before.Unit != unit;
+        var revoke = p.PasswordHash is not null || rolesChanged || companiesChanged || (before.IsActive && !p.IsActive) || before.Unit != p.Unit;
         await cn.ExecuteAsync("""
-            UPDATE meta.[User] SET DisplayName = @displayName, IsActive = @IsActive, Unit = @unit,
-                PasswordHash = COALESCE(@hash, PasswordHash),
-                FailedAttempts = CASE WHEN @hash IS NULL THEN FailedAttempts ELSE 0 END,
-                LockoutEnd = CASE WHEN @hash IS NULL THEN LockoutEnd ELSE NULL END,
+            UPDATE meta.[User] SET DisplayName = @DisplayName, IsActive = @IsActive, Unit = @Unit,
+                PasswordHash = COALESCE(@PasswordHash, PasswordHash),
+                FailedAttempts = CASE WHEN @PasswordHash IS NULL THEN FailedAttempts ELSE 0 END,
+                LockoutEnd = CASE WHEN @PasswordHash IS NULL THEN LockoutEnd ELSE NULL END,
                 SecurityStamp = CASE WHEN @revoke = 1 THEN NEWID() ELSE SecurityStamp END
              WHERE Id = @id
-            """, new
-        {
-            id, displayName, req.IsActive, revoke, unit,
-            hash = string.IsNullOrEmpty(req.Password) ? null : passwords.Hash(req.Password),
-        }, tx);
-        await SetRolesAsync(cn, tx, id, roleIds);
+            """, new { id, p.DisplayName, p.IsActive, revoke, p.Unit, p.PasswordHash }, tx);
+        await SetRolesAsync(cn, tx, id, p.RoleIds);
         if (companiesChanged) await SetCompaniesAsync(cn, tx, id, companyIds);
         await EnsureSuperuserRemainsAsync(cn, tx);
         await Audit.WriteAsync(cn, tx, http, AuditActions.UserChange, "Usuario", id.ToString(),
             before: new { before.DisplayName, before.IsActive, before.RoleIds, before.Unit, before.CompanyIds },
-            after: new { DisplayName = displayName, req.IsActive, RoleIds = roleIds, Unit = unit, CompanyIds = companyIds, PasswordChanged = !string.IsNullOrEmpty(req.Password) });
+            after: new { p.DisplayName, p.IsActive, p.RoleIds, p.Unit, CompanyIds = companyIds, PasswordChanged = p.PasswordHash is not null,
+                securityChange = approving?.Id });
+        if (approving is not null) await SecurityApproval.MarkAppliedAsync(cn, tx, approving, http);
         await tx.CommitAsync();
-        return (await LoadUsersAsync(cn)).First(u => u.Id == id);
+        return Results.Ok((await LoadUsersAsync(cn)).First(u => u.Id == id));
     }
 
     private static string? NormalizeUnit(string? unit, Dictionary<string, string[]> errors)
@@ -169,22 +220,39 @@ public static partial class AdminEndpoints
         return string.IsNullOrEmpty(u) ? null : u;
     }
 
-    private static async Task SetRolesAsync(System.Data.Common.DbConnection cn, System.Data.Common.DbTransaction tx, int userId, int[] roleIds)
+    /// <summary>Spec 015: la unidad de un usuario o equipo es una de las dadas de alta en el árbol.</summary>
+    private static async Task RequireUnitAsync(DbConnection cn, DbTransaction tx, string? unit)
     {
-        var ids = roleIds.Distinct().ToArray();
+        if (unit is not null && await cn.ExecuteScalarAsync<int?>("SELECT 1 FROM meta.BusinessUnit WHERE Name = @unit", new { unit }, tx) is null)
+            throw new ValidationFailed(new Dictionary<string, string[]> { ["unit"] = ["La unidad no existe: dala de alta en Seguridad › Unidades."] });
+    }
+
+    private static async Task RequireRolesAsync(DbConnection cn, DbTransaction tx, int[] ids)
+    {
         var existing = (await cn.QueryAsync<int>("SELECT Id FROM meta.Role WHERE Id IN @ids", new { ids }, tx)).Count();
         if (existing != ids.Length) throw new ValidationFailed(new Dictionary<string, string[]> { ["roleIds"] = ["Hay roles que no existen."] });
+    }
+
+    private static async Task RequireCompaniesAsync(DbConnection cn, DbTransaction tx, int[] ids)
+    {
+        var existing = (await cn.QueryAsync<int>("SELECT Id FROM meta.Company WHERE Id IN @ids", new { ids }, tx)).Count();
+        if (existing != ids.Length) throw new ValidationFailed(new Dictionary<string, string[]> { ["companyIds"] = ["Hay empresas que no existen."] });
+    }
+
+    private static async Task SetRolesAsync(DbConnection cn, DbTransaction tx, int userId, int[] roleIds)
+    {
+        var ids = roleIds.Distinct().ToArray();
+        await RequireRolesAsync(cn, tx, ids);
         await cn.ExecuteAsync("DELETE meta.UserRole WHERE UserId = @userId", new { userId }, tx);
         foreach (var roleId in ids)
             await cn.ExecuteAsync("INSERT meta.UserRole (UserId, RoleId) VALUES (@userId, @roleId)", new { userId, roleId }, tx);
     }
 
     /// <summary>Spec 010: empresas que puede elegir. Si su empresa actual ya no está entre ellas, se olvida.</summary>
-    private static async Task SetCompaniesAsync(System.Data.Common.DbConnection cn, System.Data.Common.DbTransaction tx, int userId, IEnumerable<int> companyIds)
+    private static async Task SetCompaniesAsync(DbConnection cn, DbTransaction tx, int userId, IEnumerable<int> companyIds)
     {
         var ids = companyIds.Distinct().ToArray();
-        var existing = (await cn.QueryAsync<int>("SELECT Id FROM meta.Company WHERE Id IN @ids", new { ids }, tx)).Count();
-        if (existing != ids.Length) throw new ValidationFailed(new Dictionary<string, string[]> { ["companyIds"] = ["Hay empresas que no existen."] });
+        await RequireCompaniesAsync(cn, tx, ids);
         await cn.ExecuteAsync("DELETE meta.UserCompany WHERE UserId = @userId", new { userId }, tx);
         foreach (var companyId in ids)
             await cn.ExecuteAsync("INSERT meta.UserCompany (UserId, CompanyId) VALUES (@userId, @companyId)", new { userId, companyId }, tx);
@@ -192,7 +260,7 @@ public static partial class AdminEndpoints
             new { userId }, tx);
     }
 
-    private static async Task EnsureSuperuserRemainsAsync(System.Data.Common.DbConnection cn, System.Data.Common.DbTransaction tx)
+    private static async Task EnsureSuperuserRemainsAsync(DbConnection cn, DbTransaction tx)
     {
         var count = await cn.ExecuteScalarAsync<int>("""
             SELECT COUNT(DISTINCT u.Id) FROM meta.[User] u JOIN meta.UserRole ur ON ur.UserId = u.Id
@@ -201,18 +269,25 @@ public static partial class AdminEndpoints
         if (count == 0) throw new Conflict("Debe quedar al menos un administrador activo.");
     }
 
-    private static async Task<IReadOnlyList<UserDto>> LoadUsersAsync(System.Data.Common.DbConnection cn)
+    private static async Task<IReadOnlyList<UserDto>> LoadUsersAsync(DbConnection cn, DbTransaction? tx = null)
     {
-        var users = await cn.QueryAsync<UserRow>("SELECT Id, Username, DisplayName, IsActive, LastLoginAt, LockoutEnd, Unit FROM meta.[User] WHERE IsService = 0 ORDER BY Username");
-        var roles = (await cn.QueryAsync<(int UserId, int RoleId)>("SELECT UserId, RoleId FROM meta.UserRole")).ToLookup(x => x.UserId, x => x.RoleId);
-        var companies = (await cn.QueryAsync<(int UserId, int CompanyId)>("SELECT UserId, CompanyId FROM meta.UserCompany")).ToLookup(x => x.UserId, x => x.CompanyId);
+        var users = await cn.QueryAsync<UserRow>(
+            "SELECT Id, Username, DisplayName, IsActive, LastLoginAt, LockoutEnd, Unit FROM meta.[User] WHERE IsService = 0 AND IsTeam = 0 ORDER BY Username",
+            transaction: tx);
+        var roles = (await cn.QueryAsync<(int UserId, int RoleId)>("SELECT UserId, RoleId FROM meta.UserRole", transaction: tx)).ToLookup(x => x.UserId, x => x.RoleId);
+        var companies = (await cn.QueryAsync<(int UserId, int CompanyId)>("SELECT UserId, CompanyId FROM meta.UserCompany", transaction: tx)).ToLookup(x => x.UserId, x => x.CompanyId);
         return users.Select(u => new UserDto(u.Id, u.Username, u.DisplayName, u.IsActive, u.LastLoginAt,
-            u.LockoutEnd > DateTime.UtcNow ? u.LockoutEnd : null, roles[u.Id].ToList(), u.Unit, companies[u.Id].Order().ToList())).ToList();
+            u.LockoutEnd > DateTime.UtcNow ? u.LockoutEnd : null, roles[u.Id].Order().ToList(), u.Unit, companies[u.Id].Order().ToList())).ToList();
     }
 
     // ---------------- Roles ----------------
 
-    private static async Task<RoleDto> SaveRole(int? id, RoleRequest req, HttpContext http, Db db, MetadataStore store, CancellationToken ct)
+    private static RoleSnapshot Snapshot(RoleDto r) => new(r.Name, r.CanManageModel, r.CanManageUsers, r.CanViewAudit,
+        r.Permissions.OrderBy(x => x.Entity, StringComparer.OrdinalIgnoreCase).Select(x => new PermissionSnapshot(x.Entity, x.CanRead, x.CanCreate, x.CanUpdate, x.CanDelete)).ToList(),
+        r.InheritsRoleIds.Order().ToList());
+
+    internal static async Task<IResult> SaveRole(int? id, RoleRequest req, HttpContext http, Db db, MetadataStore store, SecurityApproval gate,
+        SecurityChangeApproval? approving, CancellationToken ct)
     {
         RequireUserAdmin(http);
         var name = req.Name?.Trim() ?? "";
@@ -220,28 +295,51 @@ public static partial class AdminEndpoints
         if (name.Length is 0 or > 100) errors["name"] = ["El nombre es obligatorio (máx. 100)."];
         if (req.Description?.Length > 300) errors["description"] = ["Máximo 300 caracteres."];
         var model = await store.GetAsync(ct);
-        var perms = req.Permissions ?? [];
+        var perms = (req.Permissions ?? []).DistinctBy(x => x.Entity, StringComparer.OrdinalIgnoreCase)
+            .Where(x => x.CanRead || x.CanCreate || x.CanUpdate || x.CanDelete).ToList();
         if (perms.Any(p => !model.ContainsKey(p.Entity))) errors["permissions"] = ["Hay catálogos que no existen."];
+        var parents = (req.InheritsRoleIds ?? []).Distinct().Order().ToArray();
+        if (parents.Length > RoleGraph.MaxParents) errors["inheritsRoleIds"] = [$"Un rol hereda de máximo {RoleGraph.MaxParents} roles."];
         if (errors.Count > 0) throw new ValidationFailed(errors);
+        // La carga que se guarda si espera aprobación: nombres de catálogo canónicos y sin permisos vacíos.
+        req = req with { Name = name, Description = req.Description?.Trim(), InheritsRoleIds = parents,
+            Permissions = perms.Select(p => p with { Entity = model[p.Entity].Name }).OrderBy(p => p.Entity, StringComparer.OrdinalIgnoreCase).ToArray() };
 
         await using var cn = await db.OpenAsync(ct);
         await using var tx = await cn.BeginTransactionAsync(ct);
+        var all = await LoadRolesAsync(cn, tx);
         RoleDto? before = null;
         if (id is not null)
         {
-            before = (await LoadRolesAsync(cn, tx)).FirstOrDefault(r => r.Id == id) ?? throw new NotFound("El rol no existe.");
+            before = all.FirstOrDefault(r => r.Id == id) ?? throw new NotFound("El rol no existe.");
+            approving?.Verify(Snapshot(before));
             if (before.IsSystem && !string.Equals(before.Name, name, StringComparison.Ordinal))
                 throw new ValidationFailed(new Dictionary<string, string[]> { ["name"] = ["Los roles del sistema no se pueden renombrar."] });
         }
-        if (await cn.ExecuteScalarAsync<int?>("SELECT 1 FROM meta.Role WHERE Name = @name AND Id <> ISNULL(@id, 0)", new { name, id }, tx) is not null)
+        if (all.Any(r => r.Id != id && string.Equals(r.Name, name, StringComparison.OrdinalIgnoreCase)))
             throw new ValidationFailed(new Dictionary<string, string[]> { ["name"] = ["Ya existe un rol con ese nombre."] });
 
         // El rol superusuario no se puede degradar desde la aplicación.
-        var p = new { id, name, description = req.Description?.Trim(), req.CanManageModel, req.CanManageUsers, req.CanViewAudit };
+        var superuser = before?.IsSuperuser == true;
+        var (canModel, canUsers, canAudit) = superuser ? (true, true, true) : (req.CanManageModel, req.CanManageUsers, req.CanViewAudit);
+        CheckInheritance(id, parents, canModel || canUsers || canAudit || superuser, all);
+
+        var after = new RoleSnapshot(name, canModel, canUsers, canAudit,
+            req.Permissions!.Select(x => new PermissionSnapshot(x.Entity, x.CanRead, x.CanCreate, x.CanUpdate, x.CanDelete)).ToList(), parents);
+        // Spec 015 (H4): renombrar o agregar permisos, capacidades o herencia espera aprobación.
+        if (gate.MustWait(approving, SecurityGrants.Role(before is null ? null : Snapshot(before), after)))
+        {
+            var change = await gate.RequestAsync(cn, tx, http, id is null ? SecurityChangeKinds.RoleCreate : SecurityChangeKinds.RoleUpdate, id,
+                id is null ? $"Alta del rol {name}" : $"Cambios al rol {before!.Name}", req, before is null ? null : Snapshot(before));
+            await tx.CommitAsync(ct);
+            return SecurityApproval.Accepted(change);
+        }
+
+        var args = new { id, name, description = req.Description, req.CanManageModel, req.CanManageUsers, req.CanViewAudit };
         var roleId = id ?? await cn.ExecuteScalarAsync<int>("""
             INSERT meta.Role (Name, Description, CanManageModel, CanManageUsers, CanViewAudit)
             OUTPUT inserted.Id VALUES (@name, @description, @CanManageModel, @CanManageUsers, @CanViewAudit)
-            """, p, tx);
+            """, args, tx);
         if (id is not null)
             await cn.ExecuteAsync("""
                 UPDATE meta.Role SET Name = @name, Description = @description,
@@ -249,23 +347,58 @@ public static partial class AdminEndpoints
                     CanManageUsers = CASE WHEN IsSuperuser = 1 THEN 1 ELSE @CanManageUsers END,
                     CanViewAudit = CASE WHEN IsSuperuser = 1 THEN 1 ELSE @CanViewAudit END
                  WHERE Id = @id
-                """, p, tx);
+                """, args, tx);
 
         await cn.ExecuteAsync("DELETE meta.EntityPermission WHERE RoleId = @roleId", new { roleId }, tx);
-        foreach (var perm in perms.DistinctBy(x => x.Entity, StringComparer.OrdinalIgnoreCase)
-                     .Where(x => x.CanRead || x.CanCreate || x.CanUpdate || x.CanDelete))
+        foreach (var perm in req.Permissions!)
             await cn.ExecuteAsync("""
                 INSERT meta.EntityPermission (RoleId, EntityName, CanRead, CanCreate, CanUpdate, CanDelete)
                 VALUES (@roleId, @Entity, @CanRead, @CanCreate, @CanUpdate, @CanDelete)
-                """, new { roleId, Entity = model[perm.Entity].Name, perm.CanRead, perm.CanCreate, perm.CanUpdate, perm.CanDelete }, tx);
+                """, new { roleId, perm.Entity, perm.CanRead, perm.CanCreate, perm.CanUpdate, perm.CanDelete }, tx);
+        await cn.ExecuteAsync("DELETE meta.RoleInherit WHERE RoleId = @roleId", new { roleId }, tx);
+        foreach (var parent in parents)
+            await cn.ExecuteAsync("INSERT meta.RoleInherit (RoleId, ParentRoleId) VALUES (@roleId, @parent)", new { roleId, parent }, tx);
 
-        var after = (await LoadRolesAsync(cn, tx)).First(r => r.Id == roleId);
-        await Audit.WriteAsync(cn, tx, http, AuditActions.RoleChange, "Rol", roleId.ToString(), before, after);
+        var saved = (await LoadRolesAsync(cn, tx)).First(r => r.Id == roleId);
+        await Audit.WriteAsync(cn, tx, http, AuditActions.RoleChange, "Rol", roleId.ToString(), before,
+            approving is null ? saved : new { role = saved, securityChange = approving.Id });
+        if (approving is not null) await SecurityApproval.MarkAppliedAsync(cn, tx, approving, http);
         await tx.CommitAsync(ct);
-        return after;
+        return Results.Ok(saved);
     }
 
-    private static async Task<IReadOnlyList<RoleDto>> LoadRolesAsync(System.Data.Common.DbConnection cn, System.Data.Common.DbTransaction? tx = null)
+    /// <summary>
+    /// Spec 015 (H3): los roles de los que se hereda existen, no tienen capacidades administrativas (no se heredan), y la
+    /// herencia no forma ciclos ni pasa de <see cref="RoleGraph.MaxDepth"/> niveles. Un rol del que otros heredan no puede ganar
+    /// capacidades.
+    /// </summary>
+    private static void CheckInheritance(int? id, int[] parents, bool administrative, IReadOnlyList<RoleDto> all)
+    {
+        var errors = new List<string>();
+        var byId = all.ToDictionary(r => r.Id);
+        foreach (var parent in parents)
+        {
+            if (parent == id) errors.Add("Un rol no puede heredar de sí mismo.");
+            else if (!byId.TryGetValue(parent, out var r)) errors.Add("Hay roles que no existen.");
+            else if (r.IsSuperuser || r.CanManageModel || r.CanManageUsers || r.CanViewAudit)
+                errors.Add($"No se hereda de «{r.Name}»: tiene capacidades administrativas, que se asignan directamente.");
+        }
+        if (id is not null && administrative && all.Any(r => r.InheritsRoleIds.Contains(id.Value)))
+            errors.Add("Otros roles heredan de este: no puede tener capacidades administrativas.");
+        if (errors.Count == 0)
+        {
+            const int draft = 0; // un rol nuevo aún no tiene id
+            var self = id ?? draft;
+            var edges = all.Where(r => r.Id != self).SelectMany(r => r.InheritsRoleIds.Select(pid => (r.Id, pid)))
+                .Concat(parents.Select(pid => (self, pid))).ToList();
+            var depth = RoleGraph.MaxDepthOf(edges);
+            if (depth is null) errors.Add("La herencia formaría un ciclo.");
+            else if (depth > RoleGraph.MaxDepth) errors.Add($"La herencia admite máximo {RoleGraph.MaxDepth} niveles.");
+        }
+        if (errors.Count > 0) throw new ValidationFailed(new Dictionary<string, string[]> { ["inheritsRoleIds"] = errors.Distinct().ToArray() });
+    }
+
+    private static async Task<IReadOnlyList<RoleDto>> LoadRolesAsync(DbConnection cn, DbTransaction? tx = null)
     {
         var roles = await cn.QueryAsync<RoleRow>(
             "SELECT Id, Name, Description, IsSystem, IsSuperuser, CanManageModel, CanManageUsers, CanViewAudit FROM meta.Role ORDER BY Name",
@@ -273,9 +406,13 @@ public static partial class AdminEndpoints
         var perms = (await cn.QueryAsync<PermRow>(
             "SELECT RoleId, EntityName, CanRead, CanCreate, CanUpdate, CanDelete FROM meta.EntityPermission", transaction: tx))
             .ToLookup(x => x.RoleId);
+        var parents = (await cn.QueryAsync<(int RoleId, int ParentRoleId)>("SELECT RoleId, ParentRoleId FROM meta.RoleInherit", transaction: tx))
+            .ToLookup(x => x.RoleId, x => x.ParentRoleId);
         return roles.Select(r => new RoleDto(r.Id, r.Name, r.Description, r.IsSystem, r.IsSuperuser, r.CanManageModel,
             r.CanManageUsers, r.CanViewAudit,
-            perms[r.Id].Select(x => new EntityPermissionDto(x.EntityName, x.CanRead, x.CanCreate, x.CanUpdate, x.CanDelete)).ToList())).ToList();
+            perms[r.Id].OrderBy(x => x.EntityName, StringComparer.OrdinalIgnoreCase)
+                .Select(x => new EntityPermissionDto(x.EntityName, x.CanRead, x.CanCreate, x.CanUpdate, x.CanDelete)).ToList(),
+            parents[r.Id].Order().ToList())).ToList();
     }
 
     private sealed record UserRow(int Id, string Username, string DisplayName, bool IsActive, DateTime? LastLoginAt, DateTime? LockoutEnd, string? Unit);

@@ -1,6 +1,6 @@
 # ADR-0004 — Roles, permisos y usuarios son dato de cada entorno (sin cuatro ojos por ahora)
 
-**Estado:** Aceptado · **Fecha:** 2026-10-23 · **Spec:** [014](../sdd/specs/014-pendientes-menores/spec.md) (H7)
+**Estado:** Aceptado, revisado por [ADR-0005](0005-aprobacion-de-cambios-de-seguridad.md) (cuatro ojos opcionales) · **Fecha:** 2026-10-23 · **Spec:** [014](../sdd/specs/014-pendientes-menores/spec.md) (H7)
 
 ## Contexto
 Con `Environments:RequireApproval` (spec 009) el **modelo** solo cambia por paquetes que aprueba otro administrador, y la
@@ -30,6 +30,6 @@ Razones:
 - (−) En producción, un solo administrador de usuarios puede ampliar permisos. Mitigación: auditoría inmutable y
   *administrar usuarios* separado de *administrar el modelo* y del superusuario.
 - (+) Revocar accesos sigue siendo inmediato.
-- Pendiente para la **spec 015** (jerarquía de roles, equipos y unidades): una aprobación genérica de cambios de
-  seguridad (roles, asignaciones, claves de API) cuando el entorno la exija, con la misma idea de huella que los paquetes.
-  Si se hace, se revisa este ADR.
+- ~~Pendiente para la spec 015~~ Resuelto en la 015 ([ADR-0005](0005-aprobacion-de-cambios-de-seguridad.md)): con
+  `Environments:RequireSecurityApproval`, todo lo que amplía acceso (roles, asignaciones, equipos, unidades, claves de API)
+  espera la aprobación de otro administrador con huella; revocar sigue siendo inmediato. Sin esa opción, rige este ADR.

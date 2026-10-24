@@ -77,6 +77,8 @@ public sealed record FieldDef
     public string? Access { get; init; }
     /// <summary>Spec 006, solo salida: estados en que se captura (de la política del catálogo).</summary>
     public IReadOnlyList<string>? EditableIn { get; init; }
+    /// <summary>Spec 015, solo salida: el campo dueño acepta equipos (<see cref="SecurityPolicy.TeamOwners"/>).</summary>
+    public bool? AcceptsTeams { get; init; }
 
     public bool ReadOnly => FieldTypes.ReadOnly.Contains(Type);
 
@@ -200,7 +202,9 @@ public static class RecordScopes
     public const string All = "all";
     public const string Unit = "unit";
     public const string Own = "own";
-    public static readonly IReadOnlySet<string> Valid = new HashSet<string> { All, Unit, Own };
+    /// <summary>Spec 015: el dueño pertenece a mi unidad o a una que cuelga de ella (a cualquier profundidad).</summary>
+    public const string UnitTree = "unitTree";
+    public static readonly IReadOnlySet<string> Valid = new HashSet<string> { All, Unit, UnitTree, Own };
 }
 
 /// <summary><c>Read</c>/<c>Edit</c>: roles que ven / capturan (omitido = todos). <c>EditableIn</c>: estados en que se captura.</summary>
@@ -232,6 +236,15 @@ public sealed record SecurityPolicy
     public IReadOnlyList<RecordGrant>? Records { get; init; }
     /// <summary>Las personas solo consultan: altas, cambios y bajas solo por automatizaciones.</summary>
     public bool SystemManaged { get; init; }
+    /// <summary>
+    /// Spec 015: el campo dueño (<see cref="Owner"/>) acepta un equipo además de una persona. Se omite en falso para que la
+    /// forma canónica de las políticas (paquetes de la 009) no cambie en catálogos que no lo usan.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool TeamOwners { get; init; }
+
+    /// <summary>Spec 015: ¿este campo es el dueño y admite equipos?</summary>
+    public bool AcceptsTeams(string field) => TeamOwners && string.Equals(Owner, field, StringComparison.OrdinalIgnoreCase);
 
     public FieldSecurity? For(string field) =>
         Fields?.FirstOrDefault(f => string.Equals(f.Field, field, StringComparison.OrdinalIgnoreCase));

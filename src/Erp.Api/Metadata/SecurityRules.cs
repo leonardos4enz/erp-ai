@@ -19,7 +19,7 @@ public static class SecurityRules
                 if (!roles.Contains(r)) msgs.Add($"{where}: el rol '{r}' no existe.");
         }
 
-        if (e.IsChild && (s.Records is not null || s.Owner is not null || s.SystemManaged))
+        if (e.IsChild && (s.Records is not null || s.Owner is not null || s.SystemManaged || s.TeamOwners))
             msgs.Add("es una partida: el dueño, los permisos por registro y «lo administra el sistema» se declaran en su documento.");
 
         var fields = s.Fields ?? [];
@@ -54,6 +54,8 @@ public static class SecurityRules
 
         if (s.Owner is not null && e.FindField(s.Owner) is not { IsArchived: false, Type: FieldTypes.User })
             msgs.Add($"el dueño '{s.Owner}' debe ser un campo de tipo usuario de {e.Name}.");
+        // Spec 015: CreatedBy siempre es una persona; un equipo solo puede ser dueño por un campo declarado.
+        if (s.TeamOwners && s.Owner is null) msgs.Add("«teamOwners» requiere declarar el campo dueño («owner»).");
 
         if (s.Records is { } grants)
         {
@@ -65,7 +67,7 @@ public static class SecurityRules
                 var where = $"permiso {i + 1}";
                 if (g.Roles is { Count: 0 }) msgs.Add($"{where}: indica los roles u omite «roles» para todos.");
                 CheckRoles(g.Roles, where);
-                if (!RecordScopes.Valid.Contains(g.EffectiveScope)) msgs.Add($"{where}: alcance '{g.Scope}' inválido (all, unit u own).");
+                if (!RecordScopes.Valid.Contains(g.EffectiveScope)) msgs.Add($"{where}: alcance '{g.Scope}' inválido (all, unitTree, unit u own).");
                 if (g.Access is not null && g.Access is not ("read" or "write")) msgs.Add($"{where}: acceso '{g.Access}' inválido (read o write).");
                 if (!string.IsNullOrWhiteSpace(g.Where) && RecordFilter.Check(g.Where, e, roles) is { } err) msgs.Add($"{where} (where): {err}");
             }

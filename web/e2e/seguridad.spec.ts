@@ -130,6 +130,8 @@ test('preparar: roles, catálogo con política de seguridad y usuarios con unida
       permissions: [perms('Oportunidad', write), perms('Cotizacion', true)] } });
     expect(res.status(), await res.text()).toBe(200);
   }
+  // Spec 015: la unidad del usuario es una unidad dada de alta (antes era texto libre).
+  for (const name of ['Norte', 'Sur']) expect((await admin.post('/api/admin/units', { data: { name } })).status()).toBe(201);
   for (const [w, u] of Object.entries(USERS) as [Who, (typeof USERS)[Who]][]) {
     const res = await admin.post('/api/admin/users', { data: {
       username: username(w), displayName: `${w} E2E`, password: PWD, roleIds: [await roleId(admin, u.role)], unit: u.unit,
@@ -309,7 +311,7 @@ test('H2 CA6: el administrador asigna la unidad en Seguridad y cambia lo que ve 
   await page.getByRole('row', { name: /e2e-sec-vend2/ }).getByRole('button', { name: 'Editar' }).click();
   const dialog = page.getByRole('dialog');
   await expect(dialog.getByLabel('Unidad')).toHaveValue('Sur');
-  await dialog.getByLabel('Unidad').fill('Norte');
+  await dialog.getByLabel('Unidad').selectOption('Norte');
   await dialog.getByRole('button', { name: 'Guardar' }).click();
   await expect(page.getByText('Usuario actualizado')).toBeVisible();
   await expect(page.getByRole('row', { name: /e2e-sec-vend2/ })).toContainText('Norte');

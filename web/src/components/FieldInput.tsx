@@ -27,6 +27,8 @@ export interface FieldControlProps {
 }
 
 const lookupUsers = (search: string, signal: AbortSignal) => usersApi.lookup(search, signal);
+// Spec 015: el campo dueño con teamOwners ofrece personas y equipos.
+const lookupPrincipals = (search: string, signal: AbortSignal) => usersApi.lookup(search, signal, true);
 
 /** Solo el control (sin etiqueta ni mensajes), según el tipo del campo. */
 export function FieldControl(p: FieldControlProps) {
@@ -93,7 +95,7 @@ export function FieldControl(p: FieldControlProps) {
         <ReferenceSelect
           id={id}
           entity={f.referenceEntity ?? ''}
-          lookup={f.type === 'user' ? lookupUsers : undefined}
+          lookup={f.type === 'user' ? (f.acceptsTeams ? lookupPrincipals : lookupUsers) : undefined}
           filter={f.type === 'reference' ? p.filter : undefined}
           value={(v as number | null) ?? null}
           label={p.refLabel ?? null}

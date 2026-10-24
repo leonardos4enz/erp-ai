@@ -58,4 +58,5 @@ y cada sesión queda como registro de una sola entrega. Al cerrar la spec:
 | 012 | [Endurecimiento](specs/012-endurecimiento/spec.md) | Implementado |
 | 013 | [Formulario en solo lectura](specs/013-formulario-solo-lectura/spec.md) | Implementado |
 | 014 | [Pendientes menores y riesgos residuales](specs/014-pendientes-menores/spec.md) | Implementado |
-| 015–020 | Brechas de plataforma ([roadmap](roadmap.md#specs-planeadas-brechas-de-plataforma)) | Planeadas |
+| 015 | [Jerarquía de roles, equipos y unidades de negocio](specs/015-jerarquia-roles-equipos/spec.md) | Implementado |
+| 016–020 | Brechas de plataforma ([roadmap](roadmap.md#specs-planeadas-brechas-de-plataforma)) | Planeadas |

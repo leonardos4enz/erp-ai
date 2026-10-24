@@ -80,7 +80,11 @@ public static class ModelEndpoints
     private static EntityDef ForUser(EntityDef e, UserContext u)
     {
         var fields = (u.CanManageModel ? e.Fields : e.ActiveFields)
-            .Select(f => f with { Access = FieldAccess.ByRole(e, f, u), EditableIn = e.Security?.For(f.Name)?.EditableIn })
+            .Select(f => f with
+            {
+                Access = FieldAccess.ByRole(e, f, u), EditableIn = e.Security?.For(f.Name)?.EditableIn,
+                AcceptsTeams = e.Security?.AcceptsTeams(f.Name) == true ? true : null, // spec 015
+            })
             .Where(f => u.CanManageModel || f.Access != FieldAccessLevels.Hidden)
             .ToList();
         // Spec 007: vistas y reportes se consultan por /api/views y /api/reports, ya filtrados para el usuario.

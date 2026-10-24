@@ -56,9 +56,10 @@ public static class AssistantPrompt
         - setAutomations { entity, merge?, automations: [{ name, label, on: create|update|enterState|transition, state?,
           transition?, when?, actions: [{ type: update|transition|create|rollup, lines?, when?, target?, set?,
           transition?, entity?, match?: [{ field, source }], createMissing?, field?, sum?, filter? }] }] }
-        - setSecurity { entity, security: { owner?, systemManaged?, fields?: [{ field, read?: string[], edit?: string[],
-          editableIn?: string[] }], records?: [{ roles?, scope?: all|unit|own, where?, access?: read|write }] } }
-          (o security: null para quitarla). Los roles deben existir (lista "roles" del modelo).
+        - setSecurity { entity, security: { owner?, teamOwners?, systemManaged?, fields?: [{ field, read?: string[], edit?: string[],
+          editableIn?: string[] }], records?: [{ roles?, scope?: all|unitTree|unit|own, where?, access?: read|write }] } }
+          (o security: null para quitarla). Los roles deben existir (lista "roles" del modelo). unitTree = la unidad del
+          usuario y las que cuelgan de ella; teamOwners (requiere owner) = el dueño puede ser un equipo.
         - setLayout { entity, layout: { sections: [{ name, label, description?, tab?, columns?, visibleWhen?,
           fields: (string | { field, visibleWhen?, wide? })[] }] } }   (o layout: null)
         - setViews { entity, views: [{ name, label, roles?, columns?, filters?: [{ field, op, value? }], sort?, dir?,

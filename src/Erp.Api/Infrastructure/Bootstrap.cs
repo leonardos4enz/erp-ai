@@ -448,6 +448,61 @@ public static class Bootstrap
         IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_AssistantRequest_Conversation')
             CREATE INDEX IX_AssistantRequest_Conversation ON meta.AssistantRequest (ConversationId);
 
+        -- Spec 015: unidades en árbol (ruta materializada con ids: '/1/4/'), equipos, herencia de roles y solicitudes de
+        -- cambios de seguridad. La unidad del usuario sigue siendo el nombre (CURRENTUNIT() y reglas de la 006 sin cambios).
+        IF OBJECT_ID('meta.BusinessUnit') IS NULL
+        CREATE TABLE meta.BusinessUnit (
+            Id int IDENTITY PRIMARY KEY,
+            Name nvarchar(100) NOT NULL CONSTRAINT UX_BusinessUnit_Name UNIQUE,
+            ParentId int NULL CONSTRAINT FK_BusinessUnit_Parent REFERENCES meta.BusinessUnit(Id),
+            Path nvarchar(900) NOT NULL,
+            CreatedAt datetime2(3) NOT NULL DEFAULT SYSUTCDATETIME()
+        );
+        IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_BusinessUnit_Path')
+            CREATE INDEX IX_BusinessUnit_Path ON meta.BusinessUnit (Path);
+        -- Las etiquetas que ya tenían los usuarios (spec 006) pasan a ser unidades raíz.
+        INSERT meta.BusinessUnit (Name, Path)
+            SELECT DISTINCT u.Unit, N'' FROM meta.[User] u
+             WHERE u.Unit IS NOT NULL AND NOT EXISTS (SELECT 1 FROM meta.BusinessUnit b WHERE b.Name = u.Unit);
+        UPDATE meta.BusinessUnit SET Path = N'/' + CAST(Id AS nvarchar(12)) + N'/' WHERE Path = N'';
+
+        IF COL_LENGTH('meta.[User]', 'IsTeam') IS NULL ALTER TABLE meta.[User] ADD IsTeam bit NOT NULL CONSTRAINT DF_User_IsTeam DEFAULT 0;
+
+        IF OBJECT_ID('meta.TeamMember') IS NULL
+        CREATE TABLE meta.TeamMember (
+            TeamId int NOT NULL REFERENCES meta.[User](Id),
+            UserId int NOT NULL REFERENCES meta.[User](Id),
+            PRIMARY KEY (TeamId, UserId)
+        );
+        IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_TeamMember_User')
+            CREATE INDEX IX_TeamMember_User ON meta.TeamMember (UserId, TeamId);
+
+        IF OBJECT_ID('meta.RoleInherit') IS NULL
+        CREATE TABLE meta.RoleInherit (
+            RoleId int NOT NULL REFERENCES meta.Role(Id),
+            ParentRoleId int NOT NULL REFERENCES meta.Role(Id),
+            PRIMARY KEY (RoleId, ParentRoleId)
+        );
+
+        IF OBJECT_ID('meta.SecurityChange') IS NULL
+        CREATE TABLE meta.SecurityChange (
+            Id int IDENTITY PRIMARY KEY,
+            Kind nvarchar(20) NOT NULL,
+            TargetId int NULL,
+            Summary nvarchar(400) NOT NULL,
+            PayloadJson nvarchar(max) NOT NULL,
+            BeforeJson nvarchar(max) NULL,
+            Hash char(64) NOT NULL,
+            Status nvarchar(10) NOT NULL,
+            RequestedBy int NOT NULL REFERENCES meta.[User](Id),
+            RequestedAt datetime2(3) NOT NULL DEFAULT SYSUTCDATETIME(),
+            ReviewedBy int NULL REFERENCES meta.[User](Id),
+            ReviewedAt datetime2(3) NULL,
+            ReviewComment nvarchar(500) NULL
+        );
+        IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_SecurityChange_Status')
+            CREATE INDEX IX_SecurityChange_Status ON meta.SecurityChange (Status, Id);
+
         -- Constitución II.4: la auditoría es de solo inserción, incluso para la propia aplicación.
         IF OBJECT_ID('meta.TR_AuditLog_Immutable') IS NULL
             EXEC('CREATE TRIGGER meta.TR_AuditLog_Immutable ON meta.AuditLog INSTEAD OF UPDATE, DELETE AS

@@ -115,7 +115,7 @@ public static class CompanyEndpoints
         (await cn.QueryAsync<CompanyRow>("""
             SELECT c.Id, c.Code, c.Name, c.BaseCurrency, c.IsDefault, c.IsActive,
                    (SELECT COUNT(*) FROM meta.UserCompany uc JOIN meta.[User] u ON u.Id = uc.UserId
-                     WHERE uc.CompanyId = c.Id AND u.IsService = 0) AS Users
+                     WHERE uc.CompanyId = c.Id AND u.IsService = 0 AND u.IsTeam = 0) AS Users
               FROM meta.Company c ORDER BY c.IsDefault DESC, c.Name
             """, transaction: tx))
         .Select(c => new CompanyDto(c.Id, c.Code, c.Name, c.BaseCurrency.Trim(), c.IsDefault, c.IsActive, c.Users)).ToList();

@@ -94,7 +94,7 @@ public sealed record UpdateApiKeyRequest(string? Name, int[]? RoleIds);
 public sealed record RotateApiKeyRequest(int GraceHours);
 
 /// <summary>Spec 008: alta, cambio, rotación y revocación de claves (solo superusuario; auditado sin la clave).</summary>
-public sealed class ApiKeyService(Db db, PasswordService passwords)
+public sealed class ApiKeyService(Db db, PasswordService passwords, SecurityApproval gate)
 {
     public const int MaxName = 100;
     public const int MaxExpiresInDays = 3650;
@@ -153,65 +153,108 @@ public sealed class ApiKeyService(Db db, PasswordService passwords)
         return n;
     }
 
-    public async Task<object> CreateAsync(CreateApiKeyRequest req, HttpContext http, CancellationToken ct)
+    /// <summary>
+    /// Spec 015: la clave ya generada, como se guarda si espera aprobación: solo el SHA-256 del secreto (que recibe quien
+    /// la pidió) y la empresa de quien la pidió.
+    /// </summary>
+    public sealed record ApiKeyPayload(string Name, int[] RoleIds, int? ExpiresInDays, string PublicId, string SecretHash, int? CompanyId);
+
+    public sealed record ApiKeySnapshot(IReadOnlyList<int> RoleIds, string Status);
+
+    public async Task<IResult> CreateAsync(CreateApiKeyRequest req, HttpContext http, CancellationToken ct)
+    {
+        var u = http.CurrentUser();
+        RequireAdmin(u);
+        var errors = new Dictionary<string, string[]>();
+        var name = ValidName(req.Name, errors);
+        if (req.ExpiresInDays is < 1 or > MaxExpiresInDays) errors["expiresInDays"] = [$"El vencimiento va de 1 a {MaxExpiresInDays} días."];
+        if (errors.Count > 0) throw new ValidationFailed(errors);
+        var (publicId, key) = ApiKeyFormat.New();
+        var payload = new ApiKeyPayload(name!, (req.RoleIds ?? []).Distinct().ToArray(), req.ExpiresInDays, publicId,
+            Convert.ToBase64String(ApiKeyFormat.Hash(key)), u.Company?.Id);
+        return await CreateCoreAsync(payload, key, http, null, ct);
+    }
+
+    internal async Task<IResult> CreateCoreAsync(ApiKeyPayload p, string? secret, HttpContext http, SecurityChangeApproval? approving, CancellationToken ct)
     {
         var u = http.CurrentUser();
         RequireAdmin(u);
         await using var cn = await db.OpenAsync(ct);
         await using var tx = await cn.BeginTransactionAsync(ct);
         var errors = new Dictionary<string, string[]>();
-        var name = ValidName(req.Name, errors);
-        var roleIds = await ValidRolesAsync(cn, tx, req.RoleIds, errors);
-        if (req.ExpiresInDays is < 1 or > MaxExpiresInDays) errors["expiresInDays"] = [$"El vencimiento va de 1 a {MaxExpiresInDays} días."];
+        var roleIds = await ValidRolesAsync(cn, tx, p.RoleIds, errors);
         if (errors.Count > 0) throw new ValidationFailed(errors);
 
-        var (publicId, key) = ApiKeyFormat.New();
+        // Spec 015 (H4): una clave nueva es una credencial persistente; espera aprobación. El secreto se generó al solicitar
+        // y solo lo recibe quien la pidió; la clave no existe (no autentica) hasta que se aprueba.
+        if (gate.MustWait(approving, expands: true))
+        {
+            var change = await gate.RequestAsync(cn, tx, http, SecurityChangeKinds.ApiKeyCreate, null, $"Alta de la clave de API {p.Name}", p, null);
+            await tx.CommitAsync(ct);
+            return SecurityApproval.Accepted(change, secret);
+        }
+
         // Cuenta de servicio: no inicia sesión (login la rechaza) y su contraseña aleatoria nunca se conoce.
+        var name = p.Name;
         var userId = await cn.ExecuteScalarAsync<int>("""
             INSERT meta.[User] (Username, DisplayName, PasswordHash, IsService) OUTPUT inserted.Id VALUES (@username, @name, @hash, 1)
-            """, new { username = $"svc.{publicId}", name = name![..Math.Min(name!.Length, 150)], hash = passwords.Hash(WebhookSignature.NewSecret()) }, tx);
+            """, new { username = $"svc.{p.PublicId}", name = name[..Math.Min(name.Length, 150)], hash = passwords.Hash(WebhookSignature.NewSecret()) }, tx);
         foreach (var r in roleIds)
             await cn.ExecuteAsync("INSERT meta.UserRole (UserId, RoleId) VALUES (@userId, @r)", new { userId, r }, tx);
-        // Spec 010: la clave trabaja en la empresa actual de quien la crea.
-        if (u.Company is { } company)
+        // Spec 010: la clave trabaja en la empresa actual de quien la crea (o de quien la solicitó).
+        if (p.CompanyId is { } company && await cn.ExecuteScalarAsync<int?>("SELECT 1 FROM meta.Company WHERE Id = @company", new { company }, tx) is not null)
             await cn.ExecuteAsync("""
-                INSERT meta.UserCompany (UserId, CompanyId) VALUES (@userId, @c);
-                UPDATE meta.[User] SET CompanyId = @c WHERE Id = @userId;
-                """, new { userId, c = company.Id }, tx);
+                INSERT meta.UserCompany (UserId, CompanyId) VALUES (@userId, @company);
+                UPDATE meta.[User] SET CompanyId = @company WHERE Id = @userId;
+                """, new { userId, company }, tx);
         var id = await cn.ExecuteScalarAsync<int>("""
             INSERT meta.ApiKey (Name, PublicId, SecretHash, UserId, CreatedBy, ExpiresAt)
-            OUTPUT inserted.Id VALUES (@name, @publicId, @hash, @userId, @uid, @expires)
-            """, new { name, publicId, hash = ApiKeyFormat.Hash(key), userId, uid = u.Id,
-                   expires = req.ExpiresInDays is { } d ? DateTime.UtcNow.AddDays(d) : (DateTime?)null }, tx);
+            OUTPUT inserted.Id VALUES (@name, @PublicId, @hash, @userId, @uid, @expires)
+            """, new { name, p.PublicId, hash = Convert.FromBase64String(p.SecretHash), userId, uid = u.Id,
+                   expires = p.ExpiresInDays is { } d ? DateTime.UtcNow.AddDays(d) : (DateTime?)null }, tx);
         await Audit.WriteAsync(cn, tx, http, AuditActions.ApiKeyChange, "ApiKey", id.ToString(),
-            after: new { action = "create", name, prefix = ApiKeyFormat.Prefix + publicId, roleIds, req.ExpiresInDays });
+            after: new { action = "create", name, prefix = ApiKeyFormat.Prefix + p.PublicId, roleIds, p.ExpiresInDays, securityChange = approving?.Id });
+        if (approving is not null) await SecurityApproval.MarkAppliedAsync(cn, tx, approving, http);
         var dto = (await LoadAsync(cn, tx, id)).Single();
         await tx.CommitAsync(ct);
-        return new { key = dto, secret = key };
+        return Results.Ok(secret is null ? new { key = dto } : new { key = dto, secret });
     }
 
-    public async Task<ApiKeyDto> UpdateAsync(int id, UpdateApiKeyRequest req, HttpContext http, CancellationToken ct)
+    public Task<IResult> UpdateAsync(int id, UpdateApiKeyRequest req, HttpContext http, CancellationToken ct) => UpdateCoreAsync(id, req, http, null, ct);
+
+    internal async Task<IResult> UpdateCoreAsync(int id, UpdateApiKeyRequest req, HttpContext http, SecurityChangeApproval? approving, CancellationToken ct)
     {
         var u = http.CurrentUser();
         RequireAdmin(u);
         await using var cn = await db.OpenAsync(ct);
         await using var tx = await cn.BeginTransactionAsync(ct);
         var before = (await LoadAsync(cn, tx, id)).SingleOrDefault() ?? throw new NotFound("La clave no existe.");
+        var snapshot = new ApiKeySnapshot(before.RoleIds.Order().ToList(), before.Status);
+        approving?.Verify(snapshot);
         if (before.Status == "revoked") throw new Conflict("La clave está revocada.");
         var errors = new Dictionary<string, string[]>();
         var name = ValidName(req.Name, errors);
         var roleIds = await ValidRolesAsync(cn, tx, req.RoleIds, errors);
         if (errors.Count > 0) throw new ValidationFailed(errors);
+        // Spec 015 (H4): agregar roles a una clave espera aprobación; quitarlos o renombrarla, no.
+        if (gate.MustWait(approving, SecurityGrants.ApiKeyRoles(before.RoleIds, roleIds)))
+        {
+            var change = await gate.RequestAsync(cn, tx, http, SecurityChangeKinds.ApiKeyUpdate, id, $"Roles de la clave de API {before.Name}",
+                new UpdateApiKeyRequest(name, roleIds.Order().ToArray()), snapshot);
+            await tx.CommitAsync(ct);
+            return SecurityApproval.Accepted(change);
+        }
         var userId = await cn.ExecuteScalarAsync<int>("UPDATE meta.ApiKey SET Name = @name OUTPUT inserted.UserId WHERE Id = @id", new { id, name }, tx);
         await cn.ExecuteAsync("UPDATE meta.[User] SET DisplayName = @name WHERE Id = @userId", new { userId, name = name![..Math.Min(name!.Length, 150)] }, tx);
         await cn.ExecuteAsync("DELETE meta.UserRole WHERE UserId = @userId", new { userId }, tx);
         foreach (var r in roleIds)
             await cn.ExecuteAsync("INSERT meta.UserRole (UserId, RoleId) VALUES (@userId, @r)", new { userId, r }, tx);
         await Audit.WriteAsync(cn, tx, http, AuditActions.ApiKeyChange, "ApiKey", id.ToString(),
-            before: new { before.Name, before.RoleIds }, after: new { action = "update", name, roleIds });
+            before: new { before.Name, before.RoleIds }, after: new { action = "update", name, roleIds, securityChange = approving?.Id });
+        if (approving is not null) await SecurityApproval.MarkAppliedAsync(cn, tx, approving, http);
         var dto = (await LoadAsync(cn, tx, id)).Single();
         await tx.CommitAsync(ct);
-        return dto;
+        return Results.Ok(dto);
     }
 
     /// <summary>Clave nueva; la anterior sirve <paramref name="req"/>.GraceHours más (0 = deja de servir ya).</summary>

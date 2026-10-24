@@ -40,6 +40,13 @@ public static class AuditActions
     public const string AssistantDiscard = "assistant.discard";
     /// <summary>Spec 011: un administrador guardó o quitó la clave de Anthropic desde la app (nunca la clave).</summary>
     public const string AssistantKey = "assistant.key";
+    /// <summary>Spec 015: unidades (alta y movimiento) y equipos (alta y cambios), con antes y después.</summary>
+    public const string UnitChange = "security.unit";
+    public const string TeamChange = "security.team";
+    /// <summary>Spec 015 (H4): solicitud de un cambio de seguridad que amplía acceso, su aprobación y su rechazo.</summary>
+    public const string SecurityRequest = "security.request";
+    public const string SecurityApprove = "security.approve";
+    public const string SecurityReject = "security.reject";
 }
 
 public static class Audit

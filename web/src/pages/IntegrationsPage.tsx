@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Copy, KeyRound, Pencil, Plus, RefreshCw, RotateCcw, Send, Settings2, ShieldOff, Webhook } from 'lucide-react';
 import { ApiError, fieldError } from '../api/client';
 import { adminApi, integrationsApi } from '../api/endpoints';
-import type { ApiKey, DeliveryStatus, Role, WebhookEvent, WebhookSummary } from '../api/types';
+import { isPending, type ApiKey, type DeliveryStatus, type Role, type WebhookEvent, type WebhookSummary } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { ConfirmDialog, Dialog } from '../components/Dialog';
 import { useToast } from '../components/Toast';
@@ -20,7 +20,7 @@ const deliveryLabel: Record<DeliveryStatus, string> = {
 };
 
 /** Un secreto o clave se muestra una sola vez: el servidor solo guarda su hash (claves) o lo cifra (webhooks). */
-function SecretDialog({ secret, title, onClose }: { secret: string | null; title: string; onClose: () => void }) {
+function SecretDialog({ secret, title, onClose, pending }: { secret: string | null; title: string; onClose: () => void; pending?: boolean }) {
   const toast = useToast();
   return (
     <Dialog
@@ -30,6 +30,11 @@ function SecretDialog({ secret, title, onClose }: { secret: string | null; title
       description="Cópialo ahora y guárdalo en el sistema que lo usará: no se volverá a mostrar."
       footer={<Button variant="primary" onClick={onClose}>Ya lo guardé</Button>}
     >
+      {pending && (
+        <Alert tone="warning" title="Pendiente de aprobación">
+          Este entorno exige que otro administrador apruebe las claves nuevas (Seguridad › Solicitudes). La clave funcionará cuando la apruebe.
+        </Alert>
+      )}
       <div className="secret-box">
         <code aria-label="Valor secreto">{secret}</code>
         <Button
@@ -276,7 +281,7 @@ function WebhooksTab() {
 const isAdminRole = (r: Role) => r.isSuperuser || r.canManageModel || r.canManageUsers;
 
 function KeyDialog({ open, apiKey, roles, onClose, onSaved }: {
-  open: boolean; apiKey: ApiKey | null; roles: Role[]; onClose: () => void; onSaved: (secret?: string) => void;
+  open: boolean; apiKey: ApiKey | null; roles: Role[]; onClose: () => void; onSaved: (secret?: string, pending?: boolean) => void;
 }) {
   const toast = useToast();
   const isNew = !apiKey;
@@ -300,10 +305,12 @@ function KeyDialog({ open, apiKey, roles, onClose, onSaved }: {
     try {
       if (isNew) {
         const r = await integrationsApi.createKey({ name: name.trim(), roleIds, expiresInDays: expires ? Number(expires) : undefined });
-        onSaved(r.secret);
+        onSaved(r.secret, isPending(r));
       } else {
-        await integrationsApi.updateKey(apiKey.id, { name: name.trim(), roleIds });
-        toast.success('Clave actualizada');
+        const r = await integrationsApi.updateKey(apiKey.id, { name: name.trim(), roleIds });
+        // Spec 015: agregar roles en un entorno con aprobación de seguridad queda como solicitud.
+        if (isPending(r)) toast.success('Solicitud enviada: otro administrador debe aprobar los roles nuevos');
+        else toast.success('Clave actualizada');
         onSaved();
       }
     } catch (e) {
@@ -387,6 +394,7 @@ function KeysTab() {
   const [rotating, setRotating] = useState<ApiKey | null>(null);
   const [revoking, setRevoking] = useState<ApiKey | null>(null);
   const [secret, setSecret] = useState<string | null>(null);
+  const [secretPending, setSecretPending] = useState(false);
   const roleName = (id: number) => roles?.find((r) => r.id === id)?.name ?? `#${id}`;
 
   if (loading && !keys) return <LoadingBlock />;
@@ -436,8 +444,8 @@ function KeysTab() {
 
       <KeyDialog open={creating || !!editing} apiKey={editing} roles={roles ?? []}
         onClose={() => { setCreating(false); setEditing(null); }}
-        onSaved={(s) => { setCreating(false); setEditing(null); setTick((t) => t + 1); if (s) setSecret(s); }} />
-      <RotateKeyDialog apiKey={rotating} onClose={() => setRotating(null)} onRotated={(s) => { setRotating(null); setTick((t) => t + 1); setSecret(s); }} />
+        onSaved={(s, pending) => { setCreating(false); setEditing(null); setTick((t) => t + 1); setSecretPending(!!pending); if (s) setSecret(s); }} />
+      <RotateKeyDialog apiKey={rotating} onClose={() => setRotating(null)} onRotated={(s) => { setRotating(null); setTick((t) => t + 1); setSecretPending(false); setSecret(s); }} />
       <ConfirmDialog
         open={!!revoking}
         danger
@@ -452,7 +460,7 @@ function KeysTab() {
           finally { setRevoking(null); }
         }}
       />
-      <SecretDialog secret={secret} title="Clave de API" onClose={() => setSecret(null)} />
+      <SecretDialog secret={secret} pending={secretPending} title="Clave de API" onClose={() => setSecret(null)} />
     </div>
   );
 }

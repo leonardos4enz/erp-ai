@@ -40,6 +40,8 @@ export interface FieldDef {
   access?: FieldAccessLevel;
   /** Spec 006, solo salida: estados en que se captura ([] = solo en las transiciones que lo piden). */
   editableIn?: string[] | null;
+  /** Spec 015, solo salida: el campo dueño acepta equipos (`teamOwners`). */
+  acceptsTeams?: boolean;
   /** Solo en la UI: bloqueado por el estado del registro (ver `withState`). */
   lockedByState?: boolean;
 }
@@ -48,12 +50,14 @@ export type FieldAccessLevel = 'hidden' | 'read' | 'edit';
 
 /** Spec 006: quién ve y captura cada campo, y qué registros ve o modifica cada rol. */
 export interface FieldSecurity { field: string; read?: string[]; edit?: string[]; editableIn?: string[] }
-export interface RecordGrant { roles?: string[]; scope?: 'all' | 'unit' | 'own'; where?: string; access?: 'read' | 'write' }
+export interface RecordGrant { roles?: string[]; scope?: 'all' | 'unitTree' | 'unit' | 'own'; where?: string; access?: 'read' | 'write' }
 export interface SecurityPolicy {
   fields?: FieldSecurity[];
   owner?: string;
   records?: RecordGrant[];
   systemManaged?: boolean;
+  /** Spec 015: el campo dueño acepta un equipo (requiere `owner`). */
+  teamOwners?: boolean;
 }
 
 /* ---------- Spec 007: metadatos de interfaz ---------- */
@@ -431,6 +435,8 @@ export interface Role {
   canManageUsers: boolean;
   canViewAudit: boolean;
   permissions: EntityPermission[];
+  /** Spec 015: roles de los que hereda. */
+  inheritsRoleIds: number[];
 }
 
 export interface User {
@@ -567,3 +573,33 @@ export interface Proposal {
 }
 export interface ConversationSummary { id: number; title: string; turns: number; updatedAt: string; lastStatus: ProposalStatus }
 export interface Conversation { id: number; turns: Proposal[] }
+
+/* ---------- Spec 015: unidades, equipos y solicitudes de cambios de seguridad ---------- */
+
+export interface BusinessUnit { id: number; name: string; parentId: number | null; depth: number; users: number; teams: number }
+export interface Team { id: number; name: string; unit?: string | null; isActive: boolean; memberIds: number[] }
+
+export type SecurityChangeKind = 'user.create' | 'user.update' | 'role.create' | 'role.update' | 'team.create' | 'team.update' | 'unit.move' | 'apikey.create' | 'apikey.update';
+
+export interface SecurityChange {
+  id: number;
+  kind: SecurityChangeKind;
+  targetId: number | null;
+  summary: string;
+  status: 'pending' | 'applying' | 'applied' | 'rejected';
+  before: Record<string, unknown> | null;
+  after: Record<string, unknown>;
+  hash: string;
+  requestedBy: string;
+  requestedAt: string;
+  reviewedBy?: string | null;
+  reviewedAt?: string | null;
+  reviewComment?: string | null;
+  canApprove: boolean;
+  canReject: boolean;
+}
+
+/** Respuesta 202: el cambio amplía acceso y espera la aprobación de otro administrador. */
+export interface PendingChange { securityChange: SecurityChange; secret?: string }
+
+export const isPending = (x: unknown): x is PendingChange => typeof x === 'object' && x !== null && 'securityChange' in x;

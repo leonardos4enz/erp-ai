@@ -73,7 +73,7 @@ public static class DataEndpoints
             return Results.NoContent();
         });
 
-        app.MapGet("/api/users/lookup", (string? search, RecordService records, CancellationToken ct) =>
-            records.UserLookupAsync(search, ct)).RequireAuthorization();
+        app.MapGet("/api/users/lookup", (string? search, bool? teams, RecordService records, CancellationToken ct) =>
+            records.UserLookupAsync(search, ct, teams == true)).RequireAuthorization();
     }
 }

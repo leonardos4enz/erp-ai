@@ -38,6 +38,7 @@ public sealed class RelatedLoader(SqlConnection cn, SqlTransaction? tx, IReadOnl
 {
     private readonly Dictionary<(string, long), Values?> _rows = new();
     private readonly Dictionary<int, Values?> _users = new();
+    private readonly Dictionary<int, (bool IsTeam, bool IsActive)?> _principals = new();
     private readonly Dictionary<(string, string, DateTime), decimal?> _rates = new();
 
     public SqlConnection Connection => cn;
@@ -98,6 +99,17 @@ public sealed class RelatedLoader(SqlConnection cn, SqlTransaction? tx, IReadOnl
             rate = r.GetInt32(0) == 0 ? value : decimal.Round(1m / value, 10);
         }
         return _rates[(from, to, date)] = rate;
+    }
+
+    /// <summary>Spec 015: ¿el principal es un equipo y está activo? Null si no existe.</summary>
+    public (bool IsTeam, bool IsActive)? Principal(int id)
+    {
+        if (_principals.TryGetValue(id, out var cached)) return cached;
+        using var cmd = new SqlCommand("SELECT IsTeam, IsActive FROM meta.[User] WHERE Id = @id", cn, tx);
+        cmd.Parameters.Add(new SqlParameter("@id", id));
+        using var r = cmd.ExecuteReader();
+        (bool, bool)? row = r.Read() ? (r.GetBoolean(0), r.GetBoolean(1)) : null;
+        return _principals[id] = row;
     }
 
     public Values? User(int id)

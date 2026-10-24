@@ -303,7 +303,7 @@ public sealed partial class RecordService
                 if (!cache.TryGetValue(key, out var hit))
                 {
                     await using var cmd = new SqlCommand(
-                        "SELECT TOP 2 Id FROM meta.[User] WHERE IsActive = 1 AND IsService = 0 AND (Username = @v OR DisplayName = @v)", cn, tx);
+                        "SELECT TOP 2 Id FROM meta.[User] WHERE IsActive = 1 AND IsService = 0 AND IsTeam = 0 AND (Username = @v OR DisplayName = @v)", cn, tx);
                     cmd.Parameters.Add(new SqlParameter("@v", raw));
                     var ids = new List<long>();
                     await using (var r = await cmd.ExecuteReaderAsync(ct)) while (await r.ReadAsync(ct)) ids.Add(r.GetInt32(0));

@@ -20,7 +20,7 @@ en orden, no en paralelo: casi todas tocan el núcleo del motor (`PlanCompiler`,
 | 012 Endurecimiento | Implementado ([spec](specs/012-endurecimiento/spec.md)) |
 | 013 Formulario en solo lectura | Implementado ([spec](specs/013-formulario-solo-lectura/spec.md)) |
 | 014 Pendientes menores y riesgos residuales | Implementado ([spec](specs/014-pendientes-menores/spec.md)) |
-| 015 Jerarquía de roles, equipos y unidades | Planeada |
+| 015 Jerarquía de roles, equipos y unidades | Implementado ([spec](specs/015-jerarquia-roles-equipos/spec.md)) |
 | 016 Automatizaciones asíncronas y programadas | Planeada |
 | 017 Rollback de entornos | Planeada |
 | 018 OAuth2 (client credentials) y API OData | Planeada |
@@ -144,6 +144,13 @@ Señaladas por la misma auditoría. Cada una es capacidad nueva del motor y va e
   entornos con aprobación. Todo en `RecordFilter` (SQL), también en reportes, bitácora y etiquetas.
 - **Depende de:** 006, 010, 012. Va primero: las siguientes (automatizaciones con autoridad, OAuth) necesitan un modelo
   de principales más rico.
+- Implementado. Unidades en `meta.BusinessUnit` con ruta materializada y alcance `unitTree`; equipos como principales
+  sin sesión (`IsTeam`) con `teamOwners` en la política; herencia de roles por cierre transitivo (sin capacidades
+  administrativas); con `Environments:RequireSecurityApproval`, lo que amplía acceso espera a otro administrador con
+  huella ([ADR-0005](../adr/0005-aprobacion-de-cambios-de-seguridad.md)). Para la 016: una tarea programada puede
+  correr con un rol de servicio (`ServiceRole.LoadAsync` ya incluye la herencia) y dejar lo que crea a nombre de un
+  equipo; un equipo no tiene roles, así que no puede ser la identidad de la tarea. Pendiente: roles de
+  equipo, borrar unidades, comparar un campo de texto contra el árbol en reglas `where`.
 
 ### 016 — Automatizaciones asíncronas y programadas
 - **Problema:** las automatizaciones (005) corren en la transacción del evento: no hay acciones diferidas (avisar,

@@ -39,7 +39,7 @@ public static class AuthEndpoints
 
         await using var cn = await db.OpenAsync(ct);
         var user = await cn.QuerySingleOrDefaultAsync<UserRow>(
-            "SELECT Id, Username, PasswordHash, SecurityStamp, IsActive, FailedAttempts, LockoutEnd FROM meta.[User] WHERE Username = @username AND IsService = 0", // spec 008: una cuenta de servicio no inicia sesión
+            "SELECT Id, Username, PasswordHash, SecurityStamp, IsActive, FailedAttempts, LockoutEnd FROM meta.[User] WHERE Username = @username AND IsService = 0 AND IsTeam = 0", // spec 008 y 015: una cuenta de servicio no inicia sesión
             new { username });
 
         var ok = passwords.Verify(user?.PasswordHash, password, out var needsRehash);

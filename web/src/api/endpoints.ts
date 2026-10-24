@@ -1,7 +1,7 @@
 import { api } from './client';
 import type {
   AuditEntry, ChangePlan, Company, ExchangeRate, ChangeSetSummary, DashboardResult, DashboardSummary, EntityDef, HistoryEntry, LayoutState, LookupItem, Me,
-  ApiKey, AssistantStatus, Conversation, ConversationSummary, Proposal, EnvironmentInfo, ExportableCatalogs, ExportPreview, ExportRequest, ImportResult, ModuleInfo, PackageImport, ModulePreview, WebhookDelivery, WebhookSummary, Paged, PlanPreview, ReportResult, ReportSummary, Role, Row, RowList, SavedView, User, ViewFilter, ViewList,
+  ApiKey, AssistantStatus, BusinessUnit, PendingChange, SecurityChange, Team, Conversation, ConversationSummary, Proposal, EnvironmentInfo, ExportableCatalogs, ExportPreview, ExportRequest, ImportResult, ModuleInfo, PackageImport, ModulePreview, WebhookDelivery, WebhookSummary, Paged, PlanPreview, ReportResult, ReportSummary, Role, Row, RowList, SavedView, User, ViewFilter, ViewList,
 } from './types';
 
 const enc = encodeURIComponent;
@@ -121,7 +121,8 @@ export const dashboardsApi = {
 };
 
 export const usersApi = {
-  lookup: (search: string, signal?: AbortSignal) => api<LookupItem[]>('/users/lookup', { query: { search }, signal }),
+  /** Spec 015: `teams` agrega equipos (campo dueño con teamOwners). */
+  lookup: (search: string, signal?: AbortSignal, teams?: boolean) => api<LookupItem[]>('/users/lookup', { query: { search, teams: teams || undefined }, signal }),
 };
 
 export interface UserInput {
@@ -157,16 +158,26 @@ export interface RoleInput {
   canManageUsers: boolean;
   canViewAudit: boolean;
   permissions: Role['permissions'];
+  /** Spec 015 */
+  inheritsRoleIds?: number[];
 }
 
 export const adminApi = {
   users: () => api<User[]>('/admin/users'),
-  units: () => api<string[]>('/admin/units'),
-  createUser: (u: UserInput) => api<User>('/admin/users', { method: 'POST', body: u }),
-  updateUser: (id: number, u: UserInput) => api<User>(`/admin/users/${id}`, { method: 'PUT', body: u }),
+  units: () => api<BusinessUnit[]>('/admin/units'),
+  createUnit: (u: { name: string; parentId: number | null }) => api<BusinessUnit>('/admin/units', { method: 'POST', body: u }),
+  moveUnit: (id: number, parentId: number | null) => api<BusinessUnit | PendingChange>(`/admin/units/${id}`, { method: 'PUT', body: { parentId } }),
+  teams: () => api<Team[]>('/admin/teams'),
+  createTeam: (t: TeamInput) => api<Team | PendingChange>('/admin/teams', { method: 'POST', body: t }),
+  updateTeam: (id: number, t: TeamInput) => api<Team | PendingChange>(`/admin/teams/${id}`, { method: 'PUT', body: t }),
+  securityChanges: (status: 'pending' | 'all' = 'pending') => api<{ required: boolean; items: SecurityChange[] }>('/admin/security-changes', { query: { status } }),
+  approveChange: (id: number, hash: string, comment?: string) => api<SecurityChange>(`/admin/security-changes/${id}/approve`, { method: 'POST', body: { hash, comment } }),
+  rejectChange: (id: number, comment?: string) => api<SecurityChange>(`/admin/security-changes/${id}/reject`, { method: 'POST', body: { comment } }),
+  createUser: (u: UserInput) => api<User | PendingChange>('/admin/users', { method: 'POST', body: u }),
+  updateUser: (id: number, u: UserInput) => api<User | PendingChange>(`/admin/users/${id}`, { method: 'PUT', body: u }),
   roles: () => api<Role[]>('/admin/roles'),
-  createRole: (r: RoleInput) => api<Role>('/admin/roles', { method: 'POST', body: r }),
-  updateRole: (id: number, r: RoleInput) => api<Role>(`/admin/roles/${id}`, { method: 'PUT', body: r }),
+  createRole: (r: RoleInput) => api<Role | PendingChange>('/admin/roles', { method: 'POST', body: r }),
+  updateRole: (id: number, r: RoleInput) => api<Role | PendingChange>(`/admin/roles/${id}`, { method: 'PUT', body: r }),
   modules: () => api<ModuleInfo[]>('/admin/modules'),
   previewModule: (id: string) => api<ModulePreview>(`/admin/modules/${enc(id)}/preview`, { method: 'POST' }),
   installModule: (id: string) => api<{ changeSetId: number }>(`/admin/modules/${enc(id)}/install`, { method: 'POST' }),
@@ -187,8 +198,8 @@ export const integrationsApi = {
   retry: (id: number) => api<void>(`/admin/webhooks/deliveries/${id}/retry`, { method: 'POST' }),
   keys: (signal?: AbortSignal) => api<ApiKey[]>('/admin/api-keys', { signal }),
   createKey: (input: { name: string; roleIds: number[]; expiresInDays?: number }) =>
-    api<{ key: ApiKey; secret: string }>('/admin/api-keys', { method: 'POST', body: input }),
-  updateKey: (id: number, input: { name: string; roleIds: number[] }) => api<ApiKey>(`/admin/api-keys/${id}`, { method: 'PUT', body: input }),
+    api<{ key: ApiKey; secret: string } | (PendingChange & { secret: string })>('/admin/api-keys', { method: 'POST', body: input }),
+  updateKey: (id: number, input: { name: string; roleIds: number[] }) => api<ApiKey | PendingChange>(`/admin/api-keys/${id}`, { method: 'PUT', body: input }),
   rotateKey: (id: number, graceHours: 0 | 24) =>
     api<{ key: ApiKey; secret: string }>(`/admin/api-keys/${id}/rotate`, { method: 'POST', body: { graceHours } }),
   revokeKey: (id: number) => api<void>(`/admin/api-keys/${id}/revoke`, { method: 'POST' }),
@@ -231,3 +242,6 @@ export const assistantApi = {
     api<{ changeSetId: number; proposal: Proposal }>(`/assistant/requests/${id}/apply`, { method: 'POST', body: { reviewHash } }),
   discard: (id: number) => api<Proposal>(`/assistant/requests/${id}/discard`, { method: 'POST' }),
 };
+
+/** Spec 015: equipo (dueño de registros); la unidad es el nombre de una existente. */
+export interface TeamInput { name: string; unit?: string | null; isActive: boolean; memberIds: number[] }

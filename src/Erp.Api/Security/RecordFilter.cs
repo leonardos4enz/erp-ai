@@ -99,10 +99,23 @@ public static class RecordFilter
     {
         if (string.Equals(scope, RecordScopes.All, StringComparison.OrdinalIgnoreCase)) return null;
         var owner = OwnerColumn(e);
-        // Sin unidad asignada, «de mi unidad» se reduce a «propios».
-        if (string.Equals(scope, RecordScopes.Unit, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(who.Unit))
-            return $"{owner} IN (SELECT u.[Id] FROM meta.[User] u WHERE u.[Unit] = {bag.Add(who.Unit!)})";
-        return $"{owner} = {bag.Add(who.UserId)}";
+        // Sin unidad asignada, «de mi unidad» (y su árbol) se reduce a «propios». Los equipos (spec 015) son filas de
+        // meta.[User] con su unidad: estos alcances ya los incluyen.
+        if (!string.IsNullOrWhiteSpace(who.Unit))
+        {
+            if (string.Equals(scope, RecordScopes.Unit, StringComparison.OrdinalIgnoreCase))
+                return $"{owner} IN (SELECT u.[Id] FROM meta.[User] u WHERE u.[Unit] = {bag.Add(who.Unit!)})";
+            // Spec 015: la ruta materializada solo tiene dígitos y '/', así que no trae comodines de LIKE.
+            if (string.Equals(scope, RecordScopes.UnitTree, StringComparison.OrdinalIgnoreCase))
+                return $"{owner} IN (SELECT u.[Id] FROM meta.[User] u JOIN meta.[BusinessUnit] b ON b.[Name] = u.[Unit] " +
+                       $"WHERE b.[Path] LIKE (SELECT m.[Path] FROM meta.[BusinessUnit] m WHERE m.[Name] = {bag.Add(who.Unit!)}) + N'%')";
+        }
+        var me = bag.Add(who.UserId);
+        // Spec 015: con teamOwners, «propios» incluye lo de los equipos activos de los que soy miembro.
+        return e.Security?.TeamOwners == true
+            ? $"({owner} = {me} OR {owner} IN (SELECT tm.[TeamId] FROM meta.[TeamMember] tm JOIN meta.[User] tu ON tu.[Id] = tm.[TeamId] " +
+              $"WHERE tm.[UserId] = {me} AND tu.[IsActive] = 1))"
+            : $"{owner} = {me}";
     }
 
     /// <summary>

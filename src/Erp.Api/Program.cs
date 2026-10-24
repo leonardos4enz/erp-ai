@@ -61,6 +61,7 @@ builder.Services.AddHostedService<WebhookDispatcher>();
 // Spec 009: entornos. Nombre, aprobación obligatoria y clave de firma son configuración del servidor, no de la aplicación.
 builder.Services.AddSingleton(EnvironmentOptions.From(builder.Configuration));
 builder.Services.AddScoped<EnvironmentService>();
+builder.Services.AddSingleton<SecurityApproval>(); // spec 015
 // Spec 011: asistente IA. La clave de Anthropic la guarda un administrador desde la app (cifrada con Data Protection);
 // si el servidor la trae por configuración (user-secrets o variable de entorno), esa manda.
 builder.Services.AddSingleton(AssistantOptions.From(builder.Configuration));
@@ -162,6 +163,7 @@ app.MapAuth();
 app.MapModel();
 app.MapData();
 app.MapAdmin();
+app.MapSecurityChanges(); // spec 015
 app.MapAudit();
 app.MapAnalytics();
 app.MapIntegrations();
