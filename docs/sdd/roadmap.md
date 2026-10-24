@@ -24,8 +24,8 @@ en orden, no en paralelo: casi todas tocan el núcleo del motor (`PlanCompiler`,
 | 016 Automatizaciones asíncronas y programadas | Implementado ([spec](specs/016-automatizaciones-asincronas/spec.md)) |
 | 017 Rollback de entornos | Planeada |
 | 018 OAuth2 (client credentials) y API OData | Planeada |
-| 019 Contabilidad y costeo | Planeada |
-| 020 Editores visuales (layouts y modelador) | Planeada |
+| 019 Editores visuales (layouts y modelador) | Planeada |
+| 020 Contabilidad y costeo | Planeada |
 
 ## Diagnóstico
 | Brecha señalada | Situación actual | Spec |
@@ -166,7 +166,7 @@ Señaladas por la misma auditoría. Cada una es capacidad nueva del motor y va e
   registro y el alcance de lectura de su rol de servicio; lo que cambian queda a nombre de la cuenta de sistema «Tareas
   programadas» y la auditoría nombra la tarea. Llegan en pausa: el superusuario las activa por entorno en
   *Configuración › Automatizaciones*, donde está también la bitácora. `update`/`transition` sin `target` actúan sobre el propio registro.
-  Para la 019: los cierres pueden ser tareas mensuales. Pendiente: tareas sin consulta (crear un registro «cierre del
+  Para la 020: los cierres pueden ser tareas mensuales. Pendiente: tareas sin consulta (crear un registro «cierre del
   día»), asignar a un equipo por nombre, zonas horarias por tarea y continuar el siguiente lote sin esperar la ocurrencia.
 
 ### 017 — Rollback de entornos
@@ -185,20 +185,22 @@ Señaladas por la misma auditoría. Cada una es capacidad nueva del motor y va e
   `$select`, `$orderby`, `$top`, `$expand` de un nivel) traducidas con la misma seguridad por registro y campo.
 - **Depende de:** 008, 015.
 
-### 019 — Contabilidad y costeo (promedio y FIFO)
+### 019 — Editores visuales (layouts y modelador)
+- **Problema:** layouts, vistas y procesos (007) se editan como listas y formularios; es correcto pero lento, y el
+  asistente (011) es la única forma «visual» de construir.
+- **Alcance:** editor de layout con arrastrar y soltar (secciones, pestañas, columnas) y vista previa en vivo; diagrama
+  del proceso (estados y transiciones) editable; todo produce el mismo Plan de Cambios, con teclado y accesibilidad AA.
+- **Depende de:** 007, 011. No agrega capacidad: mejora cómo se usa la que ya existe. Antes era la 020; pasó antes de
+  Contabilidad por decisión del dueño (2026-10-24).
+
+### 020 — Contabilidad y costeo (promedio y FIFO)
 - **Problema:** Inventario (005) lleva cantidades, no valor: no hay costo del inventario, pólizas ni costo de ventas;
   «costo último» (Compras) es solo una sugerencia de precio.
 - **Alcance:** capacidades genéricas del motor (capas de costo por movimiento, costo promedio ponderado y FIFO, partida
   doble con cuadre obligatorio) y módulos `contabilidad` (catálogo de cuentas, pólizas, periodos con cierre) y
   `costeo` (valuación de existencias, póliza de entrada por recepción). Multi-moneda con `CONVERT` (010).
-- **Depende de:** 005, 010, 016 (cierres y revaluaciones programadas).
-
-### 020 — Editores visuales (layouts y modelador)
-- **Problema:** layouts, vistas y procesos (007) se editan como listas y formularios; es correcto pero lento, y el
-  asistente (011) es la única forma «visual» de construir.
-- **Alcance:** editor de layout con arrastrar y soltar (secciones, pestañas, columnas) y vista previa en vivo; diagrama
-  del proceso (estados y transiciones) editable; todo produce el mismo Plan de Cambios, con teclado y accesibilidad AA.
-- **Depende de:** 007, 011. Va al final: no agrega capacidad, mejora cómo se usa la que ya existe.
+- **Depende de:** 005, 010, 016 (cierres y revaluaciones programadas). Va al final por decisión del dueño (2026-10-24):
+  por ahora no se necesita; antes era la 019.
 
 ## Decisión: ¿extensión con código?
 La auditoría tiene razón en el costo: cada necesidad nueva exige una capacidad del motor. Se mantiene
