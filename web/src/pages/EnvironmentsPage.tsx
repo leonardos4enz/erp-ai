@@ -100,9 +100,11 @@ function ReviewDialog({ id, env, onClose, onChanged, onOpen }: {
   const [actionError, setActionError] = useState<ApiError | null>(null);
   // Spec 014 (H4): archivar campos que solo existen aquí se confirma aparte; si el diff cambia, se vuelve a pedir.
   const [confirmArchive, setConfirmArchive] = useState(false);
+  // Spec 021 (H5): lo que una reversión cambia de seguridad también se confirma aparte.
+  const [confirmSecurity, setConfirmSecurity] = useState(false);
 
   useEffect(() => { setComment(''); setActionError(null); }, [id]);
-  useEffect(() => { setConfirmArchive(false); }, [id, data?.diff?.diffHash]);
+  useEffect(() => { setConfirmArchive(false); setConfirmSecurity(false); }, [id, data?.diff?.diffHash]);
 
   async function act(kind: 'approve' | 'reject' | 'apply' | 'revert') {
     if (!data) return;
@@ -118,13 +120,13 @@ function ReviewDialog({ id, env, onClose, onChanged, onOpen }: {
         return;
       }
       if (kind === 'approve') {
-        await environmentsApi.approve(data.id, data.diff!.diffHash, comment.trim() || undefined, confirmArchive);
+        await environmentsApi.approve(data.id, data.diff!.diffHash, comment.trim() || undefined, confirmArchive, confirmSecurity);
         toast.success('Paquete aprobado', 'Ya se puede aplicar.');
       } else if (kind === 'reject') {
         await environmentsApi.reject(data.id, comment.trim());
         toast.success('Paquete rechazado');
       } else {
-        const r = await environmentsApi.apply(data.id, data.diff!.diffHash, confirmArchive);
+        const r = await environmentsApi.apply(data.id, data.diff!.diffHash, confirmArchive, confirmSecurity);
         const changes = r.changeSetId ? ` · conjunto de cambios #${r.changeSetId}` : '';
         if (data.kind === 'revert') toast.success('Reversión aplicada', `${data.name} queda ${data.targetVersion ? `en la versión ${data.targetVersion}` : 'sin instalar'}${changes}`);
         else toast.success('Paquete aplicado', `${data.name} v${data.version}${changes}`);
@@ -145,7 +147,10 @@ function ReviewDialog({ id, env, onClose, onChanged, onOpen }: {
   const open = data && (data.status === 'pending' || data.status === 'approved');
   const isRevert = data?.kind === 'revert';
   const diff = data?.diff;
-  const needsArchive = !!open && (diff?.localArchives.length ?? 0) > 0 && !confirmArchive;
+  const securityChanges = diff?.securityChanges ?? [];
+  const needsArchive = !!open && (((diff?.localArchives.length ?? 0) > 0 && !confirmArchive) || (securityChanges.length > 0 && !confirmSecurity));
+  const confirmFirst = (diff?.localArchives.length ?? 0) > 0 && !confirmArchive
+    ? 'Confirma primero los campos que se archivarán' : 'Confirma primero los cambios de seguridad';
   const err = actionError ?? (error instanceof ApiError ? error : null);
   return (
     <Dialog
@@ -163,11 +168,11 @@ function ReviewDialog({ id, env, onClose, onChanged, onOpen }: {
           )}
           {data?.canApprove && (
             <Button icon={CheckCircle2} loading={busy === 'approve'} disabled={!!busy || needsArchive} onClick={() => void act('approve')}
-              title={needsArchive ? 'Confirma primero los campos que se archivarán' : undefined}>Aprobar</Button>
+              title={needsArchive ? confirmFirst : undefined}>Aprobar</Button>
           )}
           {open && (
             <Button variant="primary" icon={isRevert ? Undo2 : Rocket} loading={busy === 'apply'} disabled={!!busy || !data?.canApply || needsArchive} onClick={() => void act('apply')}
-              title={data?.canApply && needsArchive ? 'Confirma primero los campos que se archivarán' : undefined}>
+              title={data?.canApply && needsArchive ? confirmFirst : undefined}>
               {isRevert ? 'Aplicar reversión' : 'Aplicar paquete'}
             </Button>
           )}
@@ -267,6 +272,18 @@ function ReviewDialog({ id, env, onClose, onChanged, onOpen }: {
                     {open && (data.canApprove || data.canApply) && (
                       <Checkbox checked={confirmArchive} onChange={setConfirmArchive} disabled={!!busy}
                         label={`Entiendo que ${diff.localArchives.length === 1 ? 'este campo se archivará' : `estos ${diff.localArchives.length} campos se archivarán`}`} />
+                    )}
+                  </Alert>
+                </section>
+              )}
+              {securityChanges.length > 0 && (
+                <section className="env-archives" aria-labelledby="pkg-security">
+                  <Alert tone="warning" icon={ShieldAlert} title={<span id="pkg-security">Cambios de seguridad</span>}>
+                    <p>La reversión vuelve a la seguridad de la instantánea: cambia quién ve y modifica, o lo que corre solo sobre los datos.</p>
+                    <ul className="import-errors">{securityChanges.map((m, i) => <li key={i}>{m}</li>)}</ul>
+                    {open && (data.canApprove || data.canApply) && (
+                      <Checkbox checked={confirmSecurity} onChange={setConfirmSecurity} disabled={!!busy}
+                        label="Entiendo que la reversión cambia la seguridad" />
                     )}
                   </Alert>
                 </section>

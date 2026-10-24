@@ -212,7 +212,7 @@ public class PendingTests
     [Fact]
     public void Aprobar_o_aplicar_un_paquete_que_archiva_campos_locales_exige_confirmarlo()
     {
-        var none = new PackageDiffDto(true, [], [], [], [], [], "h", false, []);
+        var none = new PackageDiffDto(true, [], [], [], [], [], "h", false, [], []);
         EnvironmentService.RequireArchiveConfirmed(none, confirmed: false);
         var local = none with { LocalArchives = ["«Producto» › Notas no viene en el paquete: se archiva (sus datos se conservan)."] };
         var ex = Assert.Throws<Conflict>(() => EnvironmentService.RequireArchiveConfirmed(local, confirmed: false));

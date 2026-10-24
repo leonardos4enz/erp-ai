@@ -23,6 +23,8 @@ public static class AuditActions
     public const string ApiKeyChange = "integration.apikey";
     /// <summary>Spec 018: alta, cambio, rotación o revocación de un cliente OAuth (nunca el secreto).</summary>
     public const string OAuthClientChange = "integration.oauthclient";
+    /// <summary>Spec 021: token emitido por <c>/oauth/token</c> (cliente, alcances y vigencia; nunca el token).</summary>
+    public const string OAuthToken = "integration.oauthtoken";
     public const string Import = "data.import";
     public const string Export = "data.export";
     /// <summary>Spec 009: paquetes de metadatos entre entornos (exportar, subir, rechazo al subir, aprobar, rechazar, aplicar).</summary>

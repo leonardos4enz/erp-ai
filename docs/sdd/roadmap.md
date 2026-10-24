@@ -26,6 +26,7 @@ en orden, no en paralelo: casi todas tocan el núcleo del motor (`PlanCompiler`,
 | 018 OAuth2 (client credentials) y API OData | Implementado ([spec](specs/018-oauth-odata/spec.md)) |
 | 019 Editores visuales (layouts y modelador) | Implementado ([spec](specs/019-editores-visuales/spec.md)) |
 | 020 Contabilidad y costeo | Implementado ([spec](specs/020-contabilidad-costeo/spec.md)) |
+| 021 Endurecimiento 2 | Implementado ([spec](specs/021-endurecimiento-2/spec.md)) |
 
 ## Diagnóstico
 | Brecha señalada | Situación actual | Spec |
@@ -228,6 +229,24 @@ Señaladas por la misma auditoría. Cada una es capacidad nueva del motor y va e
   (método por producto, valor de existencias, póliza de entrada por recepción). Pendiente: póliza de salidas (costo de
   ventas), revaluación de existencias, pólizas en moneda extranjera, reversa de pólizas con otra póliza y rutas de tres
   niveles en expresiones (una partida de póliza por producto).
+
+### 021 — Endurecimiento 2
+Origen: auditoría de solo lectura (2026-10-24) de las specs 014–020 contra el código. Sin capacidades nuevas: reglas que el
+motor ya prometía y no se cumplían en todos los caminos.
+- **Estado:** implementado en la [spec 021](specs/021-endurecimiento-2/spec.md). Nadie otorga ni quita lo que no tiene
+  (superusuario solo por superusuario; modelo y auditoría solo por quien los tiene; también al aprobar, y el beneficiario no
+  aprueba); los catálogos llevan `version` y la vista previa `baseHash`, que aplicar exige (el diseñador ya no pisa el
+  cambio de otra persona; el asistente incluye la huella en la suya); la bandeja marca el éxito en la transacción del
+  trabajo, con dueño del *lease*, renovación y tope de intentos; una tarea activa queda atada a lo que se activó (un plan
+  que la cambia, la quita o archiva su catálogo la pausa); una reversión lista y pide confirmar lo que cambia de seguridad;
+  Contabilidad 1.1.0 no deja cancelar a mano una póliza automática aplicada; OData con tope de `$skip` y de partidas
+  expandidas; tokens OAuth auditados; solicitudes de seguridad atoradas se liberan; no se quita un estado con registros;
+  el editor avisa de cambios sin aplicar.
+- **Pendiente:** costeo 2 (traspaso con bases distintas cuando las capas no cubren, entrada sin costo en una llave sin
+  capas, `Costo` nulo en la recepción, fecha del movimiento frente a la de la póliza, cambio FIFO→Promedio); límite de
+  `/oauth/token` detrás de un proxy (configurar `ForwardedHeaders` con los proxies conocidos de cada despliegue, nunca a
+  ciegas); aviso de cambios sin aplicar también al navegar dentro de la SPA (requiere *data router*); confirmar seguridad en
+  paquetes normales.
 
 ## Decisión: ¿extensión con código?
 La auditoría tiene razón en el costo: cada necesidad nueva exige una capacidad del motor. Se mantiene

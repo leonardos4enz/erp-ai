@@ -390,7 +390,7 @@ export function WorkflowDesigner({ workflow, onChange, savedStates, savedTransit
             {impact.trimmed.length > 0 && <div>Dejan de salir de este estado: {impact.trimmed.map((t) => t.label || t.name).join(', ')}.</div>}
             {impact.removed.length + impact.trimmed.length === 0 && <div>Ninguna transición lo usa.</div>}
             {confirmDelete && savedStates.has(confirmDelete) && (
-              <div className="field-error">Ya está guardado: los registros que estén en este estado se quedan con él, sin transiciones disponibles.</div>
+              <div className="field-error">Ya está guardado: si hay registros en este estado, el plan se rechazará hasta que los muevas a otro.</div>
             )}
             <div className="subtle">El cambio se aplica hasta revisar y aplicar el plan.</div>
           </div>

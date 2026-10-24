@@ -116,6 +116,7 @@ public static partial class AdminEndpoints
             throw new ValidationFailed(new Dictionary<string, string[]> { ["username"] = ["Ese usuario ya existe."] });
         await RequireUnitAsync(cn, tx, p.Unit);
         await RequireRolesAsync(cn, tx, p.RoleIds);
+        await RequireGrantableRolesAsync(cn, tx, http.CurrentUser(), [], p.RoleIds);
         var companyIds = p.CompanyIds ?? (await cn.QueryAsync<int>("SELECT Id FROM meta.Company WHERE IsDefault = 1", transaction: tx)).ToArray();
         await RequireCompaniesAsync(cn, tx, companyIds);
 
@@ -175,6 +176,7 @@ public static partial class AdminEndpoints
         approving?.Verify(snapshot);
         await RequireUnitAsync(cn, tx, p.Unit);
         await RequireRolesAsync(cn, tx, p.RoleIds);
+        await RequireGrantableRolesAsync(cn, tx, me, before.RoleIds, p.RoleIds);
         var companyIds = p.CompanyIds ?? before.CompanyIds.ToArray();
         await RequireCompaniesAsync(cn, tx, companyIds);
 
@@ -232,6 +234,28 @@ public static partial class AdminEndpoints
         var existing = (await cn.QueryAsync<int>("SELECT Id FROM meta.Role WHERE Id IN @ids", new { ids }, tx)).Count();
         if (existing != ids.Length) throw new ValidationFailed(new Dictionary<string, string[]> { ["roleIds"] = ["Hay roles que no existen."] });
     }
+
+    /// <summary>
+    /// Spec 021 (H1 CA1–CA2): los roles que se agregan o se quitan solo dan capacidades que quien hace el cambio tiene.
+    /// Corre al solicitar (con quien solicita) y al aprobar (con quien aprueba).
+    /// </summary>
+    private static async Task RequireGrantableRolesAsync(DbConnection cn, DbTransaction tx, UserContext actor, IEnumerable<int> before, IEnumerable<int> after)
+    {
+        var b = before.ToHashSet();
+        var a = after.ToHashSet();
+        var changed = a.Except(b).Concat(b.Except(a)).ToArray();
+        if (changed.Length == 0 || actor.IsSuperuser) return;
+        foreach (var r in await LoadCapabilitiesAsync(cn, tx, changed))
+            if (r.Caps.MissingFor(actor) is { } missing)
+                throw new Forbidden(r.Caps.Superuser
+                    ? $"Solo un administrador del sistema puede otorgar o quitar el rol «{r.Name}»."
+                    : $"No puedes otorgar ni quitar el rol «{r.Name}»: da una capacidad que no tienes ({missing}).");
+    }
+
+    internal static async Task<IReadOnlyList<(int Id, string Name, AdminCapabilities Caps)>> LoadCapabilitiesAsync(DbConnection cn, DbTransaction? tx, int[] ids) =>
+        ids.Length == 0 ? [] : (await cn.QueryAsync<(int Id, string Name, bool IsSuperuser, bool CanManageModel, bool CanManageUsers, bool CanViewAudit)>(
+                "SELECT Id, Name, IsSuperuser, CanManageModel, CanManageUsers, CanViewAudit FROM meta.Role WHERE Id IN @ids", new { ids }, tx))
+            .Select(r => (r.Id, r.Name, new AdminCapabilities(r.IsSuperuser, r.CanManageModel, r.CanManageUsers, r.CanViewAudit))).ToList();
 
     private static async Task RequireCompaniesAsync(DbConnection cn, DbTransaction tx, int[] ids)
     {
@@ -322,6 +346,13 @@ public static partial class AdminEndpoints
         // El rol superusuario no se puede degradar desde la aplicación.
         var superuser = before?.IsSuperuser == true;
         var (canModel, canUsers, canAudit) = superuser ? (true, true, true) : (req.CanManageModel, req.CanManageUsers, req.CanViewAudit);
+        // Spec 021 (H1 CA3): un rol no gana ni pierde capacidades que quien lo edita no tiene; el superusuario, solo otro superusuario.
+        var actor = http.CurrentUser();
+        var touched = new AdminCapabilities(superuser, canModel, canUsers, canAudit)
+            .Or(before is null ? AdminCapabilities.None : new AdminCapabilities(before.IsSuperuser, before.CanManageModel, before.CanManageUsers, before.CanViewAudit));
+        if (touched.MissingFor(actor) is { } missing)
+            throw new Forbidden(superuser ? "Solo un administrador del sistema puede cambiar el rol superusuario."
+                : $"No puedes dar ni quitar a un rol una capacidad que no tienes ({missing}).");
         CheckInheritance(id, parents, canModel || canUsers || canAudit || superuser, all);
 
         var after = new RoleSnapshot(name, canModel, canUsers, canAudit,

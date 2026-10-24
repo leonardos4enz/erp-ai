@@ -242,11 +242,11 @@ export const environmentsApi = {
   imports: (signal?: AbortSignal) => api<PackageImport[]>('/admin/environments/imports', { signal }),
   upload: (file: Blob) => api<PackageImport>('/admin/environments/imports', { method: 'POST', rawBody: file }),
   detail: (id: number, signal?: AbortSignal) => api<PackageImport>(`/admin/environments/imports/${id}`, { signal }),
-  approve: (id: number, diffHash: string, comment?: string, confirmArchive = false) =>
-    api<PackageImport>(`/admin/environments/imports/${id}/approve`, { method: 'POST', body: { diffHash, comment, confirmArchive } }),
+  approve: (id: number, diffHash: string, comment?: string, confirmArchive = false, confirmSecurity = false) =>
+    api<PackageImport>(`/admin/environments/imports/${id}/approve`, { method: 'POST', body: { diffHash, comment, confirmArchive, confirmSecurity } }),
   reject: (id: number, comment: string) => api<PackageImport>(`/admin/environments/imports/${id}/reject`, { method: 'POST', body: { comment } }),
-  apply: (id: number, diffHash: string, confirmArchive = false) =>
-    api<{ changeSetId: number | null; import: PackageImport }>(`/admin/environments/imports/${id}/apply`, { method: 'POST', body: { diffHash, confirmArchive } }),
+  apply: (id: number, diffHash: string, confirmArchive = false, confirmSecurity = false) =>
+    api<{ changeSetId: number | null; import: PackageImport }>(`/admin/environments/imports/${id}/apply`, { method: 'POST', body: { diffHash, confirmArchive, confirmSecurity } }),
   /** Spec 017: crea la solicitud de reversión (se revisa y aplica como un paquete). */
   revert: (id: number) => api<PackageImport>(`/admin/environments/imports/${id}/revert`, { method: 'POST', body: {} }),
 };

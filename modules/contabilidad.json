@@ -1,7 +1,7 @@
 {
   "id": "contabilidad",
   "name": "Contabilidad",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "icon": "landmark",
   "description": "Catálogo de cuentas, pólizas de partida doble y periodos contables con cierre. El cuadre y los periodos cerrados los garantiza el motor por cualquier vía.",
   "plan": {
@@ -116,6 +116,26 @@
         ] }
     ]
   },
+  "upgrades": [
+    { "version": "1.1.0",
+      "description": "Una póliza automática aplicada ya no se cancela a mano: la generó su documento de origen (p. ej. la recepción, que ya movió el inventario) y quitarla de los saldos descuadraría contabilidad e inventario. Las manuales y los borradores se siguen cancelando.",
+      "plan": { "description": "Contabilidad 1.1.0: póliza automática sin cancelación", "operations": [
+        { "op": "setWorkflow", "entity": "Poliza", "workflow": {
+            "initial": "Borrador",
+            "states": [
+              { "name": "Borrador", "label": "Borrador", "color": "neutral", "editable": true },
+              { "name": "Aplicada", "label": "Aplicada", "color": "success", "editable": false },
+              { "name": "Cancelada", "label": "Cancelada", "color": "danger", "editable": false }
+            ],
+            "transitions": [
+              { "name": "aplicar", "label": "Aplicar póliza", "from": ["Borrador"], "to": "Aplicada", "icon": "check", "variant": "primary", "roles": ["Contador"] },
+              { "name": "cancelar", "label": "Cancelar póliza", "from": ["Borrador", "Aplicada"], "to": "Cancelada", "icon": "ban", "variant": "danger", "roles": ["Contador"], "requireComment": true,
+                "when": "Estado = 'Borrador' OR Origen = 'Manual'",
+                "whenMessage": "Una póliza automática aplicada no se cancela: la generó su documento de origen. Registra una póliza manual de ajuste." }
+            ]
+          } }
+      ] } }
+  ],
   "roles": [
     { "name": "Contador", "description": "Administra el catálogo de cuentas, registra y aplica pólizas y cierra periodos.", "canManageModel": false, "canManageUsers": false, "canViewAudit": true,
       "permissions": [

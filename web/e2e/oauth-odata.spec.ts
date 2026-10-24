@@ -425,9 +425,36 @@ test('H1 CA3 · CA4: rotar sin gracia corta el secreto y los tokens; con gracia,
   for (const s of [cred.secret, graceSecret])
     expect((await tokenRequest({ grant_type: 'client_credentials' }, { Authorization: basic(cred.clientId, s) })).status()).toBe(401);
 
-  const audit = (await (await admin.get('/api/audit', { params: { page: '1', pageSize: '50' } })).json()) as { items: { action: string; recordId: string; after: { action: string } }[] };
+  // Spec 021: los tokens emitidos también se auditan; se filtra por acción para no depender de cuántos hubo.
+  const audit = (await (await admin.get('/api/audit', { params: { action: 'integration.oauthclient', pageSize: '50' } })).json()) as { items: { action: string; recordId: string; after: { action: string } }[] };
   const actions = audit.items.filter((a) => a.action === 'integration.oauthclient' && a.recordId === String(client.id)).map((a) => a.after.action);
   expect(actions).toEqual(['revoke', 'rotate', 'rotate', 'update', 'create']);
+});
+
+// Spec 021 (H7 · H8 CA2): límites de costo de OData y auditoría de los tokens emitidos. Fallaron con el código anterior.
+test('Spec 021 H7 CA1 · CA2 · H8 CA2: $skip y $expand de partidas con tope; emitir un token queda en la auditoría', async () => {
+  const tokens = (await (await admin.get('/api/audit', { params: { action: 'integration.oauthtoken', pageSize: '5' } })).json()) as
+    { total: number; items: { user: string; after: { clientId: string; scopes: string[]; expiresInMinutes: number } }[] };
+  expect(tokens.total).toBeGreaterThan(0);
+  expect(tokens.items[0].after.clientId).toBe(cred.clientId);
+  expect(tokens.items[0].after.scopes.length).toBeGreaterThan(0);
+  expect(JSON.stringify(tokens.items)).not.toMatch(/access_token|Bearer/);
+
+  const skip = await admin.get('/odata/Pedido18', { params: { $skip: '100001' } });
+  expect(skip.status()).toBe(400);
+  expect((await skip.json()).error.message).toMatch(/\$skip/);
+  expect((await admin.get('/odata/Pedido18', { params: { $skip: '100000' } })).status()).toBe(200);
+
+  // La suite limita a 10 partidas expandidas por página (OData:MaxExpandedLines).
+  const r = await admin.post('/api/data/Pedido18', { data: { Folio: 'P-021', Cliente: ids.ana, Monto: 1,
+    Partidas: Array.from({ length: 11 }, (_, i) => ({ Producto: `Pieza ${i + 1}`, Cantidad: 1, Costo: 1 })) } });
+  expect(r.status(), await r.text()).toBe(201);
+  const many = await admin.get('/odata/Pedido18', { params: { $filter: "Folio eq 'P-021'", $expand: 'Partidas' } });
+  expect(many.status()).toBe(400);
+  expect((await many.json()).error.message).toMatch(/partidas/);
+  const few = await admin.get('/odata/Pedido18', { params: { $filter: "Folio eq 'P-001'", $expand: 'Partidas' } });
+  expect(few.status()).toBe(200);
+  expect((await admin.delete(`/api/data/Pedido18/${(await r.json()).id}`)).status()).toBe(204);
 });
 
 test('diseño: la pestaña se adapta al móvil y al tema oscuro sin desbordarse', async ({ browser }) => {

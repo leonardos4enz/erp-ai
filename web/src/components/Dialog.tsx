@@ -155,13 +155,14 @@ export interface ConfirmDialogProps {
   title: string;
   message: ReactNode;
   confirmLabel?: string;
+  cancelLabel?: string;
   danger?: boolean;
   loading?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }
 
-export function ConfirmDialog({ open, title, message, confirmLabel = 'Confirmar', danger, loading, onConfirm, onCancel }: ConfirmDialogProps) {
+export function ConfirmDialog({ open, title, message, confirmLabel = 'Confirmar', cancelLabel = 'Cancelar', danger, loading, onConfirm, onCancel }: ConfirmDialogProps) {
   return (
     <Dialog
       open={open}
@@ -169,7 +170,7 @@ export function ConfirmDialog({ open, title, message, confirmLabel = 'Confirmar'
       title={<span className="row">{danger && <AlertTriangle size={18} color="var(--danger)" aria-hidden />}{title}</span>}
       footer={
         <>
-          <Button onClick={onCancel} disabled={loading} data-autofocus>Cancelar</Button>
+          <Button onClick={onCancel} disabled={loading} data-autofocus>{cancelLabel}</Button>
           <Button variant={danger ? 'danger' : 'primary'} loading={loading} onClick={onConfirm}>{confirmLabel}</Button>
         </>
       }

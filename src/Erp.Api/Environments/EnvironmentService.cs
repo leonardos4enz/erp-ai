@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using Dapper;
+using Erp.Api.Assistant;
 using Erp.Api.Infrastructure;
 using Erp.Api.Metadata;
 using Erp.Api.Security;
@@ -13,16 +14,20 @@ namespace Erp.Api.Environments;
 
 public sealed record ExportRequest(string? Id, string? Name, string? Version, string? Description, string? Icon,
     string[]? Entities, string[]? Dashboards);
-public sealed record ApproveRequest(string? DiffHash, string? Comment, bool ConfirmArchive = false);
+/// <param name="ConfirmSecurity">Spec 021 (H5 CA2): confirma los cambios de seguridad de una reversión.</param>
+public sealed record ApproveRequest(string? DiffHash, string? Comment, bool ConfirmArchive = false, bool ConfirmSecurity = false);
 public sealed record RejectRequest(string? Comment);
-public sealed record ApplyRequest(string? DiffHash, bool ConfirmArchive = false);
+public sealed record ApplyRequest(string? DiffHash, bool ConfirmArchive = false, bool ConfirmSecurity = false);
 
 /// <summary><c>Label</c>: nombre del catálogo para quien revisa (regresión F-03 de la verificación 009).</summary>
 public sealed record PackagePermission(string Entity, string Label, bool CanRead, bool CanCreate, bool CanUpdate, bool CanDelete);
 public sealed record PackageRoleDto(string Name, bool IsNew, bool CanViewAudit, IReadOnlyList<PackagePermission> Permissions);
 /// <param name="LocalArchives">Spec 014 (H4): campos que solo existen en este entorno y el paquete archiva; aprobar y aplicar piden confirmarlo.</param>
+/// <param name="SecurityChanges">Spec 021 (H5): en una reversión, lo que cambia de seguridad (campos y registros, proceso con roles,
+/// automatizaciones, webhooks y tareas); aprobar y aplicar piden confirmarlo. Vacío en un paquete.</param>
 public sealed record PackageDiffDto(bool Valid, IReadOnlyList<PlanError> Errors, IReadOnlyList<PlanStep> Steps, IReadOnlyList<string> Conflicts,
-    IReadOnlyList<string> Warnings, IReadOnlyList<PackageRoleDto> Roles, string DiffHash, bool Empty, IReadOnlyList<string> LocalArchives);
+    IReadOnlyList<string> Warnings, IReadOnlyList<PackageRoleDto> Roles, string DiffHash, bool Empty, IReadOnlyList<string> LocalArchives,
+    IReadOnlyList<string> SecurityChanges);
 public sealed record ExportPreviewDto(bool Valid, IReadOnlyList<PlanError> Errors, IReadOnlyList<PlanStep> Steps, int Operations,
     IReadOnlyList<string> Entities, IReadOnlyList<PackageRoleDto> Roles, IReadOnlyList<string> Dependencies, IReadOnlyList<string> Warnings,
     string Hash, bool Signed);
@@ -414,6 +419,7 @@ public sealed class EnvironmentService(Db db, MetadataStore store, PlanService p
         if (!string.Equals(req.DiffHash, diff.DiffHash, StringComparison.Ordinal))
             throw new Conflict("El entorno cambió mientras revisabas: vuelve a abrir el paquete y revisa el diff.");
         RequireArchiveConfirmed(diff, req.ConfirmArchive);
+        RequireSecurityConfirmed(diff, req.ConfirmSecurity);
         await cn.ExecuteAsync("""
             UPDATE meta.PackageImport SET Status = 'approved', ReviewedBy = @UserId, ReviewedAt = SYSUTCDATETIME(),
                 ReviewComment = @comment, ApprovedDiffHash = @DiffHash WHERE Id = @id
@@ -431,6 +437,14 @@ public sealed class EnvironmentService(Db db, MetadataStore store, PlanService p
         if (diff.LocalArchives.Count == 0 || confirmed) return;
         throw new Conflict($"Este paquete archiva {diff.LocalArchives.Count} {(diff.LocalArchives.Count == 1 ? "campo que solo existe" : "campos que solo existen")} " +
                            "en este entorno (sus datos se conservan). Revisa la lista y confírmalo de forma explícita.");
+    }
+
+    /// <summary>Spec 021 (H5 CA2): una reversión que cambia seguridad se confirma de forma explícita, como archivar.</summary>
+    internal static void RequireSecurityConfirmed(PackageDiffDto diff, bool confirmed)
+    {
+        if (diff.SecurityChanges.Count == 0 || confirmed) return;
+        throw new Conflict("La reversión cambia la seguridad de este entorno (quién ve y modifica campos y registros, procesos con roles, " +
+                           "automatizaciones, webhooks o tareas). Revisa la lista y confírmalo de forma explícita.");
     }
 
     public async Task<PackageImportDto> RejectAsync(int id, RejectRequest req, HttpContext http, CancellationToken ct)
@@ -668,8 +682,9 @@ public sealed class EnvironmentService(Db db, MetadataStore store, PlanService p
             warnings.Add($"Los roles del paquete ({string.Join(", ", packageRoles)}) y sus permisos se conservan: revísalos en Seguridad si ya no se usan.");
 
         var diffHash = Sha(JsonSerializer.Serialize(new { kind = KindRevert, revertOf = reverted.Id, plan.Operations }, PackageJson.Canonical));
+        // Spec 021 (H5 CA1): la instantánea puede reabrir (o cerrar) seguridad; se dice con los avisos del asistente.
         var diff = new PackageDiffDto(errors.Count == 0 && result.Conflicts.Count == 0, errors, steps, result.Conflicts, warnings, [], diffHash,
-            plan.Operations.Count == 0, result.LocalArchives);
+            plan.Operations.Count == 0, result.LocalArchives, PlanWarnings.Security(plan, model));
         return (diff, plan, versionBlock);
     }
 
@@ -689,6 +704,7 @@ public sealed class EnvironmentService(Db db, MetadataStore store, PlanService p
         if (env.RequireApproval && row.ApprovedDiffHash != diff.DiffHash)
             throw new Conflict("El entorno cambió desde la aprobación: el diff ya no es el que se aprobó.");
         RequireArchiveConfirmed(diff, req.ConfirmArchive);
+        RequireSecurityConfirmed(diff, req.ConfirmSecurity);
 
         int? changeSetId = plan.Operations.Count > 0 ? await plans.ApplyInTransactionAsync(cn, tx, plan, http) : null;
         var scopeBefore = (await LoadSnapshotsAsync(cn, tx, reverted.Id))!.Value.Before.Snapshot;
@@ -765,7 +781,7 @@ public sealed class EnvironmentService(Db db, MetadataStore store, PlanService p
         var diffHash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(hashInput)));
         var empty = plan.Operations.Count == 0 && packageRoles.All(r => !r.IsNew && r.Permissions.Count == 0);
         return new PackageDiffDto(allErrors.Count == 0 && diff.Conflicts.Count == 0, allErrors, steps, diff.Conflicts, warnings, packageRoles, diffHash, empty,
-            diff.LocalArchives);
+            diff.LocalArchives, []);
     }
 
     // ---------------- Datos ----------------

@@ -636,6 +636,12 @@ public static class Bootstrap
         IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_OAuthToken_Client' AND object_id = OBJECT_ID('meta.OAuthToken'))
             CREATE INDEX IX_OAuthToken_Client ON meta.OAuthToken (ClientId, ExpiresAt);
 
+        -- Spec 021: cuándo se reclamó una solicitud de seguridad (una atorada en 'applying' se libera), dueño del lease de
+        -- un trabajo en segundo plano y huella del contenido de una tarea programada al activarla.
+        IF COL_LENGTH('meta.SecurityChange', 'ClaimedAt') IS NULL ALTER TABLE meta.SecurityChange ADD ClaimedAt datetime2(3) NULL;
+        IF COL_LENGTH('meta.AutomationRun', 'LeaseToken') IS NULL ALTER TABLE meta.AutomationRun ADD LeaseToken uniqueidentifier NULL;
+        IF COL_LENGTH('meta.ScheduleState', 'ContentHash') IS NULL ALTER TABLE meta.ScheduleState ADD ContentHash char(64) NULL;
+
         -- Constitución II.4: la auditoría es de solo inserción, incluso para la propia aplicación.
         IF OBJECT_ID('meta.TR_AuditLog_Immutable') IS NULL
             EXEC('CREATE TRIGGER meta.TR_AuditLog_Immutable ON meta.AuditLog INSTEAD OF UPDATE, DELETE AS

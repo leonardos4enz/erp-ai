@@ -114,14 +114,14 @@ public class HardeningTests
     public void La_huella_de_la_revision_cambia_con_el_plan_los_pasos_o_las_advertencias()
     {
         var preview = new PlanPreview(true, [], [new PlanStep(0, "Reglas de 'Producto'", null)]);
-        var a = ReviewHash.Of("{\"operations\":[]}", preview, ["Quita reglas existentes: A"]);
+        var a = ReviewHash.Of("{\"operations\":[]}", preview, ["Quita reglas existentes: A"], "");
         Assert.Matches("^[0-9a-f]{64}$", a);
-        Assert.Equal(a, ReviewHash.Of("{\"operations\":[]}", preview, ["Quita reglas existentes: A"]));
-        Assert.NotEqual(a, ReviewHash.Of("{\"operations\":[]}", preview, ["Quita reglas existentes: A, B"]));
-        Assert.NotEqual(a, ReviewHash.Of("{\"operations\":[1]}", preview, ["Quita reglas existentes: A"]));
+        Assert.Equal(a, ReviewHash.Of("{\"operations\":[]}", preview, ["Quita reglas existentes: A"], ""));
+        Assert.NotEqual(a, ReviewHash.Of("{\"operations\":[]}", preview, ["Quita reglas existentes: A, B"], ""));
+        Assert.NotEqual(a, ReviewHash.Of("{\"operations\":[1]}", preview, ["Quita reglas existentes: A"], ""));
         Assert.NotEqual(a, ReviewHash.Of("{\"operations\":[]}", preview with { Steps = [new PlanStep(0, "Reglas de 'Producto'", "ALTER")] },
-            ["Quita reglas existentes: A"]));
+            ["Quita reglas existentes: A"], ""));
         // Mover texto entre partes no produce la misma huella.
-        Assert.NotEqual(ReviewHash.Of("x", new PlanPreview(true, [], []), ["y"]), ReviewHash.Of("xy", new PlanPreview(true, [], []), []));
+        Assert.NotEqual(ReviewHash.Of("x", new PlanPreview(true, [], []), ["y"], ""), ReviewHash.Of("xy", new PlanPreview(true, [], []), [], ""));
     }
 }

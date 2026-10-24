@@ -6,6 +6,7 @@ import {
 import { ApiError } from '../../api/client';
 import { adminApi } from '../../api/endpoints';
 import type { Automation, ChangePlan, EntityDef, FieldDef, FieldType, FormulaResultType, LedgerDef, Layout, Operation, ReportDef, Rule, ScheduleDef, SecurityPolicy, ViewDef, WebhookDef, Workflow } from '../../api/types';
+import { ConfirmDialog } from '../../components/Dialog';
 import { IconPicker } from '../../components/IconPicker';
 import { TagInput } from '../../components/TagInput';
 import { Alert, Button, Field, Input, Select, Switch, Tabs, Textarea } from '../../components/ui';
@@ -513,6 +514,17 @@ export function EntityEditor({ original, entities, onCancel, onReview }: EntityE
   const errors = useMemo(() => validate(d, isNew, entities.map((e) => e.name)), [d, isNew, entities]);
   const visibleErrors = showErrors ? errors : {};
   const ops = useMemo(() => buildOperations(original, d), [original, d]);
+  // Spec 021 (H8 CA4): con cambios sin aplicar, cerrar o recargar la pestaña pregunta, y «Cancelar» pide confirmación.
+  // Un catálogo nuevo siempre produce operaciones: ahí cuenta si el borrador se tocó.
+  const [pristine] = useState(d);
+  const dirty = isNew ? d !== pristine : ops.length > 0;
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [dirty]);
   const textFields = d.fields.filter((f) => !f.isArchived && (f.type === 'text') && IDENTIFIER_RE.test(f.name));
 
   function patchField(key: string, patch: Partial<DraftField>) {
@@ -538,7 +550,8 @@ export function EntityEditor({ original, entities, onCancel, onReview }: EntityE
       return;
     }
     const description = isNew ? `Crear catálogo ${d.labelPlural.trim()}` : `Modificar catálogo ${original!.labelPlural}`;
-    onReview({ description, operations: ops });
+    // Spec 021 (H2 CA1): la versión con la que se abrió; si otra persona aplicó un cambio después, la vista previa lo dice.
+    onReview({ description, operations: ops, baseVersions: original?.version ? { [original.name]: original.version } : undefined });
   }
 
   const parsedLayout = parseJson<Layout>(d.layoutJson, 'object');
@@ -792,11 +805,21 @@ export function EntityEditor({ original, entities, onCancel, onReview }: EntityE
 
       <div className="row" style={{ justifyContent: 'flex-end' }}>
         {showErrors && Object.keys(errors).length > 0 && <span className="field-error" style={{ marginRight: 'auto' }}>Corrige los campos marcados antes de continuar.</span>}
-        <Button onClick={onCancel}>Cancelar</Button>
+        <Button onClick={() => (dirty ? setConfirmDiscard(true) : onCancel())}>Cancelar</Button>
         <Button variant="primary" icon={Eye} disabled={!isNew && ops.length === 0} onClick={review}>
           {!isNew && ops.length === 0 ? 'Sin cambios' : 'Revisar cambios'}
         </Button>
       </div>
+      <ConfirmDialog
+        open={confirmDiscard}
+        danger
+        title="¿Descartar los cambios?"
+        message="Los cambios de este catálogo aún no se aplican. Si sales ahora, se pierden."
+        confirmLabel="Descartar cambios"
+        cancelLabel="Seguir editando"
+        onCancel={() => setConfirmDiscard(false)}
+        onConfirm={() => { setConfirmDiscard(false); onCancel(); }}
+      />
     </div>
   );
 }

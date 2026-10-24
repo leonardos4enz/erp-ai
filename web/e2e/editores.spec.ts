@@ -370,7 +370,8 @@ test('H2 CA3 · CA4: eliminar un estado pide confirmación y dice qué transicio
   await panel.getByRole('button', { name: 'Eliminar estado' }).click();
   const confirm = page.getByRole('dialog', { name: 'Eliminar el estado «Rechazado»' });
   await expect(confirm).toContainText('Se quitan las transiciones: Rechazar, Reabrir.');
-  await expect(confirm).toContainText('los registros que estén en este estado se quedan con él');
+  // Spec 021 (H8 CA3): el servidor ya no deja registros en un estado que desaparece.
+  await expect(confirm).toContainText('si hay registros en este estado, el plan se rechazará');
   await confirm.getByRole('button', { name: 'Eliminar estado' }).click();
   await expect(page.getByRole('button', { name: /^Estado Rechazado/ })).toHaveCount(0);
   await expect(page.getByRole('button', { name: /^Transición Rechazar/ })).toHaveCount(0);
@@ -378,6 +379,8 @@ test('H2 CA3 · CA4: eliminar un estado pide confirmación y dice qué transicio
   expect(JSON.stringify(plan)).not.toContain('Rechazado');
   await page.getByRole('dialog').getByRole('button', { name: 'Volver a editar' }).click();
   await page.getByRole('button', { name: 'Cancelar' }).click();
+  // Spec 021 (H8 CA4): con cambios sin aplicar, cancelar pide confirmación.
+  await page.getByRole('dialog', { name: '¿Descartar los cambios?' }).getByRole('button', { name: 'Descartar cambios' }).click();
   await expect(page).toHaveURL(/\/admin\/model$/);
 });
 

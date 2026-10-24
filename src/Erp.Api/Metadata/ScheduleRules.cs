@@ -198,6 +198,14 @@ public static class ScheduleCalendar
     private static string Join(IReadOnlyList<string> items) =>
         items.Count <= 1 ? string.Join("", items) : $"{string.Join(", ", items.Take(items.Count - 1))} y {items[^1]}";
 
+    /// <summary>
+    /// Spec 021 (H4): huella de lo que la tarea hace (calendario, consulta, rol, lote y acciones). La etiqueta y la
+    /// descripción no cuentan: renombrarla no la pausa.
+    /// </summary>
+    public static string ContentHash(ScheduleDef s) =>
+        Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(
+            JsonSerializer.Serialize(s with { Label = "", Description = null, Weekdays = s.Weekdays?.Order().ToList() }, MetadataStore.Json))));
+
     /// <summary>Forma canónica del calendario: si cambia (un plan lo editó), se recalcula la siguiente ocurrencia.</summary>
     public static string Key(ScheduleDef s) =>
         JsonSerializer.Serialize(new { s.Every, s.Interval, s.Minute, s.At, Weekdays = s.Weekdays?.Order().ToList(), s.Day });

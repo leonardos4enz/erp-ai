@@ -64,3 +64,4 @@ y cada sesión queda como registro de una sola entrega. Al cerrar la spec:
 | 018 | [OAuth2 (client credentials) y API OData](specs/018-oauth-odata/spec.md) | Implementado |
 | 019 | [Editores visuales: diseñador del formulario y diagrama del proceso](specs/019-editores-visuales/spec.md) | Implementado |
 | 020 | [Contabilidad y costeo (promedio y FIFO)](specs/020-contabilidad-costeo/spec.md) | Implementado |
+| 021 | [Endurecimiento 2](specs/021-endurecimiento-2/spec.md) | Implementado |

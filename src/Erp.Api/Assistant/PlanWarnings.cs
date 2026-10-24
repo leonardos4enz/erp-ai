@@ -83,4 +83,11 @@ public static class PlanWarnings
         }
         return list.Distinct().ToList();
     }
+
+    /// <summary>
+    /// Spec 021 (H5): solo los avisos de lo que cambia quién ve o modifica (seguridad por campo y registro, proceso con roles)
+    /// o lo que actúa solo sobre los datos (automatizaciones, webhooks, tareas). Lo usa la reversión de un paquete.
+    /// </summary>
+    public static IReadOnlyList<string> Security(ChangePlan plan, IReadOnlyDictionary<string, EntityDef> model) =>
+        For(plan with { Operations = plan.Operations.Where(op => op is SetSecurityOp or SetWorkflowOp or SetAutomationsOp or SetWebhooksOp or SetSchedulesOp).ToList() }, model);
 }

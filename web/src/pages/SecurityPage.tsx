@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Building2, Check, ClipboardCheck, KeyRound, MoveRight, Network, Pencil, Plus, ShieldCheck, UserPlus, Users, UsersRound, X } from 'lucide-react';
 import { ApiError, fieldError } from '../api/client';
 import { adminApi, companiesApi, modelApi, type RoleInput } from '../api/endpoints';
@@ -33,6 +33,20 @@ function UnitSelect({ label, units, value, onChange, error, hint, exclude, empty
 }
 
 /* ----------------------------- Users ----------------------------- */
+
+/**
+ * Regresión (revisión exploratoria 021, F-01): el error de un diálogo largo se trae a la vista. Se guarda desde el pie y el
+ * aviso queda arriba, fuera de la vista: parecía que «Guardar» no hacía nada.
+ */
+function DialogError({ error }: { error: ApiError }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => { ref.current?.scrollIntoView({ block: 'nearest' }); }, [error]);
+  return (
+    <div ref={ref}>
+      <Alert tone="danger" title={error.title}>{error.detail ?? Object.values(error.fieldErrors).flat().join(' ')}</Alert>
+    </div>
+  );
+}
 
 function UserDialog({ user, roles, companies, units, open, onClose, onSaved }: { user: User | null; roles: Role[]; companies: Company[]; units: BusinessUnit[]; open: boolean; onClose: () => void; onSaved: () => void }) {
   const toast = useToast();
@@ -99,7 +113,7 @@ function UserDialog({ user, roles, companies, units, open, onClose, onSaved }: {
       footer={<><Button onClick={onClose} disabled={saving}>Cancelar</Button><Button variant="primary" loading={saving} onClick={save}>{isNew ? 'Crear usuario' : 'Guardar'}</Button></>}
     >
       <div className="stack">
-        {general && <Alert tone="danger" title={general.title}>{general.detail}</Alert>}
+        {general && <DialogError error={general} />}
         <Input label="Usuario" required autoComplete="off" value={username} disabled={!isNew} error={fe('username')} onChange={(e) => setUsername(e.target.value)} maxLength={50} data-autofocus />
         <Input label="Nombre completo" required value={displayName} error={fe('displayName')} onChange={(e) => setDisplayName(e.target.value)} maxLength={100} />
         <Input
@@ -304,7 +318,7 @@ function RoleDialog({ role, roles, entities, open, onClose, onSaved }: { role: R
       footer={<><Button onClick={onClose} disabled={saving}>Cancelar</Button><Button variant="primary" loading={saving} onClick={save} disabled={superuser}>{isNew ? 'Crear rol' : 'Guardar'}</Button></>}
     >
       <div className="stack">
-        {error && <Alert tone="danger" title={error.title}>{error.detail ?? Object.values(error.fieldErrors).flat().join(' ')}</Alert>}
+        {error && <DialogError error={error} />}
         <div className="form-grid">
           <Input label="Nombre" required value={form.name} disabled={superuser} error={nameErr ?? fieldError(error, 'name')} onChange={(e) => { setNameErr(undefined); setForm((f) => ({ ...f, name: e.target.value })); }} maxLength={50} data-autofocus />
           <Textarea label="Descripción" rows={1} style={{ minHeight: 36 }} value={form.description ?? ''} disabled={superuser} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} maxLength={200} />
@@ -479,7 +493,7 @@ function TeamDialog({ team, users, units, open, onClose, onSaved }: { team: Team
       footer={<><Button onClick={onClose} disabled={saving}>Cancelar</Button><Button variant="primary" loading={saving} onClick={save}>{isNew ? 'Crear equipo' : 'Guardar'}</Button></>}
     >
       <div className="stack">
-        {general && <Alert tone="danger" title={general.title}>{general.detail}</Alert>}
+        {general && <DialogError error={general} />}
         <Input label="Nombre" required value={name} error={nameErr ?? fieldError(error, 'name')} onChange={(e) => { setNameErr(undefined); setName(e.target.value); }} maxLength={150} data-autofocus />
         <UnitSelect label="Unidad" units={units} value={unit} onChange={setUnit} error={fieldError(error, 'unit')}
           hint="Sus registros cuentan como de esta unidad para los alcances por unidad." />
@@ -605,7 +619,7 @@ function UnitDialog({ unit, units, open, onClose, onSaved }: { unit: BusinessUni
       footer={<><Button onClick={onClose} disabled={saving}>Cancelar</Button><Button variant="primary" loading={saving} onClick={save}>{isNew ? 'Crear unidad' : 'Mover'}</Button></>}
     >
       <div className="stack">
-        {general && <Alert tone="danger" title={general.title}>{general.detail}</Alert>}
+        {general && <DialogError error={general} />}
         {isNew && <Input label="Nombre" required value={name} error={nameErr ?? fieldError(error, 'name')} onChange={(e) => { setNameErr(undefined); setName(e.target.value); }} maxLength={100} data-autofocus />}
         <UnitSelect label="Unidad superior" units={units} value={parent} onChange={setParent} error={fieldError(error, 'parentId')}
           exclude={(u) => descendants.has(u.id)} emptyLabel="— Ninguna (unidad raíz) —" />

@@ -365,6 +365,12 @@ test('H3 · H5 CA1 · CA3: recepción en euros → entrada en moneda base con CO
   expect(await cuenta('2150')).toMatchObject({ Abonos: 210, Saldo: 210 });
   const history = await get('contador', `/api/data/Poliza/${pols[0].id}/history`);
   expect(history.at(-1).comment).toBe(`Automática: Póliza de entrada (Recepción ${rec.body.Folio}).`);
+  // Regresión (spec 021, H6): cancelar a mano una póliza automática aplicada la quitaba de los saldos y dejaba el inventario
+  // valuado sin su póliza (contabilidad e inventario descuadrados).
+  const cancel = await transition('contador', 'Poliza', await get('contador', `/api/data/Poliza/${pols[0].id}`), 'cancelar', { comment: 'Intento' });
+  expect(cancel.status).toBe(400);
+  expect(JSON.stringify(cancel.body)).toContain('Una póliza automática aplicada no se cancela');
+  expect(await cuenta('1200')).toMatchObject({ Cargos: 210, Saldo: 210 });
 
   // El contador la ve cerrada a edición, con sus dos partidas.
   const page = await pageAs(browser, 'contador');

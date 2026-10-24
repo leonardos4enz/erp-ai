@@ -35,7 +35,8 @@ export function PlanReviewDialog({ plan, onClose, onApplied }: PlanReviewDialogP
     setApplying(true);
     setError(null);
     try {
-      const r = await modelApi.apply(plan);
+      // Spec 021 (H2): se aplica lo que se revisó; si el modelo cambió desde la vista previa, el servidor responde 409.
+      const r = await modelApi.apply({ ...plan, baseHash: preview?.baseHash ?? undefined });
       onApplied(r.changeSetId);
     } catch (e) {
       setError(e instanceof ApiError ? e : new ApiError(0, {}));

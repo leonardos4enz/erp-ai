@@ -524,6 +524,9 @@ public sealed record WebhookDef
 
 public sealed record EntityDef
 {
+    /// <summary>Spec 021 (H2): versión de la definición, solo en las respuestas al modelador (no se guarda).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Version { get; init; }
     public required string Name { get; init; }
     public required string Label { get; init; }
     public required string LabelPlural { get; init; }
@@ -578,6 +581,12 @@ public sealed record ChangePlan
 {
     public string Description { get; init; } = "";
     public IReadOnlyList<Operation> Operations { get; init; } = [];
+    /// <summary>Spec 021 (H2 CA1): versión de cada catálogo con la que el editor lo abrió. No se guarda con el plan.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyDictionary<string, string>? BaseVersions { get; init; }
+    /// <summary>Spec 021 (H2 CA2): huella de la vista previa que se revisó (<see cref="PlanPreview.BaseHash"/>).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? BaseHash { get; init; }
 }
 
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "op", UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FailSerialization)]
@@ -762,4 +771,5 @@ public sealed record RestoreFieldOp : Operation
 
 public sealed record PlanError(int Operation, string Message);
 public sealed record PlanStep(int Operation, string Description, string? Sql);
-public sealed record PlanPreview(bool Valid, IReadOnlyList<PlanError> Errors, IReadOnlyList<PlanStep> Steps);
+/// <param name="BaseHash">Spec 021 (H2 CA2): huella de lo que el plan toca tal como estaba al revisar; aplicar la exige.</param>
+public sealed record PlanPreview(bool Valid, IReadOnlyList<PlanError> Errors, IReadOnlyList<PlanStep> Steps, string? BaseHash = null);

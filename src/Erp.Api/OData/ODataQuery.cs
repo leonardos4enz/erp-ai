@@ -15,6 +15,11 @@ public sealed partial record ODataQuery(string? Filter, IReadOnlyList<string>? S
     public const int MaxOrderBy = 5;
     public const int MaxExpand = 10;
     public const int MaxSelect = 200;
+    /// <summary>Spec 021 (H7 CA1): <c>OFFSET</c> profundo es costoso; para avanzar más, se filtra por Id.</summary>
+    public const int MaxSkip = 100_000;
+    /// <summary>Spec 021 (H7 CA2): partidas expandidas por página (lo fija el servidor con <c>OData:MaxExpandedLines</c>).</summary>
+    public const int DefaultMaxExpandedLines = 5_000;
+    public int MaxExpandedLines { get; init; } = DefaultMaxExpandedLines;
 
     public static readonly ODataQuery Empty = new(null, null, [], null, 0, false, []);
 
@@ -67,7 +72,9 @@ public sealed partial record ODataQuery(string? Filter, IReadOnlyList<string>? S
             "true" => true,
             _ => throw new ODataException("$count es true o false."),
         };
-        return new ODataQuery(filter, select, order, Number("$top", Get("$top")), Number("$skip", Get("$skip")) ?? 0, count, expand);
+        var skip = Number("$skip", Get("$skip")) ?? 0;
+        if (skip > MaxSkip) throw new ODataException($"$skip admite hasta {MaxSkip:N0}: para avanzar más, filtra por Id (p. ej. $filter=Id gt …).");
+        return new ODataQuery(filter, select, order, Number("$top", Get("$top")), skip, count, expand);
     }
 
     private static int? Number(string key, string? value)

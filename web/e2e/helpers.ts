@@ -23,9 +23,15 @@ export async function apiAs(username: string, password: string): Promise<APIRequ
 export const anonApi = (headers: Record<string, string> = { 'X-ERP-Request': '1' }) =>
   request.newContext({ baseURL: BASE_URL, storageState: NO_STATE, extraHTTPHeaders: headers });
 
-/** Aplica un plan de cambios por API (para preparar datos rápido en pruebas de UI). */
+/**
+ * Aplica un plan de cambios por API (para preparar datos rápido en pruebas de UI). Como el modelador: primero la vista
+ * previa, que da la huella de lo revisado (spec 021), y luego aplicar con ella.
+ */
 export async function applyPlan(api: APIRequestContext, plan: object) {
-  const res = await api.post('/api/model/plan/apply', { data: plan });
+  const preview = await api.post('/api/model/plan/preview', { data: plan });
+  expect(preview.status(), await preview.text()).toBe(200);
+  const { baseHash } = await preview.json();
+  const res = await api.post('/api/model/plan/apply', { data: { ...plan, baseHash } });
   expect(res.status(), await res.text()).toBe(200);
 }
 

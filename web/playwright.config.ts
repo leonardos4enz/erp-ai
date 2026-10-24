@@ -60,6 +60,8 @@ export default defineConfig({
       Automations__RetryDelaysSeconds: '1,1',
       // Spec 018: páginas de OData de 3 filas para probar @odata.nextLink sin crear cientos de registros.
       OData__MaxPageSize: '3',
+      // Spec 021: tope de partidas expandidas por página, bajo para probarlo con un documento de 11 partidas.
+      OData__MaxExpandedLines: '10',
       // Spec 009: la suite se comporta como producción (aprobación de otro administrador y paquetes firmados).
       Environments__Name: 'Producción E2E',
       Environments__RequireApproval: 'true',

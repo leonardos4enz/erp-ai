@@ -42,9 +42,12 @@ public static partial class ODataEndpoints
             }, contentType: JsonType);
         }));
         // OData:MaxPageSize (1..500) solo para que la suite E2E pruebe la paginación sin crear cientos de registros.
-        var pageSize = Math.Clamp(app.ServiceProvider.GetRequiredService<IConfiguration>().GetValue("OData:MaxPageSize", PageSize), 1, PageSize);
+        var config = app.ServiceProvider.GetRequiredService<IConfiguration>();
+        var pageSize = Math.Clamp(config.GetValue("OData:MaxPageSize", PageSize), 1, PageSize);
+        // Spec 021 (H7 CA2): partidas expandidas por página; la suite lo baja para probarlo con pocos registros.
+        var maxLines = Math.Clamp(config.GetValue("OData:MaxExpandedLines", ODataQuery.DefaultMaxExpandedLines), 1, ODataQuery.DefaultMaxExpandedLines);
         g.MapGet("/{segment}", (string segment, HttpContext http, MetadataStore store, RecordService records, CancellationToken ct) =>
-            Run(http, () => SegmentAsync(segment, http, store, records, pageSize, ct)));
+            Run(http, () => SegmentAsync(segment, http, store, records, pageSize, maxLines, ct)));
         g.MapMethods("/{**rest}", ["POST", "PUT", "PATCH", "DELETE", "MERGE"], (HttpContext http) =>
         {
             http.Response.Headers.Allow = "GET";
@@ -66,7 +69,7 @@ public static partial class ODataEndpoints
     }
 
     private static async Task<IResult> SegmentAsync(string segment, HttpContext http, MetadataStore store, RecordService records, int pageSize,
-        CancellationToken ct)
+        int maxLines, CancellationToken ct)
     {
         var user = http.CurrentUser();
         var model = await store.GetAsync(ct);
@@ -77,7 +80,7 @@ public static partial class ODataEndpoints
         // Catálogo que no existe, que es partida o que el rol no lee: el mismo 404 (no revela cuál).
         if (!m.Success || !model.TryGetValue(m.Groups[1].Value, out var e) || !ODataModel.IsEntitySet(e, user))
             throw new NotFound("El conjunto de entidades no existe.");
-        var q = ODataQuery.Parse(http.Request.Query);
+        var q = ODataQuery.Parse(http.Request.Query) with { MaxExpandedLines = maxLines };
         var root = Root(http);
 
         if (m.Groups[2].Success)

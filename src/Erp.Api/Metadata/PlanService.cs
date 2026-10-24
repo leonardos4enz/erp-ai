@@ -10,17 +10,35 @@ namespace Erp.Api.Metadata;
 
 public sealed class PlanService(Db db, MetadataStore store, JsonSerializerOptions json)
 {
+    /// <summary>
+    /// Vista previa del modelador. Spec 021: agrega los catálogos que cambiaron desde que el editor los abrió, los estados
+    /// que se quitarían con registros, y la huella de lo revisado (<see cref="PlanPreview.BaseHash"/>).
+    /// </summary>
     public async Task<PlanPreview> PreviewAsync(ChangePlan plan, CancellationToken ct)
     {
         var model = await store.GetAsync(ct);
         var boards = await store.GetDashboardsAsync(ct);
         await using var cn = await db.OpenAsync(ct);
         var roles = await LoadRolesAsync(cn, null);
-        return PlanCompiler.Compile(plan, model, roles, boards).Preview;
+        var compiled = PlanCompiler.Compile(plan, model, roles, boards);
+        var errors = compiled.Preview.Errors
+            .Concat(ModelVersion.Stale(model, plan.BaseVersions).Select(StaleError))
+            .Concat(await RemovedStatesInUseAsync(cn, null, plan, model)).ToList();
+        return compiled.Preview with
+        {
+            Valid = errors.Count == 0, Errors = errors,
+            BaseHash = ModelVersion.Base(model, boards, compiled.TouchedEntities, compiled.TouchedDashboards),
+        };
     }
 
+    private static PlanError StaleError(string label) =>
+        new(-1, $"«{label}» cambió desde que lo abriste (otra persona aplicó un cambio): vuelve a abrirlo para no borrar su cambio.");
+
+    /// <summary>Spec 021 (H2 CA2): el modelador aplica solo con la huella de la vista previa que revisó.</summary>
     public async Task<int> ApplyAsync(ChangePlan plan, HttpContext http, CancellationToken ct)
     {
+        if (string.IsNullOrWhiteSpace(plan.BaseHash))
+            throw new ValidationFailed(new Dictionary<string, string[]> { ["baseHash"] = ["Falta la huella de la vista previa: revisa los cambios antes de aplicarlos."] });
         await using var cn = await db.OpenAsync(ct);
         await using var tx = await cn.BeginTransactionAsync(ct);
         var changeSetId = await ApplyInTransactionAsync(cn, tx, plan, http);
@@ -45,10 +63,18 @@ public sealed class PlanService(Db db, MetadataStore store, JsonSerializerOption
         var boards = await MetadataStore.LoadDashboardsAsync(cn, tx);
         var roles = await LoadRolesAsync(cn, tx);
         var compiled = PlanCompiler.Compile(plan, model, extraRoles is null ? roles : roles.Union(extraRoles).ToHashSet(StringComparer.OrdinalIgnoreCase), boards);
-        if (!compiled.Preview.Valid)
-            throw new ValidationFailed(compiled.Preview.Errors
+        // Spec 021 (H8 CA3): un estado que desaparece no puede tener registros (quedarían en un estado inexistente).
+        var errors = compiled.Preview.Errors.Concat(await RemovedStatesInUseAsync(cn, tx, plan, model)).ToList();
+        if (errors.Count > 0)
+            throw new ValidationFailed(errors
                 .GroupBy(e => e.Operation < 0 ? "plan" : $"operations[{e.Operation}]")
                 .ToDictionary(g => g.Key, g => g.Select(e => e.Message).ToArray()), "El plan de cambios no es válido.");
+        // Spec 021 (H2): bajo el candado del modelo, lo que el editor abrió y lo que se revisó siguen siendo lo actual.
+        if (ModelVersion.Stale(model, plan.BaseVersions).FirstOrDefault() is { } stale)
+            throw new Conflict(StaleError(stale).Message);
+        if (plan.BaseHash is not null &&
+            !string.Equals(plan.BaseHash, ModelVersion.Base(model, boards, compiled.TouchedEntities, compiled.TouchedDashboards), StringComparison.OrdinalIgnoreCase))
+            throw new Conflict("El modelo cambió desde la vista previa (otra persona aplicó un cambio a lo mismo): vuelve a revisar los cambios.");
 
         foreach (var statement in compiled.Sql)
             await cn.ExecuteAsync(statement, transaction: tx);
@@ -57,6 +83,8 @@ public sealed class PlanService(Db db, MetadataStore store, JsonSerializerOption
             await UpsertAsync(cn, tx, compiled.ResultingModel[name]);
         foreach (var name in compiled.TouchedDashboards ?? new HashSet<string>())
             await UpsertDashboardAsync(cn, tx, compiled.Dashboards![name]);
+        // Spec 021 (H4 CA2): una tarea activa cuyo contenido cambia, se quita o pierde su catálogo vuelve a la pausa.
+        await Automations.ScheduleStates.PauseChangedAsync(cn, tx, model, compiled.ResultingModel, http);
 
         // Spec 005: una fórmula nueva o cambiada también se calcula en los registros existentes.
         var result = compiled.ResultingModel;
@@ -82,7 +110,7 @@ public sealed class PlanService(Db db, MetadataStore store, JsonSerializerOption
             """, new
         {
             Description = string.IsNullOrWhiteSpace(plan.Description) ? "Cambio de modelo" : plan.Description.Trim(),
-            PlanJson = JsonSerializer.Serialize(plan, json),
+            PlanJson = JsonSerializer.Serialize(plan with { BaseVersions = null, BaseHash = null }, json),
             SqlText = string.Join("\n\n", compiled.Sql),
             Count = plan.Operations.Count,
             UserId = user.Id,
@@ -128,6 +156,30 @@ public sealed class PlanService(Db db, MetadataStore store, JsonSerializerOption
         await using var cn = await db.OpenAsync(ct);
         var roles = (await LoadRolesAsync(cn, null)).Union(extraRoles).ToHashSet(StringComparer.OrdinalIgnoreCase);
         return PlanCompiler.Compile(plan, model, roles, boards);
+    }
+
+    /// <summary>
+    /// Spec 021 (H8 CA3): estados que un <see cref="SetWorkflowOp"/> quita y en los que hay registros. El nombre de la tabla
+    /// viene del modelo validado; los estados van como parámetros.
+    /// </summary>
+    private static async Task<IReadOnlyList<PlanError>> RemovedStatesInUseAsync(DbConnection cn, DbTransaction? tx, ChangePlan plan,
+        IReadOnlyDictionary<string, EntityDef> model)
+    {
+        var errors = new List<PlanError>();
+        for (var i = 0; i < plan.Operations.Count; i++)
+        {
+            if (plan.Operations[i] is not SetWorkflowOp op || !model.TryGetValue(op.Entity, out var e) || e.IsArchived || e.Workflow is null) continue;
+            var kept = op.Workflow.States.Select(s => s.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var removed = e.Workflow.States.Select(s => s.Name).Where(n => !kept.Contains(n)).ToArray();
+            if (removed.Length == 0) continue;
+            var inUse = await cn.QueryAsync<(string State, int Count)>(
+                $"SELECT {Identifiers.Quote(Workflow.StateField)}, COUNT(*) FROM {Identifiers.AppTable(e.Name)} WHERE [IsDeleted] = 0 AND {Identifiers.Quote(Workflow.StateField)} IN @removed GROUP BY {Identifiers.Quote(Workflow.StateField)}",
+                new { removed }, tx);
+            foreach (var (state, count) in inUse)
+                errors.Add(new(i, $"No se puede quitar el estado «{state}» de «{e.Label}»: {count} registro(s) están en el estado «{state}». " +
+                                  "Muévelos a otro estado antes de quitarlo, o consérvalo."));
+        }
+        return errors;
     }
 
     /// <summary>Serializa los cambios de modelo: dos modeladores no pueden aplicar planes a la vez (reentrante en la transacción).</summary>

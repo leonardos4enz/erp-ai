@@ -14,6 +14,8 @@ public sealed record AutomationOptions(int PollSeconds, IReadOnlyList<int> Retry
 {
     public const int BatchSize = 10;
     public static readonly TimeSpan Lease = TimeSpan.FromMinutes(5);
+    /// <summary>Spec 021 (H3 CA3): cada cuánto se renueva el lease de un trabajo en curso.</summary>
+    public static readonly TimeSpan RenewEvery = TimeSpan.FromMinutes(1);
 
     public static AutomationOptions From(IConfiguration c) => new(
         Math.Clamp(c.GetValue("Automations:PollSeconds", 2), 1, 300),
@@ -117,9 +119,11 @@ public sealed class AutomationService(Db db, MetadataStore store, RecordService 
         await cn.ExecuteAsync("""
             MERGE meta.ScheduleState AS t USING (SELECT @e AS EntityName, @n AS ScheduleName) AS src
                ON t.EntityName = src.EntityName AND t.ScheduleName = src.ScheduleName
-            WHEN MATCHED THEN UPDATE SET IsActive = @active, NextRunAt = @next, CalendarJson = @calendar, UpdatedAt = SYSUTCDATETIME(), UpdatedBy = @uid
-            WHEN NOT MATCHED THEN INSERT (EntityName, ScheduleName, IsActive, NextRunAt, CalendarJson, UpdatedBy) VALUES (@e, @n, @active, @next, @calendar, @uid);
-            """, new { e = e.Name, n = s.Name, active = req.Active, next, calendar = ScheduleCalendar.Key(s), uid = u.Id }, tx);
+            WHEN MATCHED THEN UPDATE SET IsActive = @active, NextRunAt = @next, CalendarJson = @calendar, ContentHash = @content, UpdatedAt = SYSUTCDATETIME(), UpdatedBy = @uid
+            WHEN NOT MATCHED THEN INSERT (EntityName, ScheduleName, IsActive, NextRunAt, CalendarJson, ContentHash, UpdatedBy) VALUES (@e, @n, @active, @next, @calendar, @content, @uid);
+            """, new { e = e.Name, n = s.Name, active = req.Active, next, calendar = ScheduleCalendar.Key(s), uid = u.Id,
+                // Spec 021 (H4 CA1): lo que el superusuario activó; si un plan lo cambia, la tarea vuelve a la pausa.
+                content = ScheduleCalendar.ContentHash(s) }, tx);
         await Audit.WriteAsync(cn, tx, http, AuditActions.ScheduleChange, e.Name, s.Name,
             before: before is null ? null : new { active = before }, after: new { action = req.Active ? "activate" : "pause", active = req.Active, nextRunAt = next });
         await tx.CommitAsync(ct);
@@ -213,7 +217,7 @@ public sealed class AutomationService(Db db, MetadataStore store, RecordService 
             "SELECT EntityName, Name FROM meta.AutomationRun WITH (UPDLOCK) WHERE Id = @id AND Kind = 'async' AND Status IN ('failed', 'canceled')",
             new { id }, tx) ?? throw new NotFound("La ejecución no existe o no se puede reintentar.");
         await cn.ExecuteAsync("""
-            UPDATE meta.AutomationRun SET Status = 'pending', Attempts = 0, NextAttemptAt = SYSUTCDATETIME(), LeaseUntil = NULL,
+            UPDATE meta.AutomationRun SET Status = 'pending', Attempts = 0, NextAttemptAt = SYSUTCDATETIME(), LeaseUntil = NULL, LeaseToken = NULL,
                    LastError = NULL, StartedAt = NULL, FinishedAt = NULL
              WHERE Id = @id
             """, new { id }, tx);
@@ -232,15 +236,23 @@ public sealed class AutomationService(Db db, MetadataStore store, RecordService 
         List<Claimed> batch;
         await using (var cn = await db.OpenAsync(ct))
         {
+            // Spec 021 (H3 CA4): un lease vencido con todos los intentos usados no se retoma (se cayó cada vez a mitad del trabajo).
+            await cn.ExecuteAsync("""
+                UPDATE meta.AutomationRun SET Status = 'failed', LeaseUntil = NULL, LeaseToken = NULL, FinishedAt = SYSUTCDATETIME(),
+                       LastError = CONCAT(N'Se interrumpió ', Attempts, N' veces sin terminar (el proceso se detuvo a mitad del trabajo).')
+                 WHERE Status = 'running' AND LeaseUntil < SYSUTCDATETIME() AND Attempts >= @max
+                """, new { max = options.MaxAttempts });
+            // Cada reclamo tiene dueño (LeaseToken): terminar, reintentar o avanzar exige seguir siéndolo.
             batch = (await cn.QueryAsync<Claimed>($"""
                 UPDATE TOP ({AutomationOptions.BatchSize}) r
-                   SET Status = 'running', Attempts = Attempts + 1, StartedAt = SYSUTCDATETIME(), LeaseUntil = DATEADD(second, @lease, SYSUTCDATETIME())
+                   SET Status = 'running', Attempts = Attempts + 1, StartedAt = SYSUTCDATETIME(), LeaseUntil = DATEADD(second, @lease, SYSUTCDATETIME()),
+                       LeaseToken = NEWID()
                 OUTPUT inserted.Id, inserted.Kind, inserted.EntityName, inserted.Name, inserted.RecordId, inserted.TriggeredBy, inserted.RunAsRole,
-                       inserted.RunAsName, inserted.CompanyId, inserted.Generation, inserted.Attempts
+                       inserted.RunAsName, inserted.CompanyId, inserted.Generation, inserted.Attempts, inserted.Manual, inserted.LeaseToken
                   FROM meta.AutomationRun r WITH (ROWLOCK, READPAST, UPDLOCK)
                  WHERE (r.Status = 'pending' AND r.NextAttemptAt <= SYSUTCDATETIME())
-                    OR (r.Status = 'running' AND r.LeaseUntil < SYSUTCDATETIME())
-                """, new { lease = (int)AutomationOptions.Lease.TotalSeconds })).ToList();
+                    OR (r.Status = 'running' AND r.LeaseUntil < SYSUTCDATETIME() AND r.Attempts < @max)
+                """, new { lease = (int)AutomationOptions.Lease.TotalSeconds, max = options.MaxAttempts })).ToList();
         }
         if (batch.Count == 0) return 0;
         await Task.WhenAll(batch.Select(r => r.Kind == RunKinds.Schedule ? RunScheduleAsync(r, ct) : RunAsyncJobAsync(r, ct)));
@@ -248,7 +260,58 @@ public sealed class AutomationService(Db db, MetadataStore store, RecordService 
     }
 
     private sealed record Claimed(long Id, string Kind, string EntityName, string Name, long? RecordId, int? TriggeredBy, string? RunAsRole,
-        string RunAsName, int? CompanyId, int Generation, int Attempts);
+        string RunAsName, int? CompanyId, int Generation, int Attempts, bool Manual, Guid LeaseToken);
+
+    /// <summary>
+    /// Spec 021 (H3 CA3): corre <paramref name="work"/> renovando el lease cada <see cref="AutomationOptions.RenewEvery"/>. Si otra
+    /// instancia lo retomó, cancela el trabajo y lanza <see cref="LeaseLost"/>.
+    /// </summary>
+    private async Task WithLeaseAsync(Claimed r, Func<CancellationToken, Task> work, CancellationToken ct)
+    {
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var lost = false;
+        var renew = Task.Run(async () =>
+        {
+            try
+            {
+                while (true)
+                {
+                    await Task.Delay(AutomationOptions.RenewEvery, cts.Token);
+                    if (!await RenewAsync(r)) { lost = true; await cts.CancelAsync(); return; }
+                }
+            }
+            catch (OperationCanceledException) { }
+        }, CancellationToken.None);
+        try { await work(cts.Token); }
+        catch (OperationCanceledException) when (lost) { throw new LeaseLost(); }
+        finally
+        {
+            await cts.CancelAsync();
+            await renew;
+        }
+    }
+
+    private async Task<bool> RenewAsync(Claimed r)
+    {
+        await using var cn = await db.OpenAsync(CancellationToken.None);
+        return await cn.ExecuteAsync("""
+            UPDATE meta.AutomationRun SET LeaseUntil = DATEADD(second, @lease, SYSUTCDATETIME())
+             WHERE Id = @Id AND LeaseToken = @LeaseToken AND Status = 'running'
+            """, new { r.Id, r.LeaseToken, lease = (int)AutomationOptions.Lease.TotalSeconds }) == 1;
+    }
+
+    /// <summary>
+    /// Escribe el resultado solo si el trabajo sigue siendo de esta instancia (dentro de la transacción del trabajo, si se
+    /// pasa). Sin dueño → <see cref="LeaseLost"/>.
+    /// </summary>
+    private static async Task MarkAsync(System.Data.Common.DbConnection cn, System.Data.Common.DbTransaction? tx, Claimed r, string status, string? error)
+    {
+        var n = await cn.ExecuteAsync("""
+            UPDATE meta.AutomationRun SET Status = @status, LeaseUntil = NULL, LeaseToken = NULL, FinishedAt = SYSUTCDATETIME(), LastError = @error
+             WHERE Id = @Id AND LeaseToken = @LeaseToken AND Status = 'running'
+            """, new { r.Id, r.LeaseToken, status, error = Truncate(error) }, tx);
+        if (n == 0) throw new LeaseLost();
+    }
 
     /// <summary>
     /// Por cada tarea activa: si un plan cambió su calendario, se reagenda sin correr; si ya tocaba, se avanza la siguiente
@@ -259,6 +322,12 @@ public sealed class AutomationService(Db db, MetadataStore store, RecordService 
     {
         var model = await store.GetAsync(ct);
         await using var cn = await db.OpenAsync(ct);
+        // Spec 021 (H4): una tarea activa que ya no es la que se activó (o desapareció) vuelve a la pausa.
+        await using (var guard = await cn.BeginTransactionAsync(ct))
+        {
+            await ScheduleStates.PauseChangedAsync(cn, guard, model, model, new DefaultHttpContext());
+            await guard.CommitAsync(ct);
+        }
         var states = (await cn.QueryAsync<StateRow>(
             "SELECT EntityName, ScheduleName, IsActive, NextRunAt, CalendarJson, LastRunId FROM meta.ScheduleState WHERE IsActive = 1")).ToList();
         var now = DateTime.UtcNow;
@@ -295,11 +364,13 @@ public sealed class AutomationService(Db db, MetadataStore store, RecordService 
         try
         {
             var user = await IdentityAsync(r, ct);
-            await records.RunQueuedAsync(r.EntityName, r.Name, r.RecordId ?? 0, user, r.Generation, ct);
-            await FinishAsync(r.Id, RunStatus.Succeeded, null);
+            // Spec 021 (H3 CA1): el éxito se marca en la transacción del trabajo; si el proceso cae después, ya quedó.
+            await WithLeaseAsync(r, token => records.RunQueuedAsync(r.EntityName, r.Name, r.RecordId ?? 0, user, r.Generation,
+                (cn, tx) => MarkAsync(cn, tx, r, RunStatus.Succeeded, null), token), ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { /* el lease vence y otra vuelta lo retoma */ }
-        catch (RunCanceled ex) { await FinishAsync(r.Id, RunStatus.Canceled, ex.Message); }
+        catch (LeaseLost) { log.LogWarning("La automatización asíncrona {Id} la retomó otra instancia; esta ejecución se revirtió", r.Id); }
+        catch (RunCanceled ex) { await FinishAsync(r, RunStatus.Canceled, ex.Message); }
         catch (Exception ex)
         {
             var transient = BackgroundErrors.IsTransient(ex);
@@ -309,12 +380,12 @@ public sealed class AutomationService(Db db, MetadataStore store, RecordService 
             {
                 await using var cn = await db.OpenAsync(CancellationToken.None);
                 await cn.ExecuteAsync("""
-                    UPDATE meta.AutomationRun SET Status = 'pending', LeaseUntil = NULL, LastError = @message,
+                    UPDATE meta.AutomationRun SET Status = 'pending', LeaseUntil = NULL, LeaseToken = NULL, LastError = @message,
                            NextAttemptAt = DATEADD(second, @delay, SYSUTCDATETIME())
-                     WHERE Id = @Id
-                    """, new { r.Id, message = Truncate(message), delay = options.RetryDelaysSeconds[r.Attempts - 1] });
+                     WHERE Id = @Id AND LeaseToken = @LeaseToken AND Status = 'running'
+                    """, new { r.Id, r.LeaseToken, message = Truncate(message), delay = options.RetryDelaysSeconds[r.Attempts - 1] });
             }
-            else await FinishAsync(r.Id, RunStatus.Failed, message);
+            else await FinishAsync(r, RunStatus.Failed, message);
         }
     }
 
@@ -347,49 +418,77 @@ public sealed class AutomationService(Db db, MetadataStore store, RecordService 
     {
         try
         {
-            var outcome = await records.RunScheduleAsync(r.EntityName, r.Name, r.RunAsName, o => ProgressAsync(r.Id, o),
-                ex => log.LogError(ex, "Error en la tarea programada {Entity}.{Name} ({Id})", r.EntityName, r.Name, r.Id), ct);
+            if (!r.Manual) await RequireUnchangedAsync(r, ct);
+            ScheduleOutcome outcome = null!;
+            await WithLeaseAsync(r, async token => outcome = await records.RunScheduleAsync(r.EntityName, r.Name, r.RunAsName, o => ProgressAsync(r, o),
+                ex => log.LogError(ex, "Error en la tarea programada {Entity}.{Name} ({Id})", r.EntityName, r.Name, r.Id),
+                (cn, tx) => RenewInAsync(cn, tx, r), token), ct);
             var status = outcome.Failed == 0 ? RunStatus.Succeeded : outcome.Succeeded > 0 ? RunStatus.Partial : RunStatus.Failed;
             var summary = outcome.Failed == 0 ? null : $"{outcome.Failed} registro(s) con error: {outcome.Errors.FirstOrDefault()?.Message}";
             await using var cn = await db.OpenAsync(CancellationToken.None);
             await cn.ExecuteAsync("""
-                UPDATE meta.AutomationRun SET Status = @status, LeaseUntil = NULL, FinishedAt = SYSUTCDATETIME(), Processed = @Processed,
+                UPDATE meta.AutomationRun SET Status = @status, LeaseUntil = NULL, LeaseToken = NULL, FinishedAt = SYSUTCDATETIME(), Processed = @Processed,
                        Succeeded = @Succeeded, Failed = @Failed, Skipped = @Skipped, More = @More, LastError = @summary, ErrorsJson = @errors
-                 WHERE Id = @Id;
-                UPDATE meta.ScheduleState SET LastRunId = @Id WHERE EntityName = @EntityName AND ScheduleName = @Name;
+                 WHERE Id = @Id AND LeaseToken = @LeaseToken AND Status = 'running';
+                IF @@ROWCOUNT = 1 UPDATE meta.ScheduleState SET LastRunId = @Id WHERE EntityName = @EntityName AND ScheduleName = @Name;
                 """, new
             {
-                r.Id, r.EntityName, r.Name, status, outcome.Processed, outcome.Succeeded, outcome.Failed, outcome.Skipped, outcome.More,
+                r.Id, r.LeaseToken, r.EntityName, r.Name, status, outcome.Processed, outcome.Succeeded, outcome.Failed, outcome.Skipped, outcome.More,
                 summary = Truncate(summary), errors = outcome.Errors.Count == 0 ? null : JsonSerializer.Serialize(outcome.Errors, MetadataStore.Json),
             });
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
-        catch (RunCanceled ex) { await FinishAsync(r.Id, RunStatus.Canceled, ex.Message); }
+        catch (LeaseLost) { log.LogWarning("La ocurrencia {Id} la retomó otra instancia; esta se detuvo", r.Id); }
+        catch (RunCanceled ex) { await FinishAsync(r, RunStatus.Canceled, ex.Message); }
         catch (Exception ex)
         {
             // Una tarea no se reintenta sola: la siguiente ocurrencia toma lo que siga cumpliendo la consulta.
             if (ex is not AppException) log.LogError(ex, "Error en la tarea programada {Entity}.{Name} ({Id})", r.EntityName, r.Name, r.Id);
-            await FinishAsync(r.Id, RunStatus.Failed, BackgroundErrors.Message(ex));
+            await FinishAsync(r, RunStatus.Failed, BackgroundErrors.Message(ex));
         }
     }
 
-    /// <summary>El avance se ve en la bitácora y renueva el *lease*: una tarea larga no se le pasa a otra instancia.</summary>
-    private async Task ProgressAsync(long id, ScheduleOutcome o)
+    /// <summary>Spec 021 (H4 CA3): una ocurrencia encolada de una tarea que cambió desde que se activó no corre.</summary>
+    private async Task RequireUnchangedAsync(Claimed r, CancellationToken ct)
+    {
+        var model = await store.GetAsync(ct);
+        var s = model.TryGetValue(r.EntityName, out var e)
+            ? e.Schedules?.FirstOrDefault(x => string.Equals(x.Name, r.Name, StringComparison.OrdinalIgnoreCase)) : null;
+        if (s is null) return; // el motor la cancela con su propio motivo
+        await using var cn = await db.OpenAsync(ct);
+        var saved = await cn.ExecuteScalarAsync<string?>(
+            "SELECT ContentHash FROM meta.ScheduleState WHERE EntityName = @EntityName AND ScheduleName = @Name", new { r.EntityName, r.Name });
+        if (saved is not null && !string.Equals(saved, ScheduleCalendar.ContentHash(s), StringComparison.OrdinalIgnoreCase))
+            throw new RunCanceled("La tarea cambió desde que se activó: un administrador debe revisarla y activarla de nuevo.");
+    }
+
+    /// <summary>Spec 021 (H3 CA3): en la transacción de cada registro, renueva el lease si sigue siendo de esta instancia.</summary>
+    private static async Task RenewInAsync(System.Data.Common.DbConnection cn, System.Data.Common.DbTransaction tx, Claimed r)
+    {
+        var n = await cn.ExecuteAsync("""
+            UPDATE meta.AutomationRun SET LeaseUntil = DATEADD(second, @lease, SYSUTCDATETIME())
+             WHERE Id = @Id AND LeaseToken = @LeaseToken AND Status = 'running'
+            """, new { r.Id, r.LeaseToken, lease = (int)AutomationOptions.Lease.TotalSeconds }, tx);
+        if (n == 0) throw new LeaseLost();
+    }
+
+    /// <summary>El avance se ve en la bitácora y renueva el *lease* (solo el de esta instancia).</summary>
+    private async Task ProgressAsync(Claimed r, ScheduleOutcome o)
     {
         await using var cn = await db.OpenAsync(CancellationToken.None);
         await cn.ExecuteAsync("""
             UPDATE meta.AutomationRun SET Processed = @Processed, Succeeded = @Succeeded, Failed = @Failed, Skipped = @Skipped,
                    LeaseUntil = DATEADD(second, @lease, SYSUTCDATETIME())
-             WHERE Id = @id
-            """, new { id, o.Processed, o.Succeeded, o.Failed, o.Skipped, lease = (int)AutomationOptions.Lease.TotalSeconds });
+             WHERE Id = @Id AND LeaseToken = @LeaseToken AND Status = 'running'
+            """, new { r.Id, r.LeaseToken, o.Processed, o.Succeeded, o.Failed, o.Skipped, lease = (int)AutomationOptions.Lease.TotalSeconds });
     }
 
-    private async Task FinishAsync(long id, string status, string? error)
+    /// <summary>Cierra el trabajo si sigue siendo de esta instancia; si otra lo retomó, no se toca.</summary>
+    private async Task FinishAsync(Claimed r, string status, string? error)
     {
         await using var cn = await db.OpenAsync(CancellationToken.None);
-        await cn.ExecuteAsync("""
-            UPDATE meta.AutomationRun SET Status = @status, LeaseUntil = NULL, FinishedAt = SYSUTCDATETIME(), LastError = @error WHERE Id = @id
-            """, new { id, status, error = Truncate(error) });
+        try { await MarkAsync(cn, null, r, status, error); }
+        catch (LeaseLost) { log.LogWarning("La ejecución {Id} la retomó otra instancia: no se marca como {Status}", r.Id, status); }
     }
 
     /// <summary>La bitácora lleva ids de registros y mensajes del negocio: se borra al vencer la retención.</summary>
@@ -404,6 +503,44 @@ public sealed class AutomationService(Db db, MetadataStore store, RecordService 
 
     private static string? Truncate(string? s) => s is { Length: > 500 } ? s[..500] : s;
     private static DateTime Utc(DateTime d) => DateTime.SpecifyKind(d, DateTimeKind.Utc);
+}
+
+/// <summary>
+/// Spec 021 (H4): una tarea activa queda atada a lo que el superusuario activó (<c>ContentHash</c>). Si un plan cambia su
+/// contenido, la quita o archiva su catálogo, se pausa en la misma transacción y queda en la auditoría.
+/// </summary>
+public static class ScheduleStates
+{
+    /// <param name="before">Modelo antes del cambio: da la huella de las tareas activadas antes de la 021 (sin huella).</param>
+    public static async Task PauseChangedAsync(System.Data.Common.DbConnection cn, System.Data.Common.DbTransaction tx,
+        IReadOnlyDictionary<string, EntityDef> before, IReadOnlyDictionary<string, EntityDef> after, HttpContext http)
+    {
+        static ScheduleDef? Find(IReadOnlyDictionary<string, EntityDef> model, string entity, string name) =>
+            model.TryGetValue(entity, out var e) && !e.IsArchived
+                ? e.Schedules?.FirstOrDefault(x => string.Equals(x.Name, name, StringComparison.OrdinalIgnoreCase)) : null;
+        var active = (await cn.QueryAsync<(string EntityName, string ScheduleName, string? ContentHash)>(
+            "SELECT EntityName, ScheduleName, ContentHash FROM meta.ScheduleState WITH (UPDLOCK, HOLDLOCK) WHERE IsActive = 1", transaction: tx)).ToList();
+        foreach (var (entity, name, saved) in active)
+        {
+            var now = Find(after, entity, name);
+            var baseline = saved ?? (Find(before, entity, name) is { } old ? ScheduleCalendar.ContentHash(old) : null);
+            var hash = now is null ? null : ScheduleCalendar.ContentHash(now);
+            if (hash is not null && string.Equals(baseline, hash, StringComparison.OrdinalIgnoreCase))
+            {
+                if (saved is null)
+                    await cn.ExecuteAsync("UPDATE meta.ScheduleState SET ContentHash = @hash WHERE EntityName = @entity AND ScheduleName = @name",
+                        new { hash, entity, name }, tx);
+                continue;
+            }
+            await cn.ExecuteAsync("""
+                UPDATE meta.ScheduleState SET IsActive = 0, NextRunAt = NULL, UpdatedAt = SYSUTCDATETIME()
+                 WHERE EntityName = @entity AND ScheduleName = @name
+                """, new { entity, name }, tx);
+            await Audit.WriteAsync(cn, tx, http, AuditActions.ScheduleChange, entity, name, before: new { active = true },
+                after: new { action = "pause", active = false, reason = now is null ? "removed" : "changed" },
+                username: http.Items[UserContextExtensions.ItemKey] is null ? "Tareas programadas" : null);
+        }
+    }
 }
 
 /// <summary>Spec 016: ocurrencias y bandeja en segundo plano, cada <c>Automations:PollSeconds</c>.</summary>

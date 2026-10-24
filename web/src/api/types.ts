@@ -352,6 +352,8 @@ export interface Automation {
 export interface Rule { name: string; message: string; assert: string; when?: string; field?: string }
 
 export interface EntityDef {
+  /** Spec 021: versión de la definición (solo para modeladores); el editor la manda con su plan. */
+  version?: string;
   name: string;
   label: string;
   labelPlural: string;
@@ -431,12 +433,15 @@ export type Operation =
   | { op: 'setDashboard'; dashboard: DashboardDef }
   | { op: 'archiveDashboard'; name: string };
 
-export interface ChangePlan { description: string; operations: Operation[] }
+/** Spec 021: `baseVersions` = versión de cada catálogo al abrirlo; `baseHash` = huella de la vista previa revisada. */
+export interface ChangePlan { description: string; operations: Operation[]; baseVersions?: Record<string, string>; baseHash?: string }
 
 export interface PlanPreview {
   valid: boolean;
   errors: { operation: number; message: string }[];
   steps: { operation: number; description: string; sql?: string }[];
+  /** Spec 021: huella de lo que el plan toca tal como estaba; aplicar la exige. */
+  baseHash?: string | null;
 }
 
 export interface ChangeSetSummary {
@@ -636,7 +641,9 @@ export interface PackageImport {
   description?: string | null;
   installedVersion?: string | null;
   /** Spec 014: `localArchives` = campos que solo existen aquí y se archivarán (aprobar y aplicar piden confirmarlo). */
-  diff?: (PlanPreview & { conflicts: string[]; warnings: string[]; roles: PackageRole[]; diffHash: string; empty: boolean; localArchives: string[] }) | null;
+  /** Spec 021: `securityChanges` = lo que una reversión cambia de seguridad (aprobar y aplicar piden confirmarlo). */
+  diff?: (PlanPreview & { conflicts: string[]; warnings: string[]; roles: PackageRole[]; diffHash: string; empty: boolean; localArchives: string[];
+    securityChanges: string[] }) | null;
   canApprove: boolean;
   canApply: boolean;
   blockedReason?: string | null;

@@ -103,7 +103,7 @@ public sealed partial class RecordService
 
         foreach (var n in expand)
         {
-            if (n.Collection) await ExpandLinesAsync(cn, n, model, rows, user, ct);
+            if (n.Collection) await ExpandLinesAsync(cn, n, model, rows, user, q.MaxExpandedLines, ct);
             else await ExpandReferenceAsync(cn, n, model, rows, raws, user, ct);
         }
         if (q.Select is { } selected)
@@ -165,8 +165,9 @@ public sealed partial class RecordService
     }
 
     /// <summary>Las partidas del documento (los documentos ya pasaron su alcance) con los campos visibles de la partida.</summary>
+    /// <remarks>Spec 021 (H7 CA2): como mucho <paramref name="maxLines"/> partidas por página; si hay más, 400 (nunca se recorta en silencio).</remarks>
     private static async Task ExpandLinesAsync(SqlConnection cn, ODataNavigation n, IReadOnlyDictionary<string, EntityDef> model,
-        List<Dictionary<string, object?>> rows, UserContext user, CancellationToken ct)
+        List<Dictionary<string, object?>> rows, UserContext user, int maxLines, CancellationToken ct)
     {
         var child = n.Target;
         var parent = child.ParentField!.Name;
@@ -178,10 +179,14 @@ public sealed partial class RecordService
             await using var cmd = cn.CreateCommand();
             foreach (var (name, value) in labelParams) cmd.Parameters.Add(new SqlParameter(name, value));
             var ids = string.Join(", ", byParent.Keys.Select((v, i) => Param(cmd, $"@ex{i}", v)));
-            cmd.CommandText = $"SELECT {select} FROM {from} WHERE t.[IsDeleted] = 0 AND t.{Quote(parent)} IN ({ids}) ORDER BY t.[Id]";
+            cmd.Parameters.Add(new SqlParameter("@maxLines", maxLines + 1));
+            cmd.CommandText = $"SELECT TOP (@maxLines) {select} FROM {from} WHERE t.[IsDeleted] = 0 AND t.{Quote(parent)} IN ({ids}) ORDER BY t.[Id]";
             await using var reader = await cmd.ExecuteReaderAsync(ct);
+            var read = 0;
             while (await reader.ReadAsync(ct))
             {
+                if (++read > maxLines)
+                    throw new ODataException($"Los documentos de esta página tienen más de {maxLines:N0} partidas en «{n.Name}»: pide menos documentos con $top.");
                 var raw = ReadRaw(reader);
                 if (raw.GetValueOrDefault(parent) is not long owner || !byParent.TryGetValue(owner, out var list)) continue;
                 var row = Format(child, raw);

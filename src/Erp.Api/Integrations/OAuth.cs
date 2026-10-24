@@ -420,10 +420,10 @@ public sealed class OAuthTokenService(Db db, UserContextLoader loader, ILogger<O
                 """, new { clientId })
             : null;
         var now = DateTime.UtcNow;
-        var ok = client is { RevokedAt: null } &&
-                 (OAuthFormat.Matches(secret!, client.SecretHash) || client.PreviousExpiresAt > now && OAuthFormat.Matches(secret!, client.PreviousSecretHash))
-                 && await loader.LoadServiceAsync(client.UserId, ct) is not null;
-        if (!ok)
+        var service = client is { RevokedAt: null } &&
+                      (OAuthFormat.Matches(secret!, client.SecretHash) || client.PreviousExpiresAt > now && OAuthFormat.Matches(secret!, client.PreviousSecretHash))
+            ? await loader.LoadServiceAsync(client.UserId, ct) : null;
+        if (service is null)
         {
             if (OAuthFormat.IsClientId(clientId)) log.LogWarning("Cliente OAuth rechazado ({ClientId})", clientId);
             if (usedBasic) http.Response.Headers.WWWAuthenticate = "Basic realm=\"erp\"";
@@ -447,6 +447,9 @@ public sealed class OAuthTokenService(Db db, UserContextLoader loader, ILogger<O
             UPDATE meta.OAuthClient SET LastTokenAt = SYSUTCDATETIME() WHERE Id = @Id;
             DELETE meta.OAuthToken WHERE ClientId = @Id AND ExpiresAt < DATEADD(day, -1, SYSUTCDATETIME());
             """, new { client.Id, hash = OAuthFormat.Hash(token), scope, client.TokenMinutes });
+        // Spec 021 (H8 CA2): cada token emitido queda en la auditoría a nombre del cliente (nunca el token).
+        await Audit.WriteAsync(cn, null, http, AuditActions.OAuthToken, "OAuthClient", client.Id.ToString(),
+            after: new { clientId, scopes, expiresInMinutes = client.TokenMinutes }, userId: service.Id, username: service.Username);
         NoStore(http);
         return Results.Json(new { access_token = token, token_type = "Bearer", expires_in = client.TokenMinutes * 60, scope });
     }

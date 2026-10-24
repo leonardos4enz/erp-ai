@@ -11,6 +11,9 @@ namespace Erp.Api.Data;
 /// <summary>Spec 016: el trabajo ya no aplica (registro, automatización o identidad); se cancela con el motivo.</summary>
 public sealed class RunCanceled(string reason) : Exception(reason);
 
+/// <summary>Spec 021 (H3 CA2): otra instancia retomó el trabajo (el lease venció); lo hecho aquí se revierte y no se registra.</summary>
+public sealed class LeaseLost() : Exception("Otra instancia retomó el trabajo.");
+
 public sealed record RunError(long RecordId, string Message);
 
 /// <summary>Resultado de una ocurrencia de tarea programada (o de lo que lleva, para mostrar el avance).</summary>
@@ -75,8 +78,13 @@ public sealed partial class RecordService
         }, c.Tx);
     }
 
-    /// <summary>Corre un trabajo asíncrono en su propia transacción, con los datos actuales. Lanza <see cref="RunCanceled"/> si ya no aplica.</summary>
-    internal async Task RunQueuedAsync(string entityName, string name, long id, UserContext user, int generation, CancellationToken ct)
+    /// <summary>
+    /// Corre un trabajo asíncrono en su propia transacción, con los datos actuales. Lanza <see cref="RunCanceled"/> si ya no
+    /// aplica. Spec 021 (H3 CA1): <paramref name="beforeCommit"/> marca el éxito en la misma transacción (o lanza
+    /// <see cref="LeaseLost"/>): los efectos y el estado se guardan juntos.
+    /// </summary>
+    internal async Task RunQueuedAsync(string entityName, string name, long id, UserContext user, int generation,
+        Func<SqlConnection, SqlTransaction, Task> beforeCommit, CancellationToken ct)
     {
         var model = await store.GetAsync(ct);
         if (!model.TryGetValue(entityName, out var e) || e.IsArchived) throw new RunCanceled("El catálogo ya no existe.");
@@ -87,6 +95,7 @@ public sealed partial class RecordService
         if (await LoadDraftAsync(cn, tx, e, model, id, ct) is null) throw new RunCanceled("El registro ya no existe.");
         var c = new AutoCtx(cn, tx, model, user, BackgroundHttp(user), 1, [$"{e.Label}: {auto.Label}"], ct, Generation: generation);
         await RunActionsAsync(c, e, id, auto);
+        await beforeCommit(cn, tx);
         await tx.CommitAsync(ct);
     }
 
@@ -95,7 +104,7 @@ public sealed partial class RecordService
     /// catálogo por empresa) y procesa cada uno en su propia transacción. <paramref name="progress"/> recibe el avance.
     /// </summary>
     internal async Task<ScheduleOutcome> RunScheduleAsync(string entityName, string name, string runAs,
-        Func<ScheduleOutcome, Task> progress, Action<Exception> unexpected, CancellationToken ct)
+        Func<ScheduleOutcome, Task> progress, Action<Exception> unexpected, Func<SqlConnection, SqlTransaction, Task> beforeCommit, CancellationToken ct)
     {
         var model = await store.GetAsync(ct);
         if (!model.TryGetValue(entityName, out var e) || e.IsArchived) throw new RunCanceled("El catálogo ya no existe.");
@@ -123,7 +132,7 @@ public sealed partial class RecordService
             {
                 ct.ThrowIfCancellationRequested();
                 budget--;
-                switch (await RunScheduledRecordAsync(cn, e, s, auto, model, svc, id, unexpected, ct))
+                switch (await RunScheduledRecordAsync(cn, e, s, auto, model, svc, id, unexpected, beforeCommit, ct))
                 {
                     case null: ok++; break;
                     case "": skipped++; break;
@@ -140,7 +149,8 @@ public sealed partial class RecordService
 
     /// <summary>null = correcto; "" = ya no cumple la consulta o salió del alcance; otro = el error.</summary>
     private async Task<string?> RunScheduledRecordAsync(SqlConnection cn, EntityDef e, ScheduleDef s, Automation auto,
-        IReadOnlyDictionary<string, EntityDef> model, UserContext svc, long id, Action<Exception> unexpected, CancellationToken ct)
+        IReadOnlyDictionary<string, EntityDef> model, UserContext svc, long id, Action<Exception> unexpected,
+        Func<SqlConnection, SqlTransaction, Task> beforeCommit, CancellationToken ct)
     {
         await using var tx = (SqlTransaction)await cn.BeginTransactionAsync(ct);
         try
@@ -154,10 +164,12 @@ public sealed partial class RecordService
             }
             var c = new AutoCtx(cn, tx, model, svc, BackgroundHttp(svc), 1, [$"{e.Label}: {s.Label}"], ct);
             await RunActionsAsync(c, e, id, auto);
+            // Spec 021 (H3 CA3): cada registro confirma solo si la ocurrencia sigue siendo de esta instancia.
+            await beforeCommit(cn, tx);
             await tx.CommitAsync(ct);
             return null;
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException and not LeaseLost)
         {
             try { await tx.RollbackAsync(CancellationToken.None); } catch (InvalidOperationException) { } catch (SqlException) { }
             if (ex is not AppException && !BackgroundErrors.IsTransient(ex)) unexpected(ex);

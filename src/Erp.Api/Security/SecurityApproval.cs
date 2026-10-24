@@ -40,6 +40,28 @@ public sealed record RoleSnapshot(string Name, bool CanManageModel, bool CanMana
 public sealed record PermissionSnapshot(string Entity, bool Read, bool Create, bool Update, bool Delete);
 
 /// <summary>
+/// Spec 021 (H1): capacidades administrativas de un rol o de varios. Solo se otorga o quita lo que uno mismo tiene: un
+/// administrador de usuarios no reparte superusuario, ni modelo ni auditoría si no los tiene.
+/// </summary>
+public sealed record AdminCapabilities(bool Superuser, bool Model, bool Users, bool Audit)
+{
+    public static readonly AdminCapabilities None = new(false, false, false, false);
+
+    public bool Any => Superuser || Model || Users || Audit;
+
+    public AdminCapabilities Or(AdminCapabilities o) => new(Superuser || o.Superuser, Model || o.Model, Users || o.Users, Audit || o.Audit);
+
+    /// <summary>Lo primero que le falta a <paramref name="actor"/> para repartir estas capacidades (null = nada).</summary>
+    public string? MissingFor(UserContext actor) =>
+        actor.IsSuperuser ? null
+        : Superuser ? "administrador del sistema"
+        : Model && !actor.CanManageModel ? "administrar el modelo"
+        : Users && !actor.CanManageUsers ? "administrar usuarios"
+        : Audit && !actor.CanViewAudit ? "ver la auditoría"
+        : null;
+}
+
+/// <summary>
 /// Spec 015 (H4 CA1–CA2): ¿el cambio amplía acceso? Ampliar espera aprobación; reducir (quitar, desactivar, revocar) nunca.
 /// Funciones puras para probarlas una por una.
 /// </summary>
@@ -116,6 +138,8 @@ public sealed class SecurityApproval(Db db, EnvironmentOptions env)
     public const string Applied = "applied";
     public const string Rejected = "rejected";
     public const int MaxComment = 500;
+    /// <summary>Spec 021 (H8 CA1): una solicitud en <c>applying</c> más de 10 minutos quedó atorada (el proceso cayó).</summary>
+    private const string Stuck = "(c.Status = 'applying' AND (c.ClaimedAt IS NULL OR c.ClaimedAt < DATEADD(minute, -10, SYSUTCDATETIME())))";
 
     public static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -158,21 +182,77 @@ public sealed class SecurityApproval(Db db, EnvironmentOptions env)
 
     private static async Task<List<SecurityChangeDto>> LoadAsync(DbConnection cn, DbTransaction? tx, UserContext user, int? id, string? status)
     {
-        var rows = await cn.QueryAsync<Row>("""
-            SELECT TOP 200 c.Id, c.Kind, c.TargetId, c.Summary, c.Status, c.PayloadJson, c.BeforeJson, c.Hash, c.RequestedBy AS RequestedById,
+        // Una solicitud atorada en 'applying' se muestra (y se trata) como pendiente.
+        var rows = await cn.QueryAsync<Row>($"""
+            SELECT TOP 200 c.Id, c.Kind, c.TargetId, c.Summary, CASE WHEN {Stuck} THEN 'pending' ELSE c.Status END AS Status,
+                   c.PayloadJson, c.BeforeJson, c.Hash, c.RequestedBy AS RequestedById,
                    r.Username AS RequestedBy, c.RequestedAt, v.Username AS ReviewedBy, c.ReviewedAt, c.ReviewComment
               FROM meta.SecurityChange c JOIN meta.[User] r ON r.Id = c.RequestedBy LEFT JOIN meta.[User] v ON v.Id = c.ReviewedBy
-             WHERE (@id IS NULL OR c.Id = @id) AND (@status IS NULL OR c.Status = @status)
+             WHERE (@id IS NULL OR c.Id = @id) AND (@status IS NULL OR c.Status = @status OR (@status = 'pending' AND {Stuck}))
              ORDER BY c.Id DESC
             """, new { id, status }, tx);
+        var roles = await LoadRoleCapabilitiesAsync(cn, tx);
         static DateTime U(DateTime d) => DateTime.SpecifyKind(d, DateTimeKind.Utc);
         return rows.Where(r => id is not null || user.IsSuperuser || !SecurityChangeKinds.IsIntegration(r.Kind))
             .Select(r => new SecurityChangeDto(r.Id, r.Kind, r.TargetId, r.Summary, r.Status,
                 r.BeforeJson is null ? null : JsonDocument.Parse(r.BeforeJson).RootElement.Clone(),
                 JsonSerializer.SerializeToElement(Redacted(r.PayloadJson)), r.Hash, r.RequestedBy, U(r.RequestedAt), r.ReviewedBy,
                 r.ReviewedAt is { } at ? U(at) : null, r.ReviewComment,
-                CanApprove: r.Status == Pending && CanReview(user, r.Kind) && r.RequestedById != user.Id,
+                CanApprove: r.Status == Pending && CanReview(user, r.Kind) && r.RequestedById != user.Id
+                            && WhyNotApprover(user, r.Kind, r.TargetId, r.PayloadJson, r.BeforeJson, roles) is null,
                 CanReject: r.Status == Pending && (r.RequestedById == user.Id || CanReview(user, r.Kind)))).ToList();
+    }
+
+    private static async Task<IReadOnlyDictionary<int, (string Name, AdminCapabilities Caps)>> LoadRoleCapabilitiesAsync(DbConnection cn, DbTransaction? tx) =>
+        (await cn.QueryAsync<(int Id, string Name, bool IsSuperuser, bool CanManageModel, bool CanManageUsers, bool CanViewAudit)>(
+            "SELECT Id, Name, IsSuperuser, CanManageModel, CanManageUsers, CanViewAudit FROM meta.Role", transaction: tx))
+        .ToDictionary(r => r.Id, r => (r.Name, new AdminCapabilities(r.IsSuperuser, r.CanManageModel, r.CanManageUsers, r.CanViewAudit)));
+
+    private static JsonElement? Prop(string? json, string property)
+    {
+        if (json is null) return null;
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        return root.ValueKind == JsonValueKind.Object && root.TryGetProperty(property, out var v) ? v.Clone() : null;
+    }
+
+    private static IReadOnlyList<int> Ints(string? json, string property) =>
+        Prop(json, property) is { ValueKind: JsonValueKind.Array } v
+            ? v.EnumerateArray().Where(x => x.ValueKind == JsonValueKind.Number).Select(x => x.GetInt32()).ToList() : [];
+
+    private static bool Flag(string? json, string property) => Prop(json, property) is { ValueKind: JsonValueKind.True };
+
+    /// <summary>
+    /// Spec 021 (H1 CA4–CA5): por qué <paramref name="user"/> no puede aprobar este cambio aunque revise solicitudes (null =
+    /// puede): le faltan capacidades que el cambio otorga o quita, o es su beneficiario.
+    /// </summary>
+    internal static string? WhyNotApprover(UserContext user, string kind, int? targetId, string payload, string? before,
+        IReadOnlyDictionary<int, (string Name, AdminCapabilities Caps)> roles)
+    {
+        AdminCapabilities needed;
+        switch (kind)
+        {
+            case SecurityChangeKinds.UserCreate or SecurityChangeKinds.UserUpdate:
+                if (kind == SecurityChangeKinds.UserUpdate && targetId == user.Id) return "El cambio es a tu propio usuario: lo aprueba otro administrador.";
+                var b = Ints(before, "roleIds");
+                var a = Ints(payload, "roleIds");
+                needed = a.Except(b).Concat(b.Except(a)).Select(id => roles.TryGetValue(id, out var r) ? r.Caps : AdminCapabilities.None)
+                    .Aggregate(AdminCapabilities.None, (x, y) => x.Or(y));
+                break;
+            case SecurityChangeKinds.RoleCreate or SecurityChangeKinds.RoleUpdate:
+                var target = targetId is { } tid && roles.TryGetValue(tid, out var tr) ? tr : (Name: (string?)null, Caps: AdminCapabilities.None);
+                if (target.Name is not null && user.Roles.Contains(target.Name, StringComparer.OrdinalIgnoreCase))
+                    return "Tienes este rol: el cambio lo aprueba otro administrador.";
+                needed = new AdminCapabilities(target.Caps.Superuser, Flag(payload, "canManageModel"), Flag(payload, "canManageUsers"), Flag(payload, "canViewAudit"))
+                    .Or(new AdminCapabilities(false, Flag(before, "canManageModel"), Flag(before, "canManageUsers"), Flag(before, "canViewAudit")));
+                break;
+            case SecurityChangeKinds.TeamCreate or SecurityChangeKinds.TeamUpdate:
+                return Ints(payload, "memberIds").Contains(user.Id) && !Ints(before, "memberIds").Contains(user.Id)
+                    ? "El cambio te agrega al equipo: lo aprueba otro administrador." : null;
+            default:
+                return null;
+        }
+        return needed.MissingFor(user) is { } missing ? $"El cambio otorga o quita capacidades que no tienes ({missing}): lo aprueba quien las tenga." : null;
     }
 
     private static bool CanReview(UserContext user, string kind) =>
@@ -208,9 +288,12 @@ public sealed class SecurityApproval(Db db, EnvironmentOptions env)
         if (!CanReview(user, row.Kind)) throw new Forbidden(SecurityChangeKinds.IsIntegration(row.Kind)
             ? "Una solicitud de clave de API o de cliente OAuth la aprueba otro administrador del sistema." : "No puedes aprobar cambios de seguridad.");
         if (row.RequestedById == user.Id) throw new Forbidden("La debe aprobar un administrador distinto de quien la solicitó.");
+        if (WhyNotApprover(user, row.Kind, row.TargetId, row.PayloadJson, row.BeforeJson, await LoadRoleCapabilitiesAsync(cn, null)) is { } why)
+            throw new Forbidden(why);
         if (!string.Equals(req.Hash, row.Hash, StringComparison.OrdinalIgnoreCase))
             throw new Conflict("La solicitud no coincide con la que revisaste: vuelve a revisarla.");
-        var claimed = await cn.ExecuteAsync("UPDATE meta.SecurityChange SET Status = @Applying WHERE Id = @id AND Status = @Pending",
+        var claimed = await cn.ExecuteAsync(
+            $"UPDATE c SET Status = @Applying, ClaimedAt = SYSUTCDATETIME() FROM meta.SecurityChange c WHERE c.Id = @id AND (c.Status = @Pending OR {Stuck})",
             new { id, Applying, Pending });
         if (claimed == 0) throw new Conflict("La solicitud ya no está pendiente.");
         return new SecurityChangeApproval(row.Id, row.Kind, row.TargetId, row.PayloadJson, row.BeforeJson, Clean(req.Comment));
@@ -250,9 +333,9 @@ public sealed class SecurityApproval(Db db, EnvironmentOptions env)
         await using var tx = await cn.BeginTransactionAsync(ct);
         var row = (await LoadAsync(cn, tx, user, id, null)).SingleOrDefault() ?? throw new NotFound("La solicitud no existe.");
         if (!row.CanReject) throw row.Status != Pending ? new Conflict("La solicitud ya no está pendiente.") : new Forbidden();
-        await cn.ExecuteAsync("""
-            UPDATE meta.SecurityChange SET Status = @Rejected, ReviewedBy = @uid, ReviewedAt = SYSUTCDATETIME(), ReviewComment = @comment
-             WHERE Id = @id AND Status = @Pending
+        await cn.ExecuteAsync($"""
+            UPDATE c SET Status = @Rejected, ReviewedBy = @uid, ReviewedAt = SYSUTCDATETIME(), ReviewComment = @comment
+              FROM meta.SecurityChange c WHERE c.Id = @id AND (c.Status = @Pending OR {Stuck})
             """, new { id, Rejected, Pending, uid = user.Id, comment = Clean(req.Comment) }, tx);
         await Audit.WriteAsync(cn, tx, http, AuditActions.SecurityReject, "SecurityChange", id.ToString(),
             after: new { row.Kind, row.Summary, comment = Clean(req.Comment) });

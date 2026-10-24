@@ -90,6 +90,8 @@ public static class ModelEndpoints
         // Spec 007: vistas y reportes se consultan por /api/views y /api/reports, ya filtrados para el usuario.
         return e with
         {
+            // Spec 021 (H2 CA1): el editor manda esta versión con su plan; si otra persona cambió el catálogo, se rechaza.
+            Version = u.CanManageModel ? ModelVersion.Of(e) : null,
             Fields = fields,
             Security = u.CanManageModel ? e.Security : null,
             Views = u.CanManageModel ? e.Views : null,
