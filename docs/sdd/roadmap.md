@@ -24,7 +24,7 @@ en orden, no en paralelo: casi todas tocan el núcleo del motor (`PlanCompiler`,
 | 016 Automatizaciones asíncronas y programadas | Implementado ([spec](specs/016-automatizaciones-asincronas/spec.md)) |
 | 017 Rollback de entornos | Implementado ([spec](specs/017-rollback-entornos/spec.md)) |
 | 018 OAuth2 (client credentials) y API OData | Implementado ([spec](specs/018-oauth-odata/spec.md)) |
-| 019 Editores visuales (layouts y modelador) | Planeada |
+| 019 Editores visuales (layouts y modelador) | Implementado ([spec](specs/019-editores-visuales/spec.md)) |
 | 020 Contabilidad y costeo | Planeada |
 
 ## Diagnóstico
@@ -201,6 +201,14 @@ Señaladas por la misma auditoría. Cada una es capacidad nueva del motor y va e
   del proceso (estados y transiciones) editable; todo produce el mismo Plan de Cambios, con teclado y accesibilidad AA.
 - **Depende de:** 007, 011. No agrega capacidad: mejora cómo se usa la que ya existe. Antes era la 020; pasó antes de
   Contabilidad por decisión del dueño (2026-10-24).
+- **Estado:** implementado en la [spec 019](specs/019-editores-visuales/spec.md): el editor del catálogo tiene pestañas
+  *Catálogo*, *Formulario* y *Proceso*. El diseñador del formulario arrastra campos y secciones (y con teclado: tomar,
+  mover con flechas, soltar, con región en vivo), maneja pestañas, columnas, ancho completo y condiciones, y muestra la
+  vista previa con la misma función que el formulario real. El diagrama del proceso se ordena solo desde el estado
+  inicial, se edita con un panel y se conecta arrastrando de un estado a otro. Los dos editan el mismo borrador que el
+  JSON (que sigue disponible) y producen el mismo `setLayout`/`setWorkflow`, con la vista previa, la aprobación y la
+  auditoría de siempre; sin cambios en el servidor. Pendiente: diseñador de vistas, reportes y tableros, deshacer y
+  rehacer dentro del diseñador, y editar en el modelador un plan propuesto por el asistente.
 
 ### 020 — Contabilidad y costeo (promedio y FIFO)
 - **Problema:** Inventario (005) lleva cantidades, no valor: no hay costo del inventario, pólizas ni costo de ventas;

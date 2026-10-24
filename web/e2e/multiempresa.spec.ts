@@ -395,7 +395,7 @@ test('H3 CA1 · CA5: el modelador pasa un catálogo a «por empresa» (sin volve
   ] });
   for (const Clave of ['Z1', 'Z2']) expect((await post('admin', '/api/data/MeZona', { Clave })).status).toBe(201);
   await page.goto('/admin/model?edit=MeZona');
-  await page.getByText('Reglas, proceso, automatizaciones, seguridad e interfaz').click();
+  await page.getByText('Reglas, automatizaciones, seguridad, vistas e integraciones').click();
   const sw = page.getByRole('switch', { name: 'Un registro por empresa' });
   await expect(sw).not.toBeChecked();
   await sw.check();

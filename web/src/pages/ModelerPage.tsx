@@ -10,7 +10,7 @@ import { useToast } from '../components/Toast';
 import { Alert, Badge, Button, EmptyState, LoadingBlock, PageHeader, Tabs } from '../components/ui';
 import { formatDateTime } from '../lib/format';
 import { useAsync } from '../lib/hooks';
-import { EntityEditor } from './modeler/EntityEditor';
+import { EntityEditor, editorTab } from './modeler/EntityEditor';
 import { PlanReviewDialog } from './modeler/PlanReviewDialog';
 
 type Tab = 'entities' | 'history';
@@ -57,7 +57,7 @@ export function ModelerPage() {
 
   function closeEditor() {
     const p = new URLSearchParams(params);
-    p.delete('new'); p.delete('edit');
+    p.delete('new'); p.delete('edit'); p.delete('tab');
     setParams(p, { replace: true });
   }
 
@@ -70,8 +70,10 @@ export function ModelerPage() {
   }
 
   if (editorOpen && entities) {
+    // Spec 019: el diseñador del formulario y el diagrama del proceso usan el ancho completo.
+    const wide = editorTab(params.get('tab')) !== 'catalogo';
     return (
-      <div className="page page-narrow">
+      <div className={wide ? 'page' : 'page page-narrow'}>
         <PageHeader
           icon={Workflow}
           title={original ? `Editar ${original.labelPlural}` : 'Nuevo catálogo'}

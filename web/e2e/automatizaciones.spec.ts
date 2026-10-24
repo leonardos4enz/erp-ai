@@ -78,6 +78,8 @@ test('preparar el modelo de prueba', async () => {
 
 test('H1 CA4 · CA7: el modelador declara automatizaciones como JSON validado en la vista previa', async ({ page }) => {
   await page.goto('/admin/model?edit=ParteHoras');
+  // Spec 019: el proceso tiene su pestaña, así que la sección avanzada ya no se abre sola por él.
+  await page.getByText('Reglas, automatizaciones, seguridad, vistas e integraciones').click();
   const box = page.getByLabel('Automatizaciones (JSON)');
   await expect(box).toBeVisible();
 

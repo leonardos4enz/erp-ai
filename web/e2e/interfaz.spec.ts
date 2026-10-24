@@ -446,10 +446,14 @@ test('H4 CA1 · CA2 · CA3: tableros con indicadores y gráficas, filtrados por 
 
 test('H5: el modelador edita layout, vistas, reportes y tableros como JSON validado', async ({ page }) => {
   await page.goto('/admin/model?edit=Pedido');
-  await expect(page.getByLabel('Layout del formulario (JSON)')).toHaveValue(/"Revision"/);
   await expect(page.getByLabel('Vistas compartidas (JSON)')).toHaveValue(/"Urgentes"/);
   await expect(page.getByLabel('Reportes (JSON)')).toHaveValue(/"PorZona"/);
+  // Spec 019: el layout está en la pestaña Formulario (diseñador o JSON, sobre el mismo borrador).
+  await page.getByRole('tab', { name: 'Formulario' }).click();
+  await page.getByRole('button', { name: 'JSON' }).click();
+  await expect(page.getByLabel('Layout del formulario (JSON)')).toHaveValue(/"Revision"/);
   await expect(page.getByLabel('Layout del formulario (JSON)')).not.toHaveValue(/null/);
+  await page.getByRole('tab', { name: 'Catálogo' }).click();
   await expect(page.getByRole('button', { name: 'Sin cambios' })).toBeDisabled();
   const box = page.getByLabel('Reportes (JSON)');
   await box.fill((await box.inputValue()).replace('"Pedidos por zona"', '"Pedidos por zona (editado)"'));
@@ -476,7 +480,7 @@ test('H5: el modelador edita layout, vistas, reportes y tableros como JSON valid
 // consecutivo (la orden de compra tiene el estado en -1 y huecos) y ofrecía «Revisar cambios» sin cambios.
 test('H5 CA1 (F-03): sin cambios en un catálogo con orden no consecutivo no se ofrece revisar', async ({ page }) => {
   await page.goto('/admin/model?edit=OrdenCompra');
-  await expect(page.getByLabel('Layout del formulario (JSON)')).toHaveValue(/"Seguimiento"/);
+  await expect(page.getByLabel('Nombre (singular)')).not.toHaveValue('');
   await expect(page.getByRole('button', { name: 'Sin cambios' })).toBeDisabled();
   // Al mover un campo sí hay cambio, y solo de orden.
   await page.getByRole('button', { name: 'Bajar campo' }).nth(2).click();

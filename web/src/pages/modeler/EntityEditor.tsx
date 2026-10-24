@@ -1,16 +1,19 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
-  Archive, ArchiveRestore, ArrowDown, ArrowUp, ChevronDown, ChevronUp, Eye, Plus, Search, Trash2,
+  Archive, ArchiveRestore, ArrowDown, ArrowUp, ChevronDown, ChevronUp, Eye, LayoutTemplate, Plus, Table2, Trash2, Workflow as WorkflowIcon,
 } from 'lucide-react';
 import { ApiError } from '../../api/client';
 import { adminApi } from '../../api/endpoints';
 import type { Automation, ChangePlan, EntityDef, FieldDef, FieldType, FormulaResultType, Layout, Operation, ReportDef, Rule, ScheduleDef, SecurityPolicy, ViewDef, WebhookDef, Workflow } from '../../api/types';
-import { Dialog } from '../../components/Dialog';
-import { CURATED_ICONS, DynamicIcon } from '../../components/DynamicIcon';
+import { IconPicker } from '../../components/IconPicker';
 import { TagInput } from '../../components/TagInput';
-import { Alert, Button, Field, Input, Select, Switch, Textarea } from '../../components/ui';
+import { Alert, Button, Field, Input, Select, Switch, Tabs, Textarea } from '../../components/ui';
 import { FIELD_TYPE_LABELS, MODELER_FIELD_TYPES, supportsDefault } from '../../lib/entity';
 import { IDENTIFIER_RE, pluralize, toIdentifier } from '../../lib/format';
+import { DesignOrJson, type JsonResult } from './DesignOrJson';
+import { LayoutDesigner } from './LayoutDesigner';
+import { WorkflowDesigner } from './WorkflowDesigner';
 
 const RESULT_TYPE_LABELS: Record<FormulaResultType, string> = {
   decimal: 'Número decimal', integer: 'Número entero', text: 'Texto', boolean: 'Sí / No', date: 'Fecha',
@@ -18,8 +21,6 @@ const RESULT_TYPE_LABELS: Record<FormulaResultType, string> = {
 
 /** Tipos cuyo valor no captura la persona: no aplican "obligatorio" ni "único". */
 const COMPUTED_TYPES: FieldType[] = ['formula', 'autonumber', 'lines', 'state'];
-
-type JsonResult<T> = { ok: true; value: T | null } | { ok: false; error: string };
 
 /** Vacío = sin definición. Valida forma mínima; el servidor valida el contenido en la vista previa. */
 function parseJson<T>(text: string, kind: 'array' | 'object'): JsonResult<T> {
@@ -36,7 +37,14 @@ function parseJson<T>(text: string, kind: 'array' | 'object'): JsonResult<T> {
 
 /** Sin propiedades nulas: el servidor las omite al leer, así que no cambian el significado y solo estorban. */
 const withoutNulls = (_k: string, v: unknown) => (v === null ? undefined : v);
-const canonical = (v: unknown) => JSON.stringify(v ?? null, withoutNulls);
+/**
+ * Para comparar con lo guardado, las claves van ordenadas: el diseñador (019) puede reescribir un objeto con sus
+ * propiedades en otro orden y eso no es un cambio.
+ */
+const sortedKeys = (_k: string, v: unknown) => (v === null ? undefined : v && typeof v === 'object' && !Array.isArray(v)
+  ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, (v as Record<string, unknown>)[k]]))
+  : v);
+export const canonical = (v: unknown) => JSON.stringify(v ?? null, sortedKeys);
 const pretty = (v: unknown) => JSON.stringify(v, withoutNulls, 2);
 
 function parseJsonError(text: string, kind: 'array' | 'object'): string | undefined {
@@ -293,42 +301,6 @@ function validate(d: Draft, isNew: boolean, existingNames: string[]): Record<str
 
 /* ------------------------------------------------------------------------- */
 
-function IconPicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  const [open, setOpen] = useState(false);
-  const [q, setQ] = useState('');
-  const list = CURATED_ICONS.filter((i) => i.includes(q.trim().toLowerCase()));
-  return (
-    <>
-      <Field label="Icono">
-        <Button onClick={() => setOpen(true)} aria-label={`Icono: ${value}. Cambiar`} className="icon-btn-preview">
-          <DynamicIcon name={value} size={16} /> <span className="muted">{value}</span>
-        </Button>
-      </Field>
-      <Dialog open={open} onClose={() => setOpen(false)} title="Elegir icono" size="lg">
-        <div className="stack">
-          <Input icon={Search} placeholder="Buscar icono…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Buscar icono" data-autofocus />
-          <div className="icon-grid" role="group" aria-label="Iconos">
-            {list.map((name) => (
-              <button
-                key={name}
-                type="button"
-                className="icon-cell"
-                title={name}
-                aria-label={name}
-                aria-pressed={value === name}
-                onClick={() => { onChange(name); setOpen(false); }}
-              >
-                <DynamicIcon name={name} size={18} />
-              </button>
-            ))}
-          </div>
-          {list.length === 0 && <p className="muted">Sin coincidencias.</p>}
-        </div>
-      </Dialog>
-    </>
-  );
-}
-
 interface FieldRowProps {
   f: DraftField;
   index: number;
@@ -499,6 +471,9 @@ function FieldRow({ f, index, count, errors, entities, roleNames, onChange, onMo
 
 /* ------------------------------------------------------------------------- */
 
+export type EditorTab = 'catalogo' | 'formulario' | 'proceso';
+export const editorTab = (v: string | null): EditorTab => (v === 'formulario' || v === 'proceso' ? v : 'catalogo');
+
 export interface EntityEditorProps {
   original?: EntityDef;
   entities: EntityDef[];
@@ -513,6 +488,14 @@ export function EntityEditor({ original, entities, onCancel, onReview }: EntityE
   const [pluralTouched, setPluralTouched] = useState(!isNew);
   const [showErrors, setShowErrors] = useState(false);
   const [roleNames, setRoleNames] = useState<string[] | null>(null);
+  // Spec 019: pestañas del editor en la URL; el borrador es uno solo para las tres.
+  const [params, setParams] = useSearchParams();
+  const tab = editorTab(params.get('tab'));
+  const setTab = (t: EditorTab) => {
+    const p = new URLSearchParams(params);
+    if (t === 'catalogo') p.delete('tab'); else p.set('tab', t);
+    setParams(p, { replace: true });
+  };
 
   useEffect(() => {
     adminApi.roles().then((r) => setRoleNames(r.map((x) => x.name))).catch((e) => { if (e instanceof ApiError) setRoleNames(null); });
@@ -538,13 +521,87 @@ export function EntityEditor({ original, entities, onCancel, onReview }: EntityE
 
   function review() {
     setShowErrors(true);
-    if (Object.keys(errors).length) return;
+    const keys = Object.keys(errors);
+    if (keys.length) {
+      // El error puede estar en otra pestaña: se abre la primera que tenga uno.
+      const target: EditorTab = keys.some((k) => k !== 'layoutJson' && k !== 'workflowJson') ? 'catalogo' : keys.includes('layoutJson') ? 'formulario' : 'proceso';
+      if (target !== tab) setTab(target);
+      return;
+    }
     const description = isNew ? `Crear catálogo ${d.labelPlural.trim()}` : `Modificar catálogo ${original!.labelPlural}`;
     onReview({ description, operations: ops });
   }
 
+  const parsedLayout = parseJson<Layout>(d.layoutJson, 'object');
+  const parsedWorkflow = parseJson<Workflow>(d.workflowJson, 'object');
+  // Campos activos del borrador con identificador válido: los nuevos también se pueden colocar en el formulario.
+  const designFields: FieldDef[] = d.fields.filter((f) => !f.isArchived && IDENTIFIER_RE.test(f.name));
+  const isChild = d.fields.some((f) => !f.isArchived && f.type === 'parent');
+  const isDocument = d.fields.some((f) => !f.isArchived && f.type === 'lines');
+  const tabErrors = (t: EditorTab) => showErrors && Object.keys(errors).some((k) => (t === 'formulario' ? k === 'layoutJson' : t === 'proceso' ? k === 'workflowJson' : k !== 'layoutJson' && k !== 'workflowJson'));
+  const childNotice = (
+    <Alert tone="info" title="Es un catálogo de partidas">
+      Sus registros se capturan como tabla dentro de su documento: el formulario y el proceso se definen en el documento.
+    </Alert>
+  );
+
   return (
     <div className="stack" style={{ gap: 'var(--space-6)' }}>
+      <div className="editor-tabs">
+      <Tabs<EditorTab>
+        label="Partes del catálogo"
+        value={tab}
+        onChange={setTab}
+        items={[
+          { id: 'catalogo', label: tabErrors('catalogo') ? 'Catálogo (con errores)' : 'Catálogo', icon: Table2 },
+          { id: 'formulario', label: tabErrors('formulario') ? 'Formulario (con errores)' : 'Formulario', icon: LayoutTemplate },
+          { id: 'proceso', label: tabErrors('proceso') ? 'Proceso (con errores)' : 'Proceso', icon: WorkflowIcon },
+        ]}
+      />
+      </div>
+      {tab === 'formulario' && (
+        <div role="tabpanel" aria-label="Formulario">
+          {isChild ? childNotice : (
+            <DesignOrJson<Layout>
+              title="Formulario"
+              jsonLabel="Layout del formulario (JSON)"
+              text={d.layoutJson}
+              parsed={parsedLayout}
+              onText={(layoutJson) => setD((s) => ({ ...s, layoutJson }))}
+              placeholder={'{\n  "sections": [\n    { "name": "General", "label": "Datos generales", "tab": "General", "fields": ["Nombre", "Fecha"] },\n    { "name": "Pago", "label": "Pago", "tab": "General", "fields": ["Moneda", { "field": "TipoCambio", "visibleWhen": "Moneda.Clave <> \'MXN\'" }] }\n  ]\n}'}
+              hint="Secciones con name, label, fields y opcionalmente tab, columns (1 o 2), description y visibleWhen (también por campo). Los campos no mencionados van en «Otros datos». Vacío: sin layout."
+              error={visibleErrors.layoutJson}
+              designer={(layout) => (
+                <LayoutDesigner layout={layout} isDocument={isDocument} fields={designFields}
+                  onChange={(next) => setD((s) => ({ ...s, layoutJson: next ? pretty(next) : '' }))} />
+              )}
+            />
+          )}
+        </div>
+      )}
+      {tab === 'proceso' && (
+        <div role="tabpanel" aria-label="Proceso">
+          {isChild ? childNotice : (
+            <DesignOrJson<Workflow>
+              title="Proceso"
+              jsonLabel="Proceso (JSON)"
+              text={d.workflowJson}
+              parsed={parsedWorkflow}
+              onText={(workflowJson) => setD((s) => ({ ...s, workflowJson }))}
+              placeholder={'{\n  "initial": "Borrador",\n  "states": [{ "name": "Borrador", "label": "Borrador", "editable": true }],\n  "transitions": []\n}'}
+              hint="Estados y transiciones del documento. Déjalo vacío si el catálogo no tiene proceso (un proceso guardado no se quita)."
+              error={visibleErrors.workflowJson}
+              designer={(workflow) => (
+                <WorkflowDesigner workflow={workflow} fields={designFields} roleNames={roleNames}
+                  savedStates={new Set(original?.workflow?.states.map((x) => x.name) ?? [])}
+                  savedTransitions={new Set(original?.workflow?.transitions.map((x) => x.name) ?? [])}
+                  onChange={(next) => setD((s) => ({ ...s, workflowJson: pretty(next) }))} />
+              )}
+            />
+          )}
+        </div>
+      )}
+      {tab === 'catalogo' && <div role="tabpanel" aria-label="Catálogo" className="stack" style={{ gap: 'var(--space-6)' }}>
       <section className="card card-pad stack">
         <h2 style={{ fontSize: 'var(--text-md)', fontWeight: 600 }}>General</h2>
         <div className="form-grid">
@@ -576,7 +633,7 @@ export function EntityEditor({ original, entities, onCancel, onReview }: EntityE
             hint={isNew ? 'Nombre técnico de la tabla. No se puede cambiar después.' : 'No se puede cambiar.'}
             onChange={(e) => { setNameTouched(true); setD((s) => ({ ...s, name: e.target.value.replace(/[^A-Za-z0-9_]/g, '') })); }}
           />
-          <IconPicker value={d.icon} onChange={(icon) => setD((s) => ({ ...s, icon }))} />
+          <IconPicker value={d.icon} onChange={(icon) => setD((s) => ({ ...s, icon: icon ?? 'package' }))} />
           <Textarea wrapClassName="span-2" label="Descripción" placeholder="Para qué sirve este catálogo" rows={2} style={{ minHeight: 64 }} value={d.description} onChange={(e) => setD((s) => ({ ...s, description: e.target.value }))} maxLength={500} />
           <Input label="Grupo del menú" hint="Sección del menú lateral, p. ej. Compras. Vacío: Catálogos." maxLength={60} value={d.group} onChange={(e) => setD((s) => ({ ...s, group: e.target.value }))} />
           <Select label="Campo para mostrar en referencias" hint="Se usa cuando otro catálogo apunta a este" value={d.displayField} onChange={(e) => setD((s) => ({ ...s, displayField: e.target.value }))}>
@@ -610,10 +667,10 @@ export function EntityEditor({ original, entities, onCancel, onReview }: EntityE
         </div>
       </section>
 
-      <details className="card card-pad advanced-section" open={!!(original?.perCompany || original?.rules?.length || original?.workflow || original?.automations?.length || original?.security || original?.layout || original?.views?.length || original?.reports?.length || original?.webhooks?.length || original?.schedules?.length) || undefined}>
+      <details className="card card-pad advanced-section" open={!!(original?.perCompany || original?.rules?.length || original?.automations?.length || original?.security || original?.views?.length || original?.reports?.length || original?.webhooks?.length || original?.schedules?.length) || undefined}>
         <summary className="advanced-summary">
-          <span className="section-title">Reglas, proceso, automatizaciones, seguridad e interfaz</span>
-          <span className="subtle">Avanzado · validaciones de negocio, estados del documento, efectos en otros registros y quién ve o edita qué</span>
+          <span className="section-title">Reglas, automatizaciones, seguridad, vistas e integraciones</span>
+          <span className="subtle">Avanzado · validaciones de negocio, efectos en otros registros, quién ve o edita qué, vistas, reportes, webhooks y tareas</span>
         </summary>
         <div className="stack" style={{ marginTop: 'var(--space-4)' }}>
           {/* Spec 010: catálogo compartido o por empresa. Pasar a por empresa no se puede deshacer. */}
@@ -645,17 +702,6 @@ export function EntityEditor({ original, entities, onCancel, onReview }: EntityE
           />
           <Textarea
             className="mono json-editor"
-            label="Proceso (JSON)"
-            rows={12}
-            spellCheck={false}
-            placeholder={'{\n  "initial": "Borrador",\n  "states": [{ "name": "Borrador", "label": "Borrador", "editable": true }],\n  "transitions": []\n}'}
-            hint="Estados y transiciones del documento. Déjalo vacío si el catálogo no tiene proceso."
-            error={visibleErrors.workflowJson ?? (d.workflowJson ? parseJsonError(d.workflowJson, 'object') : undefined)}
-            value={d.workflowJson}
-            onChange={(e) => setD((s) => ({ ...s, workflowJson: e.target.value }))}
-          />
-          <Textarea
-            className="mono json-editor"
             label="Automatizaciones (JSON)"
             rows={12}
             spellCheck={false}
@@ -675,17 +721,6 @@ export function EntityEditor({ original, entities, onCancel, onReview }: EntityE
             error={visibleErrors.securityJson ?? (d.securityJson ? parseJsonError(d.securityJson, 'object') : undefined)}
             value={d.securityJson}
             onChange={(e) => setD((s) => ({ ...s, securityJson: e.target.value }))}
-          />
-          <Textarea
-            className="mono json-editor"
-            label="Layout del formulario (JSON)"
-            rows={12}
-            spellCheck={false}
-            placeholder={'{\n  "sections": [\n    { "name": "General", "label": "Datos generales", "tab": "General", "fields": ["Nombre", "Fecha"] },\n    { "name": "Pago", "label": "Pago", "tab": "General", "fields": ["Moneda", { "field": "TipoCambio", "visibleWhen": "Moneda.Clave <> \'MXN\'" }] }\n  ]\n}'}
-            hint="Secciones con name, label, fields y opcionalmente tab, columns (1 o 2), description y visibleWhen (también por campo). Los campos no mencionados van en «Otros datos»."
-            error={visibleErrors.layoutJson ?? (d.layoutJson ? parseJsonError(d.layoutJson, 'object') : undefined)}
-            value={d.layoutJson}
-            onChange={(e) => setD((s) => ({ ...s, layoutJson: e.target.value }))}
           />
           <Textarea
             className="mono json-editor"
@@ -733,6 +768,7 @@ export function EntityEditor({ original, entities, onCancel, onReview }: EntityE
           />
         </div>
       </details>
+      </div>}
 
       <div className="row" style={{ justifyContent: 'flex-end' }}>
         {showErrors && Object.keys(errors).length > 0 && <span className="field-error" style={{ marginRight: 'auto' }}>Corrige los campos marcados antes de continuar.</span>}
