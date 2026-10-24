@@ -29,7 +29,7 @@ Cada spec se trabaja en **su propia sesión de IA, nueva**, de principio a fin
 (SPECIFY → VERIFY → commit). Así se evita que una sesión arrastre contexto de otras specs,
 y cada sesión queda como registro de una sola entrega. Al cerrar la spec:
 1. `verify.md` completo y suites en verde.
-2. Revisión de secretos y artefactos, commit y push.
+2. Revisión de secretos y artefactos, commit y **push a `origin/main` (obligatorio: la siguiente spec no se abre con commits sin subir)**.
 3. Actualizar el estado en el índice de abajo y en [roadmap.md](roadmap.md).
 4. La siguiente spec se abre en una sesión nueva, que arranca leyendo [CLAUDE.md](../../CLAUDE.md).
 

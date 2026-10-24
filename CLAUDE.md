@@ -10,8 +10,11 @@ se declaran como datos; el motor genera tablas, API y pantallas. Idioma del proy
 4. Las specs previas relevantes en `docs/sdd/specs/` (sobre todo 002: contrato de API y lenguaje de expresiones).
 
 ## Reglas de trabajo
-- **Una spec por sesión.** Esta sesión trabaja solo su spec, de SPECIFY a VERIFY y commit.
+- **Una spec por sesión.** Esta sesión trabaja solo su spec, de SPECIFY a VERIFY, commit y **push**.
   La siguiente spec se abre en una sesión nueva.
+- **Push obligatorio al cerrar cada spec** (decisión del dueño, 2026-10-24): con las suites en verde y la revisión de
+  «Antes de cada push», se sube a `origin/main`. No se abre una spec nueva mientras `git rev-list --count origin/main..main`
+  no dé 0; la sesión que abre una spec lo comprueba primero y, si hay commits sin subir, los revisa y los sube antes.
 - Flujo: `spec.md` → `plan.md` (contrato y STRIDE) → `tasks.md` → implementar → `verify.md`.
 - Toda capacidad nueva es **genérica del motor** y se ejerce con metadatos (p. ej. en un paquete de `modules/`).
 - Cambios a un módulo instalado: nueva entrada en `upgrades` del paquete (no editar el plan base).
