@@ -28,16 +28,28 @@
 | F-01 | Media | Con la huella como parámetro de cuerpo, `POST /apply` **sin** cuerpo JSON no encontraba la ruta (404 «Ruta no encontrada») en lugar de 409 «ya se aplicó»; lo detectó `asistente › H2 CA1` y, al cortar la suite serial, dejó el grupo «Pruebas IA» en el menú y empujó «Auditoría» fuera de la pantalla en `compras › H7` (falla en cascada de cinco archivos) | Corregido: el cuerpo se lee solo si es JSON; cubierto por `asistente › H2 CA1` (falló en la primera corrida) |
 | F-02 | Baja | (prueba) `integraciones › H5 CA1` simula Compras 1.4.0 sobre un modelo ya actualizado y restauraba la versión a 1.5.0 en lugar de la instalada; con 1.7.0 la cadena repite un `addField` y la vista previa deja de ser válida | La prueba restaura la versión real y verifica solo la lista de roles (lo que protege) |
 | F-03 | Baja | (prueba) La limpieza no podía archivar documentos con partidas (se referencian entre sí) | La limpieza archiva primero el campo de partidas |
+| F-04 | Baja | (exploratoria) En un entorno con aprobación el modelador se enteraba de que la propuesta no se aplica aquí **después** de gastar una solicitud | Corregido: el redactor lo avisa cuando `directChanges` es falso. Solo texto: la regla la aplica el servidor (409), cubierta por `endurecimiento › H4` |
+| F-05 | Media | (exploratoria, previo a 012, de la 006) Un vendedor que solo puede **ver** una oportunidad ajena recibe el formulario con campos editables y «Guardar cambios»; el servidor rechaza con 403 al guardar. No es una fuga, pero confunde | Fuera de alcance de esta spec: propuesto como tarea aparte (el registro debe decir al cliente si se puede modificar) |
 
 ## Decisiones y diferidos
 Ver [spec](spec.md#decisiones-clarify): transiciones con roles siguen sin exigir escritura; superusuario sin filtro en la
 bitácora; en un entorno con aprobación se bloquean los caminos directos (también los módulos del servidor); acumulado en
 memoria, folios bloqueados durante la importación y `ModelDiff` que archiva campos locales quedan diferidos con su razón.
 
-## Revisión exploratoria
-No hay pantallas nuevas: los cambios son del servidor (respuestas filtradas, 403/409) y un aviso en el asistente. Se
-revisó por API en la suite (dos instancias) en lugar de con el navegador. No se tocó la base `ErpAi` ni la contraseña de
-`admin`.
+## Revisión exploratoria (navegador integrado)
+- **Instancia temporal** en `127.0.0.1:5094` sobre la base desechable `ErpAi_E2E` (tras la suite), con
+  `RequireApproval` y sin `AllowDirectChanges`, para entrar con los usuarios de prueba sin tocar la sesión de `localhost`:
+  - `e2e-sec-vend2` abre una oportunidad pública de otro vendedor: «Enviar a revisión» (sin roles) aparece bloqueada
+    con el motivo en el título y, al pulsarla, un aviso «Puedes consultar este registro, pero tu rol no puede
+    modificarlo». Detectado F-05 (previo).
+  - En *Cotizaciones*, una cotización que apunta a una oportunidad privada muestra «(sin acceso)» en el listado y en el
+    detalle; guardarla sin cambios conserva la referencia («Cambios guardados»).
+  - `e2e-ia-modelador` en *Asistente IA*: la propuesta muestra «Este entorno exige la aprobación de otro
+    administrador…» y «Aplicar…» deshabilitado; en 375 px no hay desbordes (F-04 corregido y verificado tras recargar).
+  - Consola: solo los 401/404 esperados de la sesión; sin errores de JavaScript ni de CSP.
+- **Base de desarrollo `ErpAi`** (servidor `erp-api` relanzado con el código nuevo): Compras actualizado de 1.6.0 a
+  **1.7.0** desde *Módulos* (vista previa válida de 4 pasos; conjunto de cambios #15). No se cambió la contraseña de
+  `admin` ni otros datos.
 
 ## Riesgo residual
 - Los bloqueos previos a validar solo cubren destinos `target` de automatizaciones; un acumulado por `match` (sin

@@ -25,4 +25,5 @@
 ## Verificación
 - [x] Regresiones corridas contra el código anterior
 - [x] `dotnet test` y E2E en verde
-- [x] `verify.md`, roadmap; revisión de secretos y artefactos; commit
+- [x] Revisión exploratoria con navegador (instancia con aprobación sobre `ErpAi_E2E`) y Compras 1.7.0 en `ErpAi`
+- [x] `verify.md`, roadmap; revisión de secretos y artefactos; commit y push

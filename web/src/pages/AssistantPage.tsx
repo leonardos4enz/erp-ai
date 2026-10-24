@@ -222,6 +222,8 @@ export function AssistantPage() {
                   <>
                     {st.model && <>Modelo: {st.model}. </>}Se envía a Anthropic junto con la estructura del modelo (nunca tus registros) y queda en la auditoría: no escribas
                     datos personales ni contraseñas. {prompt.length}/{max} · Ctrl+Enter para enviar · te quedan {st.remaining} de {st.requestsPerHour} solicitudes esta hora.
+                    {/* Spec 012 (F-04): se avisa antes de gastar una solicitud que no se podrá aplicar aquí. */}
+                    {st.directChanges === false && <> En este entorno las propuestas no se aplican: los cambios al modelo llegan como paquete desde Entornos.</>}
                   </>
                 }
               />
