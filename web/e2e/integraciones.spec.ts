@@ -270,6 +270,29 @@ test('H1 CA4: reintentos con bitácora; reintento manual, prueba y rotación del
   secrets.ContactoValidado = fresh;
 });
 
+test('Spec 014 · H5 CA1: un rechazo 4xx no se reintenta; 429 (límite del destino) sí', async () => {
+  // Regresión (auditoría 014): un 400/401/404 se reintentaba como si fuera temporal.
+  const admin = await as('admin');
+  const delivery = async (recordId: number) =>
+    ((await (await admin.get('/api/admin/webhooks/deliveries', { params: { entity: 'Contacto' } })).json()) as
+      { recordId: number; webhook: string; status: string; attempts: number; lastStatusCode: number; lastError: string }[])
+      .find((x) => x.recordId === recordId && x.webhook === 'ContactoMayorista');
+  try {
+    for (const [code, attempts] of [[400, 1], [429, 3]] as const) {
+      mode.ContactoMayorista = code;
+      const before = deliveriesFor('ContactoMayorista').length;
+      const c = await (await admin.post('/api/data/Contacto', { data: { Nombre: `Distribuidora ${code}`, Segmento: 'Mayorista', Activo: true } })).json();
+      await expect.poll(async () => (await delivery(c.id))?.status, { timeout: 20_000 }).toBe('failed');
+      const d = (await delivery(c.id))!;
+      expect(d).toMatchObject({ attempts, lastStatusCode: code });
+      expect(deliveriesFor('ContactoMayorista').length - before).toBe(attempts);
+      if (code === 400) expect(d.lastError).toContain('rechazó la entrega (400): no se reintenta');
+    }
+  } finally {
+    mode.ContactoMayorista = 200;
+  }
+});
+
 test('H2 CA1 · CA4: el administrador crea una clave; se ve una sola vez y no tiene roles de administración', async ({ page }) => {
   await page.goto('/admin/integrations');
   await page.getByRole('tab', { name: 'Claves de API' }).click();
@@ -487,7 +510,7 @@ test('H4 CA1 · CA2: exportar el listado como se ve, sin campos ocultos ni inyec
 test('H5 CA1 · CA2 · CA3: Compras 1.5.0 trae su rol de servicio y el webhook sin destino; la orden autorizada llega sin importes', async ({ page }) => {
   const admin = await as('admin');
   const mod = (await (await admin.get('/api/admin/modules')).json()).find((m: { id: string }) => m.id === 'compras');
-  expect(mod.installedVersion).toBe('1.7.0'); // Compras 1.7.0 (spec 012) ya está instalado
+  expect(mod.installedVersion).toBe('1.8.0'); // Compras 1.8.0 (spec 014) ya está instalado
   await page.goto('/admin/integrations');
   const row = page.getByRole('row', { name: /Orden autorizada/ });
   await expect(row).toContainText('Integración de almacén');

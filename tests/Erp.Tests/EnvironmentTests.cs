@@ -142,7 +142,9 @@ public class EnvironmentTests
         Assert.Contains(ops, o => o is AddFieldOp { Field.Name: "Precio" });
         Assert.Contains(ops, o => o is UpdateFieldOp { Field: "Nombre", Label: "Descripción", Required: true });
         Assert.Contains(ops, o => o is ArchiveFieldOp { Field: "Notas" });
-        Assert.Contains(diff.Warnings, w => w.Contains("Notas") && w.Contains("se archiva"));
+        // Spec 014 (H4): el campo local se lista aparte para confirmarlo, no entre las advertencias.
+        Assert.Contains(diff.LocalArchives, w => w.Contains("Notas") && w.Contains("se archiva"));
+        Assert.DoesNotContain(diff.Warnings, w => w.Contains("Notas"));
 
         var (after, _) = Apply(diff.Plan, target, NoBoards, System);
         Assert.Empty(Diff(renamed, after, "Producto").Plan.Operations);

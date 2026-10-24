@@ -26,7 +26,7 @@ public sealed partial class RecordService
 
     /// <summary>Contexto de ejecución: la transacción del evento, quién lo disparó y la cadena de automatizaciones.</summary>
     private sealed record AutoCtx(SqlConnection Cn, SqlTransaction Tx, IReadOnlyDictionary<string, EntityDef> Model,
-        UserContext User, HttpContext Http, int Depth, IReadOnlyList<string> Chain, CancellationToken Ct);
+        UserContext User, HttpContext Http, int Depth, IReadOnlyList<string> Chain, CancellationToken Ct, FolioSource? Folios = null);
 
     /// <summary>Corre las automatizaciones de <paramref name="e"/> para el evento (y estado o transición, si aplica).</summary>
     private async Task FireAsync(AutoCtx c, EntityDef e, long id, string ev, string? key)
@@ -141,24 +141,48 @@ public sealed partial class RecordService
     /// actuales: sin esto, dos recepciones simultáneas validaban contra el mismo pendiente. Orden fijo (catálogo, id) para
     /// no provocar interbloqueos; los bloqueos posteriores del motor sobre esos documentos son reentrantes.
     /// </summary>
-    private static async Task LockAutomationTargetsAsync(SqlConnection cn, SqlTransaction tx, EntityDef e,
-        IReadOnlyDictionary<string, EntityDef> model, DocDraft draft, WorkflowTransition t, CancellationToken ct)
+    private static Task<bool> LockAutomationTargetsAsync(SqlConnection cn, SqlTransaction tx, EntityDef e,
+        IReadOnlyDictionary<string, EntityDef> model, DocDraft draft, WorkflowTransition t, CancellationToken ct) =>
+        LockAutomationTargetsAsync(cn, tx, e, model, draft, auto =>
+            auto.On == AutomationEvents.Transition && string.Equals(auto.Transition, t.Name, StringComparison.OrdinalIgnoreCase)
+            || auto.On == AutomationEvents.EnterState && string.Equals(auto.State, t.To, StringComparison.OrdinalIgnoreCase), ct);
+
+    /// <summary>
+    /// Spec 014 (H6): lo mismo para cualquier evento, y también para los acumulados por <c>match</c>: se toma su bloqueo por
+    /// clave (el mismo recurso que <see cref="RollupAsync"/>) antes de insertar o validar. Sin esto, en un catálogo sin folio
+    /// (la secuencia serializa a los que tienen) dos altas simultáneas con la misma clave se esperaban entre sí: la suma de
+    /// la primera esperaba la fila sin confirmar de la segunda, que esperaba la clave de la primera, hasta que el bloqueo
+    /// vencía (10 s) y la operación se rechazaba aunque cupiera. Primero las claves (ordenadas), luego los documentos.
+    /// Devuelve si bloqueó algún documento (quien llama vuelve a leer lo relacionado).
+    /// </summary>
+    private static async Task<bool> LockAutomationTargetsAsync(SqlConnection cn, SqlTransaction tx, EntityDef e,
+        IReadOnlyDictionary<string, EntityDef> model, DocDraft draft, Func<Automation, bool> fires, CancellationToken ct)
     {
         var refs = new HashSet<(string Entity, long Id)>();
-        foreach (var auto in e.Automations ?? [])
+        var keys = new SortedSet<string>(StringComparer.Ordinal);
+        foreach (var auto in (e.Automations ?? []).Where(fires))
         {
-            var fires = auto.On == AutomationEvents.Transition && string.Equals(auto.Transition, t.Name, StringComparison.OrdinalIgnoreCase)
-                        || auto.On == AutomationEvents.EnterState && string.Equals(auto.State, t.To, StringComparison.OrdinalIgnoreCase);
-            if (!fires) continue;
-            foreach (var a in auto.Actions.Where(a => a.Target is not null))
+            foreach (var a in auto.Actions)
             {
-                if (AutomationRules.Scope(e, a, model) is not { } scope || scope.FindField(a.Target!) is not { Type: FieldTypes.Reference } f) continue;
+                if (AutomationRules.Scope(e, a, model) is not { } scope) continue;
                 var rows = a.Lines is null ? [draft.Header] : (draft.Lines.GetValueOrDefault(a.Lines) ?? []).Select(l => l.Values);
-                foreach (var v in rows)
-                    if (v.GetValueOrDefault(f.Name) is { } raw) refs.Add((f.ReferenceEntity!, Convert.ToInt64(raw, CultureInfo.InvariantCulture)));
+                if (a.Target is not null && scope.FindField(a.Target) is { Type: FieldTypes.Reference } f)
+                {
+                    foreach (var v in rows)
+                        if (v.GetValueOrDefault(f.Name) is { } raw) refs.Add((f.ReferenceEntity!, Convert.ToInt64(raw, CultureInfo.InvariantCulture)));
+                }
+                else if (a is { Type: AutomationActions.Rollup, Target: null, Match: { Count: > 0 } match } && model.TryGetValue(a.Entity ?? "", out var dest))
+                {
+                    foreach (var v in rows)
+                    {
+                        var values = match.Select(m => scope.FindField(m.Source) is { } src ? v.GetValueOrDefault(src.Name) : null).ToList();
+                        if (values.All(x => x is not null)) keys.Add(RollupLockKey(dest, values!));
+                    }
+                }
             }
         }
-        if (refs.Count == 0) return;
+        foreach (var key in keys) await AppLockAsync(cn, tx, key, ct);
+        if (refs.Count == 0) return false;
 
         // Documento raíz de cada destino (una partida se bloquea por su documento, como en LockRootAsync).
         var roots = new SortedSet<(string Entity, long Id)>(Comparer<(string Entity, long Id)>.Create((x, y) =>
@@ -178,6 +202,7 @@ public sealed partial class RecordService
             cmd.Parameters.Add(new SqlParameter("@id", id));
             await cmd.ExecuteScalarAsync(ct);
         }
+        return roots.Count > 0;
     }
 
     /// <summary>Documento que contiene a <paramref name="target"/> (él mismo o, si es partida, su documento), bloqueado.</summary>
@@ -308,7 +333,7 @@ public sealed partial class RecordService
                 keys.Add((target.FindField(m.Field)!, src, v));
             }
             // Bloqueo por clave: dos operaciones simultáneas no crean dos destinos iguales.
-            await AppLockAsync(c, $"erp-rollup:{target.Name}:" + string.Join("|", keys.Select(k => Convert.ToString(k.Value, CultureInfo.InvariantCulture))));
+            await AppLockAsync(c.Cn, c.Tx, RollupLockKey(target, keys.Select(k => k.Value)), c.Ct);
             await using (var find = new SqlCommand { Connection = c.Cn, Transaction = c.Tx })
             {
                 // Spec 010: en un catálogo por empresa el destino es el de la misma empresa: nunca se acumula en otra.
@@ -344,6 +369,19 @@ public sealed partial class RecordService
 
     private static async Task<decimal> SumSourcesAsync(AutoCtx c, EntityDef source, List<string> where, List<SqlParameter> pars, AutomationAction a)
     {
+        var sumField = source.FindField(a.Sum!)!;
+        // Spec 014 (H2): si el campo está en la tabla y el filtro se puede traducir, la base suma sin cargar los registros
+        // (sin tope). Solo lo que no es traducible se evalúa en memoria, con el tope de siempre.
+        if (SqlRollup(source, sumField, a.Filter, c.Model) is { } filter)
+        {
+            await using var cmd = new SqlCommand(
+                $"SELECT SUM(t.{Quote(sumField.Name)}) FROM {AppTable(source.Name)} t WHERE {string.Join(" AND ", where)} AND t.[IsDeleted] = 0{filter.Sql}",
+                c.Cn, c.Tx);
+            foreach (var p in pars) cmd.Parameters.Add(new SqlParameter(p.ParameterName, p.Value));
+            foreach (var (name, value) in filter.Parameters) cmd.Parameters.Add(new SqlParameter(name, value));
+            return ExprEvaluator.Normalize(await cmd.ExecuteScalarAsync(c.Ct)) as decimal? ?? 0m;
+        }
+
         var cols = source.StoredFields.Select(f => Quote(f.Name)).Prepend("[Id]");
         var rows = new List<Values>();
         await using (var cmd = new SqlCommand(
@@ -358,7 +396,6 @@ public sealed partial class RecordService
             throw new AppException(400, $"Hay más de {MaxRollupSources:N0} registros de {source.LabelPlural} para acumular.");
 
         var loader = new RelatedLoader(c.Cn, c.Tx, c.Model);
-        var sumField = source.FindField(a.Sum!)!;
         var total = 0m;
         foreach (var row in rows)
         {
@@ -368,15 +405,37 @@ public sealed partial class RecordService
         return total;
     }
 
-    private static async Task AppLockAsync(AutoCtx c, string key)
+    /// <summary>
+    /// Spec 014: condición SQL adicional (<c>" AND (…)"</c>, o vacía sin filtro) para sumar en la base, o <c>null</c> si hay
+    /// que sumar en memoria (campo sin columna o filtro no traducible).
+    /// </summary>
+    internal static SqlPredicate? SqlRollup(EntityDef source, FieldDef sumField, string? filter, IReadOnlyDictionary<string, EntityDef> model)
+    {
+        if (FieldTypes.IsVirtual(sumField.Type) || sumField.IsArchived) return null;
+        if (filter is null) return new SqlPredicate("", []);
+        var bag = new RecordFilter.ParamBag("@rf");
+        try { return new SqlPredicate($" AND {RecordFilter.TranslateRollup(filter, source, model, bag)}", bag.Items); }
+        catch (ExprException) { return null; }
+    }
+
+    /// <summary>Clave del bloqueo de un acumulado por <c>match</c>: el mismo texto para los valores leídos de la base o capturados.</summary>
+    internal static string RollupLockKey(EntityDef target, IEnumerable<object> values) =>
+        $"erp-rollup:{target.Name}:" + string.Join("|", values.Select(v => ExprEvaluator.Normalize(v) switch
+        {
+            decimal d => (d / 1.0000000000000000000000000000m).ToString(CultureInfo.InvariantCulture),
+            string s => s.Trim().ToUpperInvariant(),
+            var x => Convert.ToString(x, CultureInfo.InvariantCulture),
+        }));
+
+    private static async Task AppLockAsync(SqlConnection cn, SqlTransaction tx, string key, CancellationToken ct)
     {
         // El recurso admite 255 caracteres: se usa un hash de la clave.
         var resource = "erp-rollup:" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(key)))[..40];
         await using var cmd = new SqlCommand("""
             DECLARE @r int; EXEC @r = sp_getapplock @Resource = @res, @LockMode = 'Exclusive', @LockOwner = 'Transaction', @LockTimeout = 10000; SELECT @r;
-            """, c.Cn, c.Tx);
+            """, cn, tx);
         cmd.Parameters.Add(new SqlParameter("@res", resource));
-        if ((int)(await cmd.ExecuteScalarAsync(c.Ct))! < 0) throw new Conflict("Otra operación está actualizando el mismo registro. Intenta de nuevo.");
+        if ((int)(await cmd.ExecuteScalarAsync(ct))! < 0) throw new Conflict("Otra operación está actualizando el mismo registro. Intenta de nuevo.");
     }
 
     // ---------------- Recalcular fórmulas guardadas (spec 005) ----------------

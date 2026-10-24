@@ -464,6 +464,8 @@ export interface EnvironmentInfo {
   name: string;
   requireApproval: boolean;
   signing: boolean;
+  /** Spec 014: el servidor exige aprobación pero permite cambios directos (Environments:AllowDirectChanges). */
+  directChangesOverride: boolean;
   packages: { id: string; version: string; installedAt: string }[];
 }
 
@@ -522,7 +524,8 @@ export interface PackageImport {
   changeSetId?: number | null;
   description?: string | null;
   installedVersion?: string | null;
-  diff?: (PlanPreview & { conflicts: string[]; warnings: string[]; roles: PackageRole[]; diffHash: string; empty: boolean }) | null;
+  /** Spec 014: `localArchives` = campos que solo existen aquí y se archivarán (aprobar y aplicar piden confirmarlo). */
+  diff?: (PlanPreview & { conflicts: string[]; warnings: string[]; roles: PackageRole[]; diffHash: string; empty: boolean; localArchives: string[] }) | null;
   canApprove: boolean;
   canApply: boolean;
   blockedReason?: string | null;

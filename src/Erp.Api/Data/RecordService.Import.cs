@@ -46,71 +46,183 @@ public sealed partial class RecordService
         var structural = columns.Any(c => c.Status == "error");
         var imported = 0;
 
-        await using var cn = await db.OpenAsync(ct);
-        await using var tx = (SqlTransaction)await cn.BeginTransactionAsync(ct);
-        if (!structural)
+        // Spec 014 (H3): la vista previa no toca la secuencia de folios; la importación reserva su bloque de una vez, en una
+        // transacción corta, y las altas de otras personas no esperan a que termine.
+        var folios = structural || !e.ActiveFields.Any(f => f.Type == FieldTypes.Autonumber) ? null
+            : dryRun ? FolioSource.ForPreview(e) : await ReserveFoliosAsync(e, table.Rows.Count, ct);
+        var committed = false;
+        try
         {
-            var refs = new Dictionary<(string, string), (long? Id, string? Error)>();
-            foreach (var (rowNumber, cells) in table.Rows)
+            await using var cn = await db.OpenAsync(ct);
+            await using var tx = (SqlTransaction)await cn.BeginTransactionAsync(ct);
+            if (!structural)
             {
-                var body = new JsonObject();
-                var rowOk = true;
-                foreach (var (index, f) in map)
+                var refs = new Dictionary<(string, string), (long? Id, string? Error)>();
+                foreach (var (rowNumber, cells) in table.Rows)
                 {
-                    var raw = index < cells.Count ? cells[index] : null;
-                    if (string.IsNullOrWhiteSpace(raw)) continue; // vacía: aplica el valor por defecto
-                    var (node, error) = await CellAsync(cn, tx, f, raw.Trim(), model, user, refs, ct);
-                    if (error is not null) { Add(new(rowNumber, columns[index].Column, f.Name, error)); rowOk = false; }
-                    else body[f.Name] = node;
-                }
-                if (!rowOk) continue;
+                    var body = new JsonObject();
+                    var rowOk = true;
+                    foreach (var (index, f) in map)
+                    {
+                        var raw = index < cells.Count ? cells[index] : null;
+                        if (string.IsNullOrWhiteSpace(raw)) continue; // vacía: aplica el valor por defecto
+                        var (node, error) = await CellAsync(cn, tx, f, raw.Trim(), model, user, refs, ct);
+                        if (error is not null) { Add(new(rowNumber, columns[index].Column, f.Name, error)); rowOk = false; }
+                        else body[f.Name] = node;
+                    }
+                    if (!rowOk) continue;
 
-                tx.Save("fila");
-                try
-                {
-                    using var doc = JsonDocument.Parse(body.ToJsonString());
-                    var id = await CreateInTransactionAsync(cn, tx, e, model, doc.RootElement, user, http, ct);
-                    if (RecordFilter.For(e, user, write: true) is { } scope && !await MatchesAsync(cn, tx, e, id, scope, ct))
-                        throw new Forbidden("Quedaría fuera de los registros que tu rol puede modificar.");
-                    imported++;
-                }
-                catch (ValidationFailed vf)
-                {
-                    tx.Rollback("fila");
-                    foreach (var (key, messages) in vf.Errors ?? new Dictionary<string, string[]>())
-                    foreach (var m in messages)
-                        Add(new(rowNumber, colOf.GetValueOrDefault(key), e.FindField(key)?.Name, m));
-                }
-                catch (AppException ex)
-                {
-                    tx.Rollback("fila");
-                    Add(new(rowNumber, null, null, ex.Message));
-                }
-                catch (ExprException ex)
-                {
-                    tx.Rollback("fila");
-                    Add(new(rowNumber, null, null, $"Error al calcular: {ex.Message}"));
+                    tx.Save("fila");
+                    var mark = folios?.Mark();
+                    try
+                    {
+                        using var doc = JsonDocument.Parse(body.ToJsonString());
+                        var id = await CreateInTransactionAsync(cn, tx, e, model, doc.RootElement, user, http, ct, folios);
+                        if (RecordFilter.For(e, user, write: true) is { } scope && !await MatchesAsync(cn, tx, e, id, scope, ct))
+                            throw new Forbidden("Quedaría fuera de los registros que tu rol puede modificar.");
+                        imported++;
+                    }
+                    catch (ValidationFailed vf)
+                    {
+                        tx.Rollback("fila");
+                        folios?.Restore(mark!);
+                        foreach (var (key, messages) in vf.Errors ?? new Dictionary<string, string[]>())
+                        foreach (var m in messages)
+                            Add(new(rowNumber, colOf.GetValueOrDefault(key), e.FindField(key)?.Name, m));
+                    }
+                    catch (AppException ex)
+                    {
+                        tx.Rollback("fila");
+                        folios?.Restore(mark!);
+                        Add(new(rowNumber, null, null, ex.Message));
+                    }
+                    catch (ExprException ex)
+                    {
+                        tx.Rollback("fila");
+                        folios?.Restore(mark!);
+                        Add(new(rowNumber, null, null, $"Error al calcular: {ex.Message}"));
+                    }
                 }
             }
+
+            var valid = !structural && errors.Count == 0 && !truncated;
+            if (!valid || dryRun)
+            {
+                await tx.RollbackAsync(ct);
+                var result = new ImportResult(dryRun, table.Format, table.Rows.Count, 0, valid, columns, errors, truncated);
+                if (!dryRun)
+                    throw new ValidationFailed(
+                        (structural ? columns.Where(c => c.Status == "error").Select(c => ($"Columna «{c.Column}»", c.Message!)) : [])
+                            .Concat(errors.Select(x => ($"Fila {x.Row}{(x.Column is null ? "" : $" › {x.Column}")}", x.Message)))
+                            .GroupBy(x => x.Item1).ToDictionary(g => g.Key, g => g.Select(x => x.Item2).ToArray()),
+                        "El archivo tiene errores; no se importó ningún registro.");
+                return result;
+            }
+            await Audit.WriteAsync(cn, tx, http, AuditActions.Import, e.Name, null,
+                after: new { table.Format, rows = table.Rows.Count, imported, columns = columns.Where(c => c.Status == "ok").Select(c => c.Field) });
+            await tx.CommitAsync(ct);
+            committed = true;
+            return new ImportResult(false, table.Format, table.Rows.Count, imported, true, columns, [], false);
+        }
+        finally
+        {
+            if (!committed && folios is { IsPreview: false }) await ReleaseFoliosAsync(folios, CancellationToken.None);
+        }
+    }
+
+    /// <summary>Spec 014 (H3): reserva <paramref name="count"/> folios por campo en una transacción propia y corta.</summary>
+    private async Task<FolioSource> ReserveFoliosAsync(EntityDef e, int count, CancellationToken ct)
+    {
+        var folios = new FolioSource(e.Name, preview: false);
+        if (count == 0) return folios;
+        await using var cn = await db.OpenAsync(ct);
+        await using var tx = (SqlTransaction)await cn.BeginTransactionAsync(ct);
+        foreach (var f in e.ActiveFields.Where(f => f.Type == FieldTypes.Autonumber))
+        {
+            await using var cmd = new SqlCommand("""
+                DECLARE @v bigint;
+                UPDATE meta.Sequence WITH (UPDLOCK, HOLDLOCK) SET @v = NextValue, NextValue = NextValue + @n
+                 WHERE EntityName = @e AND FieldName = @f;
+                IF @v IS NULL BEGIN INSERT meta.Sequence (EntityName, FieldName, NextValue) VALUES (@e, @f, 1 + @n); SET @v = 1; END
+                SELECT @v;
+                """, cn, tx);
+            cmd.Parameters.Add(new SqlParameter("@e", e.Name));
+            cmd.Parameters.Add(new SqlParameter("@f", f.Name));
+            cmd.Parameters.Add(new SqlParameter("@n", (long)count));
+            folios.Add(f.Name, (long)(await cmd.ExecuteScalarAsync(ct))!, count);
+        }
+        await tx.CommitAsync(ct);
+        return folios;
+    }
+
+    /// <summary>
+    /// Devuelve el bloque de una importación que no se guardó, solo si nadie reservó folios después (comparar y cambiar);
+    /// si alguien lo hizo, queda un hueco en la numeración (spec 014, H3 CA3).
+    /// </summary>
+    private async Task ReleaseFoliosAsync(FolioSource folios, CancellationToken ct)
+    {
+        await using var cn = await db.OpenAsync(ct);
+        foreach (var (field, start, end) in folios.Blocks)
+        {
+            await using var cmd = new SqlCommand(
+                "UPDATE meta.Sequence SET NextValue = @start WHERE EntityName = @e AND FieldName = @f AND NextValue = @end", cn);
+            cmd.Parameters.Add(new SqlParameter("@e", folios.Entity));
+            cmd.Parameters.Add(new SqlParameter("@f", field));
+            cmd.Parameters.Add(new SqlParameter("@start", start));
+            cmd.Parameters.Add(new SqlParameter("@end", end));
+            await cmd.ExecuteNonQueryAsync(ct);
+        }
+    }
+
+/// <summary>
+    /// Spec 014 (H3): de dónde salen los folios de una importación. En la vista previa son provisionales (no se guardan ni
+    /// tocan la secuencia); en la importación, de un bloque reservado de antemano. Solo para el catálogo importado: lo que
+    /// creen sus automatizaciones usa la secuencia como siempre.
+    /// </summary>
+    internal sealed class FolioSource(string entity, bool preview)
+    {
+        private readonly Dictionary<string, (long Next, long End)> _blocks = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, long> _start = new(StringComparer.OrdinalIgnoreCase);
+        private long _previews;
+
+        public string Entity => entity;
+        public bool IsPreview => preview;
+        public static FolioSource ForPreview(EntityDef e) => new(e.Name, preview: true);
+
+        public IEnumerable<(string Field, long Start, long End)> Blocks => _blocks.Select(b => (b.Key, _start[b.Key], b.Value.End));
+
+        public void Add(string field, long start, long count)
+        {
+            _start[field] = start;
+            _blocks[field] = (start, start + count);
         }
 
-        var valid = !structural && errors.Count == 0 && !truncated;
-        if (!valid || dryRun)
+        public static string Format(FieldDef f, long n) =>
+            (f.Prefix ?? "") + n.ToString(CultureInfo.InvariantCulture).PadLeft(f.Padding ?? 6, '0');
+
+        /// <summary>Folio para <paramref name="f"/>, o null si no aplica o se agotó el bloque (entonces, la secuencia).</summary>
+        public string? Take(EntityDef e, FieldDef f)
         {
-            await tx.RollbackAsync(ct);
-            var result = new ImportResult(dryRun, table.Format, table.Rows.Count, 0, valid, columns, errors, truncated);
-            if (!dryRun)
-                throw new ValidationFailed(
-                    (structural ? columns.Where(c => c.Status == "error").Select(c => ($"Columna «{c.Column}»", c.Message!)) : [])
-                        .Concat(errors.Select(x => ($"Fila {x.Row}{(x.Column is null ? "" : $" › {x.Column}")}", x.Message)))
-                        .GroupBy(x => x.Item1).ToDictionary(g => g.Key, g => g.Select(x => x.Item2).ToArray()),
-                    "El archivo tiene errores; no se importó ningún registro.");
-            return result;
+            if (!string.Equals(e.Name, entity, StringComparison.OrdinalIgnoreCase)) return null;
+            if (preview)
+            {
+                var p = $"{f.Prefix}VP-{++_previews}";
+                return p.Length <= 30 ? p : p[^30..];
+            }
+            if (!_blocks.TryGetValue(f.Name, out var b) || b.Next >= b.End) return null;
+            _blocks[f.Name] = (b.Next + 1, b.End);
+            return Format(f, b.Next);
         }
-        await Audit.WriteAsync(cn, tx, http, AuditActions.Import, e.Name, null,
-            after: new { table.Format, rows = table.Rows.Count, imported, columns = columns.Where(c => c.Status == "ok").Select(c => c.Field) });
-        await tx.CommitAsync(ct);
-        return new ImportResult(false, table.Format, table.Rows.Count, imported, true, columns, [], false);
+
+        /// <summary>Una fila que se revierte a su punto de guardado devuelve sus folios al bloque.</summary>
+        public object Mark() => (_blocks.ToDictionary(b => b.Key, b => b.Value, StringComparer.OrdinalIgnoreCase), _previews);
+
+        public void Restore(object mark)
+        {
+            var (blocks, previews) = ((Dictionary<string, (long, long)>, long))mark;
+            foreach (var (k, v) in blocks) _blocks[k] = v;
+            _previews = previews;
+        }
     }
 
     /// <summary>Encabezado → campo por nombre o etiqueta (sin mayúsculas ni acentos), con la seguridad del usuario.</summary>

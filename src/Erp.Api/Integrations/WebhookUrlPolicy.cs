@@ -55,6 +55,7 @@ public sealed class WebhookUrlPolicy(bool allowHttp = false, IReadOnlyCollection
             return ip.Equals(IPAddress.IPv6Any) || ip.Equals(IPAddress.IPv6Loopback) || ip.IsIPv6LinkLocal || ip.IsIPv6SiteLocal ||
                    ip.IsIPv6Multicast || (b6[0] & 0xFE) == 0xFC /* fc00::/7 */ ||
                    (b6[0] == 0x20 && b6[1] == 0x01 && b6[2] == 0x0d && b6[3] == 0xb8) /* 2001:db8::/32 documentación */ ||
+                   (b6[0] == 0x20 && b6[1] == 0x01 && b6[2] == 0x00 && b6[3] == 0x00) /* 2001::/32 Teredo (spec 014) */ ||
                    (b6[0] == 0x00 && b6[1] == 0x64 && b6[2] == 0xff && b6[3] == 0x9b) /* 64:ff9b::/96 NAT64 */ ||
                    (b6[0] == 0x20 && b6[1] == 0x02) /* 2002::/16 6to4 */;
         }

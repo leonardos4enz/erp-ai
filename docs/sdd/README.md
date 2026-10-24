@@ -55,3 +55,7 @@ y cada sesión queda como registro de una sola entrega. Al cerrar la spec:
 | 009 | [Entornos: ciclo de vida de metadatos (sandbox → pruebas → producción)](specs/009-entornos/spec.md) | Implementado |
 | 010 | [Multi-empresa y multi-moneda](specs/010-multi-empresa-moneda/spec.md) | Implementado |
 | 011 | [Asistente IA (Claude)](specs/011-asistente-ia/spec.md) | Implementado |
+| 012 | [Endurecimiento](specs/012-endurecimiento/spec.md) | Implementado |
+| 013 | [Formulario en solo lectura](specs/013-formulario-solo-lectura/spec.md) | Implementado |
+| 014 | [Pendientes menores y riesgos residuales](specs/014-pendientes-menores/spec.md) | Implementado |
+| 015–020 | Brechas de plataforma ([roadmap](roadmap.md#specs-planeadas-brechas-de-plataforma)) | Planeadas |

@@ -209,11 +209,11 @@ export const environmentsApi = {
   imports: (signal?: AbortSignal) => api<PackageImport[]>('/admin/environments/imports', { signal }),
   upload: (file: Blob) => api<PackageImport>('/admin/environments/imports', { method: 'POST', rawBody: file }),
   detail: (id: number, signal?: AbortSignal) => api<PackageImport>(`/admin/environments/imports/${id}`, { signal }),
-  approve: (id: number, diffHash: string, comment?: string) =>
-    api<PackageImport>(`/admin/environments/imports/${id}/approve`, { method: 'POST', body: { diffHash, comment } }),
+  approve: (id: number, diffHash: string, comment?: string, confirmArchive = false) =>
+    api<PackageImport>(`/admin/environments/imports/${id}/approve`, { method: 'POST', body: { diffHash, comment, confirmArchive } }),
   reject: (id: number, comment: string) => api<PackageImport>(`/admin/environments/imports/${id}/reject`, { method: 'POST', body: { comment } }),
-  apply: (id: number, diffHash: string) =>
-    api<{ changeSetId: number | null; import: PackageImport }>(`/admin/environments/imports/${id}/apply`, { method: 'POST', body: { diffHash } }),
+  apply: (id: number, diffHash: string, confirmArchive = false) =>
+    api<{ changeSetId: number | null; import: PackageImport }>(`/admin/environments/imports/${id}/apply`, { method: 'POST', body: { diffHash, confirmArchive } }),
 };
 
 /** Spec 011: el asistente propone planes; aplicar usa el plan guardado en el servidor. */

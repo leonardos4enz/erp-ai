@@ -249,13 +249,15 @@ public sealed partial class RecordService(Db db, MetadataStore store)
     }
 
     /// <summary>Alta completa (valores por defecto, fórmulas, reglas, folio, partidas) dentro de una transacción ajena.</summary>
+    /// <param name="folios">Spec 014: folios de una importación (provisionales o de un bloque ya reservado).</param>
     internal async Task<long> CreateInTransactionAsync(SqlConnection cn, SqlTransaction tx, EntityDef e,
-        IReadOnlyDictionary<string, EntityDef> model, JsonElement body, UserContext user, HttpContext http, CancellationToken ct)
+        IReadOnlyDictionary<string, EntityDef> model, JsonElement body, UserContext user, HttpContext http, CancellationToken ct,
+        FolioSource? folios = null)
     {
         var loader = new RelatedLoader(cn, tx, model);
         var draft = new DocDraft { CreatorId = user.Id };
         await ParseIntoAsync(draft, e, model, body, loader, lenient: false, ct, new Writer(user, e.Workflow?.Initial));
-        return await InsertDraftAsync(new AutoCtx(cn, tx, model, user, http, 0, [], ct), e, draft, AuditActions.Create);
+        return await InsertDraftAsync(new AutoCtx(cn, tx, model, user, http, 0, [], ct, folios), e, draft, AuditActions.Create);
     }
 
     /// <summary>
@@ -272,9 +274,16 @@ public sealed partial class RecordService(Db db, MetadataStore store)
             ?? throw new Forbidden($"No tienes una empresa asignada: pide al administrador una para capturar {e.LabelPlural.ToLowerInvariant()}.");
         var env = Env(user, draft, loader);
         Compute(draft, e, model, loader, env);
+        // Spec 014 (H6): lo que tocarán sus automatizaciones se bloquea antes de validar e insertar; si se bloqueó un
+        // documento, se recalcula con sus datos actuales.
+        if (await LockAutomationTargetsAsync(cn, tx, e, model, draft, a => a.On == AutomationEvents.Create, ct))
+        {
+            loader.Reset();
+            Compute(draft, e, model, loader, env);
+        }
         Validate(draft, e, model, loader, env, user);
 
-        await AssignFoliosAsync(cn, tx, e, draft, ct);
+        await AssignFoliosAsync(cn, tx, e, draft, c.Folios, ct);
         var id = await InsertAsync(cn, tx, e, draft.Header, extra: null, user.Id, ct, company);
         await SaveLinesAsync(cn, tx, e, model, id, draft, existing: null, user.Id, ct);
         if (e.Workflow is not null)
@@ -306,6 +315,11 @@ public sealed partial class RecordService(Db db, MetadataStore store)
         await ParseIntoAsync(draft, e, model, body, loader, lenient: false, ct, new Writer(user, stateName));
         var env = Env(user, draft, loader);
         Compute(draft, e, model, loader, env);
+        if (await LockAutomationTargetsAsync(cn, tx, e, model, draft, a => a.On == AutomationEvents.Update, ct))
+        {
+            loader.Reset();
+            Compute(draft, e, model, loader, env);
+        }
         Validate(draft, e, model, loader, env, user);
 
         await UpdateHeaderAsync(cn, tx, e, id, draft.Header, rowVersion, user.Id, ct);
@@ -802,10 +816,17 @@ public sealed partial class RecordService(Db db, MetadataStore store)
 
     // ======================= Persistencia =======================
 
-    private static async Task AssignFoliosAsync(SqlConnection cn, SqlTransaction tx, EntityDef e, DocDraft d, CancellationToken ct)
+    private static async Task AssignFoliosAsync(SqlConnection cn, SqlTransaction tx, EntityDef e, DocDraft d, FolioSource? folios, CancellationToken ct)
     {
         foreach (var f in e.ActiveFields.Where(f => f.Type == FieldTypes.Autonumber))
         {
+            // Spec 014 (H3): en una importación, el folio sale de su bloque (o es provisional en la vista previa) y la
+            // secuencia no queda bloqueada hasta que termine.
+            if (folios?.Take(e, f) is { } taken)
+            {
+                d.Header[f.Name] = taken;
+                continue;
+            }
             // UPDLOCK+HOLDLOCK: dos altas simultáneas nunca obtienen el mismo número.
             await using var cmd = new SqlCommand("""
                 DECLARE @v bigint;
@@ -817,7 +838,7 @@ public sealed partial class RecordService(Db db, MetadataStore store)
             cmd.Parameters.Add(new SqlParameter("@e", e.Name));
             cmd.Parameters.Add(new SqlParameter("@f", f.Name));
             var next = (long)(await cmd.ExecuteScalarAsync(ct))!;
-            d.Header[f.Name] = (f.Prefix ?? "") + next.ToString(CultureInfo.InvariantCulture).PadLeft(f.Padding ?? 6, '0');
+            d.Header[f.Name] = FolioSource.Format(f, next);
         }
     }
 

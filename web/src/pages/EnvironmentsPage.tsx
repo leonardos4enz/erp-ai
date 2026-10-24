@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  CheckCircle2, Download, Eye, Fingerprint, GitCompareArrows, History, PackageCheck, PackagePlus, Rocket, ScanSearch, ShieldCheck, Upload, XCircle,
+  Archive, CheckCircle2, Download, Eye, Fingerprint, GitCompareArrows, History, PackageCheck, PackagePlus, Rocket, ScanSearch, ShieldAlert,
+  ShieldCheck, Upload, XCircle,
 } from 'lucide-react';
 import { ApiError, fieldError } from '../api/client';
 import { environmentsApi } from '../api/endpoints';
@@ -89,8 +90,11 @@ function ReviewDialog({ id, env, onClose, onChanged }: { id: number | null; env:
   const [comment, setComment] = useState('');
   const [busy, setBusy] = useState<'approve' | 'reject' | 'apply' | null>(null);
   const [actionError, setActionError] = useState<ApiError | null>(null);
+  // Spec 014 (H4): archivar campos que solo existen aquí se confirma aparte; si el diff cambia, se vuelve a pedir.
+  const [confirmArchive, setConfirmArchive] = useState(false);
 
   useEffect(() => { setComment(''); setActionError(null); }, [id]);
+  useEffect(() => { setConfirmArchive(false); }, [id, data?.diff?.diffHash]);
 
   async function act(kind: 'approve' | 'reject' | 'apply') {
     if (!data) return;
@@ -98,13 +102,13 @@ function ReviewDialog({ id, env, onClose, onChanged }: { id: number | null; env:
     setActionError(null);
     try {
       if (kind === 'approve') {
-        await environmentsApi.approve(data.id, data.diff!.diffHash, comment.trim() || undefined);
+        await environmentsApi.approve(data.id, data.diff!.diffHash, comment.trim() || undefined, confirmArchive);
         toast.success('Paquete aprobado', 'Ya se puede aplicar.');
       } else if (kind === 'reject') {
         await environmentsApi.reject(data.id, comment.trim());
         toast.success('Paquete rechazado');
       } else {
-        const r = await environmentsApi.apply(data.id, data.diff!.diffHash);
+        const r = await environmentsApi.apply(data.id, data.diff!.diffHash, confirmArchive);
         toast.success('Paquete aplicado', `${data.name} v${data.version}${r.changeSetId ? ` · conjunto de cambios #${r.changeSetId}` : ''}`);
         await refresh();
       }
@@ -122,6 +126,7 @@ function ReviewDialog({ id, env, onClose, onChanged }: { id: number | null; env:
 
   const open = data && (data.status === 'pending' || data.status === 'approved');
   const diff = data?.diff;
+  const needsArchive = !!open && (diff?.localArchives.length ?? 0) > 0 && !confirmArchive;
   const err = actionError ?? (error instanceof ApiError ? error : null);
   return (
     <Dialog
@@ -138,10 +143,12 @@ function ReviewDialog({ id, env, onClose, onChanged }: { id: number | null; env:
               title="Escribe el motivo en el comentario">Rechazar</Button>
           )}
           {data?.canApprove && (
-            <Button icon={CheckCircle2} loading={busy === 'approve'} disabled={!!busy} onClick={() => void act('approve')}>Aprobar</Button>
+            <Button icon={CheckCircle2} loading={busy === 'approve'} disabled={!!busy || needsArchive} onClick={() => void act('approve')}
+              title={needsArchive ? 'Confirma primero los campos que se archivarán' : undefined}>Aprobar</Button>
           )}
           {open && (
-            <Button variant="primary" icon={Rocket} loading={busy === 'apply'} disabled={!!busy || !data?.canApply} onClick={() => void act('apply')}>
+            <Button variant="primary" icon={Rocket} loading={busy === 'apply'} disabled={!!busy || !data?.canApply || needsArchive} onClick={() => void act('apply')}
+              title={data?.canApply && needsArchive ? 'Confirma primero los campos que se archivarán' : undefined}>
               Aplicar paquete
             </Button>
           )}
@@ -190,6 +197,19 @@ function ReviewDialog({ id, env, onClose, onChanged }: { id: number | null; env:
             <>
               <Notes tone="danger" title="Conflictos: el plan no puede expresar estos cambios" items={diff.conflicts} />
               <Notes tone="warning" title="Advertencias" items={diff.warnings} />
+              {diff.localArchives.length > 0 && (
+                <section className="env-archives" aria-labelledby="pkg-archives">
+                  <Alert tone="warning" icon={Archive} title={<span id="pkg-archives">Campos de este entorno que se archivarán</span>}>
+                    <p>Existen solo en este entorno: el paquete no los trae. Al aplicarlo se archivan; dejan de verse y sus datos se conservan.</p>
+                    <ul className="import-errors">{diff.localArchives.map((m, i) => <li key={i}>{m}</li>)}</ul>
+                    {/* Regresión (verificación 014, F-02): solo quien puede aprobar o aplicar confirma. */}
+                    {open && (data.canApprove || data.canApply) && (
+                      <Checkbox checked={confirmArchive} onChange={setConfirmArchive} disabled={!!busy}
+                        label={`Entiendo que ${diff.localArchives.length === 1 ? 'este campo se archivará' : `estos ${diff.localArchives.length} campos se archivarán`}`} />
+                    )}
+                  </Alert>
+                </section>
+              )}
               <RolesSummary roles={diff.roles} />
               {diff.empty ? (
                 <Alert tone="info" title="Sin cambios en el modelo">Este entorno ya coincide con el paquete: al aplicarlo solo se registra la versión.</Alert>
@@ -464,6 +484,12 @@ export function EnvironmentsPage() {
             <Badge tone={env.signing ? 'success' : 'warning'}>{env.signing ? 'Firma obligatoria' : 'Sin clave de firma'}</Badge>
           </div>
         </section>
+      )}
+      {env?.directChangesOverride && (
+        <Alert tone="warning" icon={ShieldAlert} title="Este entorno exige aprobación, pero permite cambios directos">
+          El servidor tiene <span className="mono">Environments:AllowDirectChanges</span>: el modelador, los módulos y el asistente
+          cambian el modelo sin un paquete aprobado por otro administrador. Úsalo solo en entornos de prueba.
+        </Alert>
       )}
       <Tabs label="Entornos" value={tab} onChange={setTab}
         items={[{ id: 'received', label: 'Paquetes recibidos', icon: PackageCheck }, { id: 'export', label: 'Exportar', icon: PackagePlus }]} />

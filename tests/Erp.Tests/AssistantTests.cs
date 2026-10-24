@@ -262,7 +262,7 @@ public class AssistantTests
             ],
         };
         var w = PlanWarnings.For(plan, model);
-        Assert.Contains("Quita reglas existentes de «Producto»: CostoNoNegativo, IvaRango.", w);
+        Assert.Contains("Quita reglas existentes de «Producto»: CostoNoNegativo, IvaRango, MonedaCostoClave.", w);
         Assert.Contains(w, x => x.StartsWith("Quita vistas existentes de «Requisición»: PorAprobar"));
         Assert.Contains(w, x => x.StartsWith("Quita reportes existentes de «Orden de compra»: ComprasPorProveedor"));
         Assert.Contains(w, x => x.StartsWith("Quita automatizaciones existentes de «Recepción»"));

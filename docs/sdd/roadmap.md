@@ -19,6 +19,13 @@ en orden, no en paralelo: casi todas tocan el núcleo del motor (`PlanCompiler`,
 | 011 Asistente IA (Claude) | Implementado ([spec](specs/011-asistente-ia/spec.md)) |
 | 012 Endurecimiento | Implementado ([spec](specs/012-endurecimiento/spec.md)) |
 | 013 Formulario en solo lectura | Implementado ([spec](specs/013-formulario-solo-lectura/spec.md)) |
+| 014 Pendientes menores y riesgos residuales | Implementado ([spec](specs/014-pendientes-menores/spec.md)) |
+| 015 Jerarquía de roles, equipos y unidades | Planeada |
+| 016 Automatizaciones asíncronas y programadas | Planeada |
+| 017 Rollback de entornos | Planeada |
+| 018 OAuth2 (client credentials) y API OData | Planeada |
+| 019 Contabilidad y costeo | Planeada |
+| 020 Editores visuales (layouts y modelador) | Planeada |
 
 ## Diagnóstico
 | Brecha señalada | Situación actual | Spec |
@@ -106,7 +113,7 @@ sin roles exige el alcance de escritura; el motor bloquea los documentos que toc
 paquetes; el límite del asistente se reserva antes de llamar al proveedor y aplicar exige la huella de lo revisado; la
 etiqueta de una referencia fuera de alcance es «(sin acceso)».
 - Diferidos (con razón en la spec): acumulado en SQL en lugar de memoria, folios fuera de la transacción de importación,
-  y que un paquete no archive campos locales sin decisión explícita.
+  y que un paquete no archive campos locales sin decisión explícita. Resueltos en la 014.
 
 ### 013 — Formulario en solo lectura fuera del alcance de escritura
 Origen: hallazgo F-05 de la verificación 012. El registro trae `_access` (`update`, `delete`, `reason`) con el permiso del
@@ -114,6 +121,68 @@ rol, el alcance de escritura por registro (006/010) y el catálogo del sistema; 
 sin «Guardar cambios» ni «Eliminar» y con el motivo, cuando la persona solo puede consultar ese registro (también
 si una transición lo saca de su alcance). El servidor
 sigue rechazando con 403. Pendiente: el listado no lo calcula por fila (no ofrece edición en línea).
+
+### 014 — Pendientes menores y riesgos residuales
+Origen: auditoría de solo lectura posterior a la 013. Compras 1.8.0 sugiere el precio en la moneda de la orden y el costo
+estimado en la moneda base (sin tipo de cambio no sugiere nada); el acumulado suma en SQL cuando el filtro es traducible
+(sin tope); la vista previa de una importación no toca los folios y la importación reserva su bloque sin detener altas;
+archivar campos locales con un paquete se confirma aparte al aprobar y aplicar; un webhook con 4xx definitivo no se
+reintenta y Teredo es interno; el motor toma el bloqueo por clave de los acumulados por `match` antes de insertar
+(interbloqueos en salidas simultáneas); aviso de `AllowDirectChanges` con aprobación. Decisiones: `CostoMXN` no se
+renombra; la bitácora se filtra con la política actual; roles y permisos son dato del entorno
+([ADR-0004](../adr/0004-seguridad-como-dato-del-entorno.md)).
+
+## Specs planeadas (brechas de plataforma)
+Señaladas por la misma auditoría. Cada una es capacidad nueva del motor y va en su propia sesión, en este orden.
+
+### 015 — Jerarquía de roles, equipos y unidades de negocio
+- **Problema:** el alcance «de mi unidad» (006) es una etiqueta plana en el usuario: no hay árbol de unidades (un gerente
+  regional no ve lo de sus sucursales), ni equipos que compartan registros, ni roles que hereden de otros. Cada permiso se
+  repite rol por rol, y los cambios de seguridad no tienen cuatro ojos (ADR-0004).
+- **Alcance:** unidades en árbol con alcance «mi unidad y sus descendientes»; equipos (dueño de un registro = persona o
+  equipo); herencia de roles; aprobación opcional de cambios de seguridad (roles, asignaciones, claves de API) en
+  entornos con aprobación. Todo en `RecordFilter` (SQL), también en reportes, bitácora y etiquetas.
+- **Depende de:** 006, 010, 012. Va primero: las siguientes (automatizaciones con autoridad, OAuth) necesitan un modelo
+  de principales más rico.
+
+### 016 — Automatizaciones asíncronas y programadas
+- **Problema:** las automatizaciones (005) corren en la transacción del evento: no hay acciones diferidas (avisar,
+  recalcular en lote), ni programadas (vencimientos, recordatorios, cierres diarios), ni reintentos.
+- **Alcance:** bandeja transaccional como la de webhooks (008) para acciones `async`; disparadores por calendario
+  (`schedule`) con consulta declarativa de registros; ejecución con un principal de servicio y su alcance; bitácora de
+  ejecuciones, reintentos y límite de lotes.
+- **Depende de:** 005, 008, 015 (con qué identidad corre una tarea programada).
+
+### 017 — Rollback de entornos
+- **Problema:** un paquete aplicado (009) no se puede revertir: volver atrás exige otro paquete hecho a mano, y los
+  campos archivados no se reactivan por paquete.
+- **Alcance:** instantánea del modelo antes de aplicar; «revertir a la versión anterior» como un diff inverso que pasa por
+  el mismo compilador, vista previa, aprobación y auditoría; reactivar campos y catálogos archivados como operación del
+  plan (nunca borrar datos).
+- **Depende de:** 009, 014 (campos locales confirmados), 012 (cuatro ojos sin atajos).
+
+### 018 — OAuth2 (client credentials) y API OData con descubrimiento
+- **Problema:** las integraciones usan claves de API estáticas (008) y endpoints propios: sin expiración corta, sin
+  alcances por cliente, y cada integrador aprende la API a mano.
+- **Alcance:** servidor de tokens con *client credentials* (tokens cortos, alcances, rotación del secreto del cliente);
+  documento de descubrimiento (`$metadata`/OpenAPI) generado del modelo; consultas OData de solo lectura (`$filter`,
+  `$select`, `$orderby`, `$top`, `$expand` de un nivel) traducidas con la misma seguridad por registro y campo.
+- **Depende de:** 008, 015.
+
+### 019 — Contabilidad y costeo (promedio y FIFO)
+- **Problema:** Inventario (005) lleva cantidades, no valor: no hay costo del inventario, pólizas ni costo de ventas;
+  «costo último» (Compras) es solo una sugerencia de precio.
+- **Alcance:** capacidades genéricas del motor (capas de costo por movimiento, costo promedio ponderado y FIFO, partida
+  doble con cuadre obligatorio) y módulos `contabilidad` (catálogo de cuentas, pólizas, periodos con cierre) y
+  `costeo` (valuación de existencias, póliza de entrada por recepción). Multi-moneda con `CONVERT` (010).
+- **Depende de:** 005, 010, 016 (cierres y revaluaciones programadas).
+
+### 020 — Editores visuales (layouts y modelador)
+- **Problema:** layouts, vistas y procesos (007) se editan como listas y formularios; es correcto pero lento, y el
+  asistente (011) es la única forma «visual» de construir.
+- **Alcance:** editor de layout con arrastrar y soltar (secciones, pestañas, columnas) y vista previa en vivo; diagrama
+  del proceso (estados y transiciones) editable; todo produce el mismo Plan de Cambios, con teclado y accesibilidad AA.
+- **Depende de:** 007, 011. Va al final: no agrega capacidad, mejora cómo se usa la que ya existe.
 
 ## Decisión: ¿extensión con código?
 La auditoría tiene razón en el costo: cada necesidad nueva exige una capacidad del motor. Se mantiene

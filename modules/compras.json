@@ -1,7 +1,7 @@
 {
   "id": "compras",
   "name": "Compras",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "icon": "shopping-cart",
   "description": "Requisiciones, órdenes de compra con autorización por montos y recepción de mercancía con cantidades recibidas y pendientes. Incluye proveedores, productos y catálogos base.",
   "plan": {
@@ -523,6 +523,20 @@
                 { "type": "transition", "target": "OrdenCompra", "transition": "recibir", "when": "OrdenCompra.PendientePorRecibir <= 0" },
                 { "type": "transition", "target": "OrdenCompra", "transition": "recibirParcial", "when": "OrdenCompra.PendientePorRecibir > 0" }
               ] }
+          ] }
+      ] } },
+    { "version": "1.8.0",
+      "description": "Moneda en las sugerencias (spec 014): el precio de la partida de la orden se sugiere en la moneda de la orden (costo último → moneda base → tipo de cambio de la orden) y el costo estimado de la requisición en la moneda base; sin tipo de cambio no se sugiere nada. La moneda del costo del producto se puede capturar.",
+      "plan": { "description": "Compras 1.8.0", "operations": [
+        { "op": "updateField", "entity": "RequisicionPartida", "field": "CostoEstimado",
+          "defaultValue": "IF(ISBLANK(Producto.CostoUltimo), NULL, CONVERT(Producto.CostoUltimo, COALESCE(Producto.MonedaCosto, BASECURRENCY()), BASECURRENCY(), Requisicion.Fecha))" },
+        { "op": "updateField", "entity": "OrdenCompraPartida", "field": "PrecioUnitario",
+          "defaultValue": "IF(ISBLANK(Producto.CostoUltimo), NULL, CONVERT(Producto.CostoUltimo / Orden.TipoCambio, COALESCE(Producto.MonedaCosto, BASECURRENCY()), BASECURRENCY(), Orden.Fecha))" },
+        { "op": "updateField", "entity": "Producto", "field": "MonedaCosto", "editable": true, "defaultValue": "BASECURRENCY()" },
+        { "op": "setRules", "entity": "Producto", "rules": [
+            { "name": "CostoNoNegativo", "field": "CostoUltimo", "assert": "CostoUltimo >= 0", "message": "El costo no puede ser negativo." },
+            { "name": "IvaRango", "field": "IVA", "assert": "IVA >= 0 AND IVA <= 100", "message": "El IVA debe estar entre 0 y 100." },
+            { "name": "MonedaCostoClave", "field": "MonedaCosto", "assert": "ISBLANK(MonedaCosto) OR LEN(MonedaCosto) = 3", "message": "La moneda del costo es una clave de 3 letras (p. ej. MXN, USD)." }
           ] }
       ] } }
   ],

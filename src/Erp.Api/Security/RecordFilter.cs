@@ -112,6 +112,16 @@ public static class RecordFilter
     public static string Translate(string source, EntityDef e, Who who, ParamBag bag, IReadOnlySet<string>? knownRoles = null) =>
         new Translator(e, who, bag, knownRoles).Bool(ExprParser.Parse(source));
 
+    /// <summary>
+    /// Spec 014 (H2): filtro de un acumulado, que el motor evalúa con <see cref="ExprEnv.System"/> sobre el alias <c>t</c>.
+    /// Admite además rutas de un nivel (<c>Recepcion.Estado</c>) por un campo referencia o padre, leídas como
+    /// <see cref="Data.RelatedLoader.Row"/> (registro vigente o nulo), y traduce <c>=</c>, <c>&lt;&gt;</c> e <c>IN</c> con la
+    /// semántica del evaluador: contra un nulo son falso o verdadero, no desconocido. Lanza <see cref="ExprException"/> si la
+    /// condición no es traducible; el motor la evalúa entonces en memoria.
+    /// </summary>
+    public static string TranslateRollup(string source, EntityDef e, IReadOnlyDictionary<string, EntityDef> model, ParamBag bag) =>
+        new Translator(e, new Who(0, null, []), bag, null, model).Bool(ExprParser.Parse(source));
+
     /// <summary>Valida una regla <c>where</c> con un usuario ficticio; devuelve el error o null.</summary>
     public static string? Check(string source, EntityDef e, IReadOnlySet<string> knownRoles)
     {
@@ -131,15 +141,21 @@ public static class RecordFilter
         }
     }
 
-    private sealed class Translator(EntityDef e, Who who, ParamBag bag, IReadOnlySet<string>? knownRoles)
+    /// <param name="model">Con modelo, modo acumulado (ver <see cref="TranslateRollup"/>).</param>
+    private sealed class Translator(EntityDef e, Who who, ParamBag bag, IReadOnlySet<string>? knownRoles,
+        IReadOnlyDictionary<string, EntityDef>? model = null)
     {
         private static readonly HashSet<string> Comparisons = ["=", "<>", "<", "<=", ">", ">="];
+        private int _aliases;
 
         public string Bool(Node n) => n switch
         {
             Binary { Op: "AND" or "OR" } b => $"({Bool(b.Left)} {b.Op} {Bool(b.Right)})",
             Unary { Op: "NOT" } u => $"(NOT {Bool(u.Operand)})",
+            // Como ExprEvaluator.Compare: nulo = nulo es verdadero y nulo = x es falso (dos valores, también bajo NOT).
+            Binary { Op: "=" or "<>" } b when model is not null => TwoValued(Value(b.Left), Value(b.Right), b.Op == "="),
             Binary b when Comparisons.Contains(b.Op) => $"{Value(b.Left)} {b.Op} {Value(b.Right)}",
+            InList i when model is not null => $"(CASE WHEN {Value(i.Value)} IN ({string.Join(", ", i.Items.Select(Value))}) THEN 1 ELSE 0 END = 1)",
             InList i => $"{Value(i.Value)} IN ({string.Join(", ", i.Items.Select(Value))})",
             Literal { Value: bool v } => v ? "1 = 1" : "1 = 0",
             // Regresión (spec 007): una fórmula sí/no guardada (p. ej. «Bajo mínimo») también es una condición.
@@ -148,8 +164,13 @@ public static class RecordFilter
             _ => throw new ExprException("Una regla de acceso debe ser una condición (verdadero o falso)."),
         };
 
+        private string TwoValued(string l, string r, bool equal) =>
+            $"(CASE WHEN {l} = {r} OR ({l} IS NULL AND {r} IS NULL) THEN 1 ELSE 0 END = {(equal ? 1 : 0)})";
+
         private string BoolCall(Call c)
         {
+            if (model is not null && c.Name is "HASROLE" or "ISCREATOR")
+                throw new ExprException($"{c.Name}() depende de quién dispara el evento: se evalúa en memoria.");
             switch (c.Name)
             {
                 case "ISBLANK" when c.Args.Count == 1 && c.Args[0] is PathRef p:
@@ -175,6 +196,8 @@ public static class RecordFilter
             Literal l => bag.Add(l.Value),
             Unary { Op: "-", Operand: Literal { Value: decimal d } } => bag.Add(-d),
             PathRef p => Column(p).Sql,
+            Call { Name: "CURRENTUSER" or "CURRENTUNIT" } c when model is not null =>
+                throw new ExprException($"{c.Name}() depende de quién dispara el evento: se evalúa en memoria."),
             Call { Name: "CURRENTUSER", Args.Count: 0 } => bag.Add(who.UserId),
             Call { Name: "CURRENTUNIT", Args.Count: 0 } => bag.Add(who.Unit),
             Call { Name: "TODAY", Args.Count: 0 } => bag.Add(DateTime.Today),
@@ -184,11 +207,23 @@ public static class RecordFilter
 
         private (string Sql, FieldDef Field) Column(PathRef p)
         {
-            if (p.Tail is not null) throw new ExprException($"'{p}': una regla de acceso solo usa campos del propio catálogo.");
-            var f = e.FindField(p.Head);
+            if (p.Tail is not null && model is null) throw new ExprException($"'{p}': una regla de acceso solo usa campos del propio catálogo.");
+            var f = Stored(e, p.Head);
+            if (p.Tail is null) return ($"t.{Quote(f.Name)}", f);
+            // Spec 014: campo de un registro referido o del documento (un nivel), vigente; si no existe, nulo.
+            if (f.Type is not (FieldTypes.Reference or FieldTypes.Parent) || !model!.TryGetValue(f.ReferenceEntity ?? "", out var target))
+                throw new ExprException($"'{p}' no se puede leer en la base.");
+            var tf = Stored(target, p.Tail);
+            var alias = $"r{_aliases++}";
+            return ($"(SELECT {alias}.{Quote(tf.Name)} FROM {AppTable(target.Name)} {alias} WHERE {alias}.[Id] = t.{Quote(f.Name)} AND {alias}.[IsDeleted] = 0)", tf);
+        }
+
+        private static FieldDef Stored(EntityDef entity, string name)
+        {
+            var f = entity.FindField(name);
             if (f is null || f.IsArchived || FieldTypes.IsVirtual(f.Type))
-                throw new ExprException($"El campo '{p.Head}' no existe en {e.Name}.");
-            return ($"t.{Quote(f.Name)}", f);
+                throw new ExprException($"El campo '{name}' no existe en {entity.Name}.");
+            return f;
         }
     }
 }

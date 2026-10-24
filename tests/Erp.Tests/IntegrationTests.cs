@@ -38,6 +38,8 @@ public class IntegrationTests
     [InlineData("::ffff:10.0.0.1")]
     [InlineData("::127.0.0.1")]
     [InlineData("64:ff9b::a9fe:a9fe")]
+    [InlineData("2001:0:4136:e378:8000:63bf:3fff:fdd2")] // Teredo (spec 014): el túnel lleva la IPv4 del cliente codificada
+    [InlineData("2001::1")]
     public void Direcciones_internas_se_bloquean(string ip) =>
         Assert.True(new WebhookUrlPolicy().IsBlocked(IPAddress.Parse(ip)), ip);
 
@@ -46,6 +48,7 @@ public class IntegrationTests
     [InlineData("172.32.0.1")]
     [InlineData("100.128.0.1")]
     [InlineData("2606:4700:4700::1111")]
+    [InlineData("2001:4860:4860::8888")] // solo 2001::/32 es Teredo; el resto de 2001::/16 es Internet
     public void Direcciones_publicas_se_permiten(string ip) =>
         Assert.False(new WebhookUrlPolicy().IsBlocked(IPAddress.Parse(ip)), ip);
 

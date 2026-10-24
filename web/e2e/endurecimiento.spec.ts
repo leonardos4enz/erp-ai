@@ -313,7 +313,7 @@ test('H3 CA2 + H7 CA1: Compras 1.7.0 protege lo recibido y guarda la moneda del 
   const admin = await as('admin');
   const modules = (await (await admin.get('/api/admin/modules')).json()) as { id: string; installedVersion?: string; version: string }[];
   const compras = modules.find((m) => m.id === 'compras')!;
-  expect(compras.version).toBe('1.7.0');
+  expect(compras.installedVersion).toBe(compras.version); // 1.7.0 o posterior (la 014 agrega 1.8.0)
   const partida = await (await admin.get('/api/model/entities/OrdenCompraPartida')).json();
   expect(partida.rules.map((r: { name: string }) => r.name)).toEqual(['CantidadPositiva', 'PrecioNoNegativo', 'DescuentoRango', 'IvaRango', 'RecibidoNoExcede']);
   const producto = await (await admin.get('/api/model/entities/Producto')).json();

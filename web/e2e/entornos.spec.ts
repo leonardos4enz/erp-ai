@@ -187,7 +187,11 @@ test('H2 CA1 · CA2 · CA4 + H4 CA1: diff contra un entorno que divergió; quien
   await expect(dialog).toContainText('Sin instalar → 1.0.0');
   await expect(dialog).toContainText("Actualizar campo 'Nombre' de 'Producto E2E'");
   await expect(dialog).toContainText("Archivar campo 'Nota local'");
-  await expect(dialog).toContainText('Nota local no viene en el paquete: se archiva');
+  // Spec 014 (H4): el campo local se lista aparte, con su casilla, y no entre las advertencias.
+  const archives = dialog.getByRole('region', { name: 'Campos de este entorno que se archivarán' });
+  await expect(archives).toContainText('Nota local no viene en el paquete: se archiva');
+  // Regresión (verificación 014, F-02): quien subió no puede aprobar ni aplicar, así que no se le pide confirmar.
+  await expect(archives.getByRole('checkbox')).toHaveCount(0);
   // Los roles que ya existen y no reciben permisos no se listan: no cambian.
   await expect(dialog.getByRole('region', { name: 'Roles y permisos' })).toHaveCount(0);
   // Cuatro ojos: quien subió no ve «Aprobar» y no puede aplicar.
@@ -206,12 +210,20 @@ test('H2 CA1 · CA2 · CA4 + H4 CA1: diff contra un entorno que divergió; quien
   expect(early.status()).toBe(409);
   expect((await early.json()).title).toContain('apruebe');
 
-  // Otro administrador revisa, aprueba con comentario y aplica.
+  // Spec 014 (H4 CA2): sin confirmar los campos locales, ni aprobar ni aplicar (antes se aprobaba con solo un aviso).
+  const unconfirmed = await (await as('aprobador')).post(`/api/admin/environments/imports/${id}/approve`, { data: { diffHash: d.diff.diffHash } });
+  expect(unconfirmed.status()).toBe(409);
+  expect((await unconfirmed.json()).title).toContain('1 campo que solo existe en este entorno');
+  expect(d.diff.localArchives).toEqual([expect.stringContaining('Nota local')]);
+
+  // Otro administrador revisa, confirma el campo local, aprueba con comentario y aplica.
   const other = await pageAs(browser, 'e2e-env-aprobador');
   await other.goto('/admin/environments');
   await other.getByRole('button', { name: 'Revisar Catálogo de productos v1.0.0' }).click();
   const review = other.getByRole('dialog', { name: 'Catálogo de productos v1.0.0' });
   await review.getByLabel('Comentario').fill('Revisado contra pruebas');
+  await expect(review.getByRole('button', { name: 'Aprobar' })).toBeDisabled();
+  await review.getByRole('checkbox', { name: 'Entiendo que este campo se archivará' }).check();
   await review.getByRole('button', { name: 'Aprobar' }).click();
   await expect(other.getByText('Paquete aprobado')).toBeVisible();
   await expect(review).toContainText('Aprobado por e2e-env-aprobador');
@@ -292,10 +304,15 @@ test('H4 CA2 + H5 CA2: la aprobación queda ligada al diff; un rol nuevo llega c
   expect((await rejected.json()).status).toBe('rejected');
   const again = await (await upload('admin', marcas)).json();
   const fresh = await detail(again.id);
-  expect(fresh.diff.warnings.join(' ')).toContain('Sitio web no viene en el paquete');
-  expect((await aprobador.post(`/api/admin/environments/imports/${again.id}/approve`, { data: { diffHash: fresh.diff.diffHash, comment: 'ok' } })).status()).toBe(200);
-  const applied = await aprobador.post(`/api/admin/environments/imports/${again.id}/apply`, { data: { diffHash: fresh.diff.diffHash } });
+  expect(fresh.diff.localArchives.join(' ')).toContain('Sitio web no viene en el paquete');
+  expect(fresh.diff.warnings.join(' ')).not.toContain('Sitio web');
+  expect((await aprobador.post(`/api/admin/environments/imports/${again.id}/approve`, { data: { diffHash: fresh.diff.diffHash, comment: 'ok', confirmArchive: true } })).status()).toBe(200);
+  // Aplicar también lo pide (quien aplica puede no ser quien aprobó).
+  const blind = await aprobador.post(`/api/admin/environments/imports/${again.id}/apply`, { data: { diffHash: fresh.diff.diffHash } });
+  expect(blind.status()).toBe(409);
+  const applied = await aprobador.post(`/api/admin/environments/imports/${again.id}/apply`, { data: { diffHash: fresh.diff.diffHash, confirmArchive: true } });
   expect(applied.status(), await applied.text()).toBe(200);
+  expect((await audit('environment.apply')).items[0].after.localArchives).toEqual([expect.stringContaining('Sitio web')]);
 
   const now = await (await admin.get('/api/admin/roles')).json();
   const created = now.find((r: { name: string }) => r.name === 'Lector9');

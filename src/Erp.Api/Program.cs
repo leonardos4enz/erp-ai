@@ -128,6 +128,10 @@ builder.Services.AddRateLimiter(o =>
 var app = builder.Build();
 
 await Bootstrap.RunAsync(app.Services, app.Configuration, app.Logger);
+// Spec 014 (H6 CA2): con aprobación y cambios directos a la vez, la compuerta de cuatro ojos se puede saltar.
+if (app.Services.GetRequiredService<EnvironmentOptions>() is { RequireApproval: true, AllowDirectChanges: true })
+    app.Logger.LogWarning("Environments:AllowDirectChanges está activo en un entorno que exige aprobación: planes, módulos y el " +
+                          "asistente cambian el modelo sin pasar por un paquete aprobado. Úsalo solo en suites de prueba.");
 
 // ---------- Pipeline ----------
 app.UseExceptionHandler();

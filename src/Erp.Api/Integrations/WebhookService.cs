@@ -275,7 +275,11 @@ public sealed class WebhookService(Db db, MetadataStore store, WebhookSecrets se
                 """, new { d.Id, result.Status });
             return;
         }
-        var done = d.Attempts >= options.MaxAttempts;
+        // Spec 014 (H5): un 4xx dice que la petición está mal (URL, autenticación, formato): repetirla no cambia nada. Solo
+        // 408 (tiempo agotado) y 429 (límite de solicitudes) son temporales.
+        var rejected = result.Status is >= 400 and < 500 and not 408 and not 429;
+        if (rejected) result = result with { Error = $"El destino rechazó la entrega ({result.Status}): no se reintenta." };
+        var done = rejected || d.Attempts >= options.MaxAttempts;
         var delay = done ? 0 : options.RetryDelaysSeconds[d.Attempts - 1];
         await cn.ExecuteAsync("""
             UPDATE meta.WebhookDelivery SET Status = @status, LeaseUntil = NULL, LastStatusCode = @code, LastError = @error,

@@ -2,8 +2,14 @@ using System.Text.Json;
 
 namespace Erp.Api.Metadata;
 
-/// <summary>Plan mínimo para llevar un entorno al estado de un paquete, más lo que el plan no puede expresar.</summary>
-public sealed record ModelDiffResult(ChangePlan Plan, IReadOnlyList<string> Conflicts, IReadOnlyList<string> Warnings, IReadOnlySet<string> Created);
+/// <summary>
+/// Plan mínimo para llevar un entorno al estado de un paquete, más lo que el plan no puede expresar. Spec 014:
+/// <c>LocalArchives</c> son los campos que solo existen en el destino y el plan archivaría (requieren confirmación aparte).
+/// </summary>
+public sealed record ModelDiffResult(ChangePlan Plan, IReadOnlyList<string> Conflicts, IReadOnlyList<string> Warnings, IReadOnlySet<string> Created)
+{
+    public IReadOnlyList<string> LocalArchives { get; init; } = [];
+}
 
 /// <summary>
 /// Spec 009: compara estados de modelo (no historiales). Es puro, como <see cref="PlanCompiler"/>: el resultado es un
@@ -34,6 +40,7 @@ public static class ModelDiff
         var archives = new List<Operation>();
         var boards = new List<Operation>();
         var created = new HashSet<string>(Ci);
+        var localArchives = new List<string>();
 
         // 1) Catálogos nuevos: el documento antes que su partida; una referencia a un catálogo del paquete que aún no
         //    existe (ciclo A ↔ B) se agrega después con addField.
@@ -87,7 +94,7 @@ public static class ModelDiff
                 if (df is { IsArchived: false }) continue;
                 if (tf.Type == FieldTypes.Parent) continue; // ya se reportó como conflicto de partida
                 archives.Add(new ArchiveFieldOp { Entity = t.Name, Field = tf.Name });
-                if (df is null) warnings.Add($"«{t.Label}» › {tf.Label} no viene en el paquete: se archiva (sus datos se conservan).");
+                if (df is null) localArchives.Add($"«{t.Label}» › {tf.Label} no viene en el paquete: se archiva (sus datos se conservan).");
             }
 
             if (!JsonEq(d.Workflow, t.Workflow))
@@ -111,7 +118,7 @@ public static class ModelDiff
             Description = description,
             Operations = [.. creates, .. adds, .. updates, .. workflows, .. sets, .. archives, .. boards],
         };
-        return new ModelDiffResult(plan, conflicts, warnings, created);
+        return new ModelDiffResult(plan, conflicts, warnings, created) { LocalArchives = localArchives };
     }
 
     /// <summary>
