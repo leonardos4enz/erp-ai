@@ -1179,7 +1179,7 @@ public sealed partial class RecordService(Db db, MetadataStore store)
         return (string.Join(", ", cols), from.ToString(), pars);
     }
 
-    private static string ResolveSort(EntityDef e, string? sort, string? dir, Func<FieldDef, bool> visible)
+    internal static string ResolveSort(EntityDef e, string? sort, string? dir, Func<FieldDef, bool> visible)
     {
         var direction = string.Equals(dir, "asc", StringComparison.OrdinalIgnoreCase) ? "ASC" : "DESC";
         if (string.IsNullOrEmpty(sort)) return "t.[Id] DESC";
@@ -1192,7 +1192,8 @@ public sealed partial class RecordService(Db db, MetadataStore store)
             _ => e.StoredFields.FirstOrDefault(f => f.Type != FieldTypes.LongText &&
                      string.Equals(f.Name, sort, StringComparison.OrdinalIgnoreCase)) is { } f && visible(f) ? Quote(f.Name) : null,
         };
-        return column is null ? "t.[Id] DESC" : $"t.{column} {direction}, t.[Id] {direction}";
+        // Regresión (022, F-01): por Id no se repite el desempate (SQL Server rechaza una columna dos veces en ORDER BY).
+        return column is null ? "t.[Id] DESC" : column == "[Id]" ? $"t.[Id] {direction}" : $"t.{column} {direction}, t.[Id] {direction}";
     }
 
     private static Values ReadRaw(SqlDataReader r) => ReadValues(r);

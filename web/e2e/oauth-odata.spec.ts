@@ -318,6 +318,10 @@ test('H4 CA1 · CA2: $filter, $select, $orderby, $top, $count y paginación con 
   expect(next['@odata.nextLink']).toBeUndefined();
   const topped = await q({ $top: '4', $orderby: 'Folio' });
   expect(topped['@odata.nextLink']).toBe(`${BASE_URL}/odata/Pedido18?$orderby=Folio&$top=1&$skip=3`);
+  // Regresión (revisión exploratoria 022, F-01): ordenar por Id, o repetir una propiedad, repetía la columna y respondía 500.
+  const byId = await q({ $orderby: 'Id desc', $top: '4' });
+  expect(byId.value.map((r) => r.Id as number)).toEqual(byId.value.map((r) => r.Id as number).sort((a, b) => b - a));
+  expect(folios(await q({ $orderby: 'Folio,Folio desc' }))).toEqual(['P-001', 'P-002', 'P-004']); // páginas de 3; gana el primer criterio
 
   // Lo oculto se trata igual que lo inexistente; lo no admitido responde 400 en el formato de OData.
   const bad = async (params: Record<string, string>, pattern: RegExp, set = 'Pedido18') => {

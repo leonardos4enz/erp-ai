@@ -112,6 +112,20 @@ test.describe('Datos', () => {
     expect((await wildcard.json()).total, 'el % se trata como texto literal').toBe(0);
   });
 
+  test('ordena por Id en los dos sentidos', async () => {
+    // Regresión (revisión exploratoria 022, F-01): sort=Id repetía la columna del desempate y respondía 500.
+    const api = await apiAs(ADMIN.username, ADMIN.password);
+    for (const dir of ['asc', 'desc'] as const) {
+      for (const path of ['', '/export']) {
+        const res = await api.get(`/api/data/${ENTITY}${path}`, { params: { sort: 'Id', dir } });
+        expect(res.status(), `${path || 'listado'} ${dir}`).toBe(200);
+      }
+      const ids = ((await (await api.get(`/api/data/${ENTITY}`, { params: { sort: 'Id', dir } })).json()).items as { id: number }[]).map((r) => r.id);
+      expect(ids.length).toBeGreaterThan(0);
+      expect(ids).toEqual([...ids].sort((a, b) => (dir === 'asc' ? a - b : b - a)));
+    }
+  });
+
   test('detecta ediciones concurrentes (rowversion)', async () => {
     const api = await apiAs(ADMIN.username, ADMIN.password);
     const row = (await (await api.get(`/api/data/${ENTITY}`, { params: { search: 'CJ-01' } })).json()).items[0];

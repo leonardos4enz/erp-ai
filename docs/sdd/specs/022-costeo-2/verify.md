@@ -65,7 +65,7 @@ prueba de la suite.
 ## Hallazgos
 | ID | Sev. | Hallazgo | Estado |
 |---|---|---|---|
-| F-01 | Baja | `GET /api/data/{catálogo}?sort=Id` responde 500: `ResolveSort` arma `ORDER BY t.[Id] DESC, t.[Id] DESC` (columna repetida). La SPA no envía ese orden; existe desde la spec 001 | Fuera del alcance de la 022 (no lo toca este cambio): propuesto como tarea aparte |
+| F-01 | Baja | `GET /api/data/{catálogo}?sort=Id` responde 500: `ResolveSort` arma `ORDER BY t.[Id] DESC, t.[Id] DESC` (columna repetida). Lo mismo en OData con `$orderby=Id` o una propiedad repetida (`$orderby=Folio,Folio desc`). La SPA no envía esos órdenes; existe desde las specs 001 y 018 | Resuelto después del cierre, a pedido del dueño: ordenar por `Id` no agrega el desempate y en OData gana el primer criterio de cada columna (el desempate sigue al último criterio conservado). Regresiones: `SortTests.cs` (8 de 12 fallaban con el código anterior, ya con `ResolveSort` y `ODataOrderClause` expuestos sin cambiar su lógica), `api-security` «ordena por Id en los dos sentidos» (listado y exportación) y `oauth-odata` H4 CA1 · CA2. Unitarias 497/497 y E2E 300/300 dos veces |
 
 ## Riesgos residuales
 - **H3 CA2 sin E2E.** Con moneda base MXN el costo siempre tiene respaldo; probarlo exige una empresa con otra moneda base y

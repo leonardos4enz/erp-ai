@@ -30,6 +30,26 @@ public sealed partial class RecordService
         return rows.FirstOrDefault();
     }
 
+    /// <summary><c>$orderby</c> traducido a columnas citadas (de <see cref="ODataModel.Properties"/>), más el id para paginar.</summary>
+    internal static List<string> ODataOrderClause(EntityDef e, IReadOnlyList<ODataOrder> orderBy, IReadOnlyDictionary<string, ODataProperty> byName)
+    {
+        var order = new List<string>();
+        var used = new HashSet<string>(StringComparer.Ordinal);
+        var lastDescending = false;
+        foreach (var o in orderBy)
+        {
+            var p = byName.GetValueOrDefault(o.Property) ?? throw new ODataException($"$orderby: la propiedad '{o.Property}' no existe en {e.Name}.");
+            if (!p.Sortable) throw new ODataException($"$orderby: {p.Name} es un texto largo y no se ordena.");
+            // Regresión (022, F-01): una columna repetida en ORDER BY es un error de SQL Server; gana el primer criterio.
+            if (!used.Add(p.Column)) continue;
+            order.Add($"{p.Column} {(o.Descending ? "DESC" : "ASC")}");
+            lastDescending = o.Descending;
+        }
+        // Orden estable para paginar: el id al final, en el sentido del último criterio (si no se ordenó ya por él).
+        if (used.Add("t.[Id]")) order.Add($"t.[Id] {(lastDescending ? "DESC" : "ASC")}");
+        return order;
+    }
+
     private async Task<(List<Dictionary<string, object?>> Rows, int? Count, bool More)> ODataQueryAsync(EntityDef e,
         IReadOnlyDictionary<string, EntityDef> model, ODataQuery q, long? id, int skip, int take, UserContext user, CancellationToken ct)
     {
@@ -42,15 +62,7 @@ public sealed partial class RecordService
             if (!byName.ContainsKey(s))
                 throw new ODataException(navs.ContainsKey(s) ? $"$select: {s} es una navegación; inclúyela con $expand." : $"$select: la propiedad '{s}' no existe en {e.Name}.");
         var expand = q.Expand.Select(x => navs.GetValueOrDefault(x) ?? throw new ODataException($"$expand: '{x}' no es una navegación de {e.Name}.")).ToList();
-        var order = new List<string>();
-        foreach (var o in q.OrderBy)
-        {
-            var p = byName.GetValueOrDefault(o.Property) ?? throw new ODataException($"$orderby: la propiedad '{o.Property}' no existe en {e.Name}.");
-            if (!p.Sortable) throw new ODataException($"$orderby: {p.Name} es un texto largo y no se ordena.");
-            order.Add($"{p.Column} {(o.Descending ? "DESC" : "ASC")}");
-        }
-        // Orden estable para paginar: el id al final, en el sentido del último criterio.
-        order.Add($"t.[Id] {(q.OrderBy.LastOrDefault()?.Descending == true ? "DESC" : "ASC")}");
+        var order = ODataOrderClause(e, q.OrderBy, byName);
 
         var (select, from, labelParams) = SelectClause(e, model, user);
         await using var cn = await db.OpenAsync(ct);
