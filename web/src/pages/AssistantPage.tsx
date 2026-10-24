@@ -14,10 +14,10 @@ import { PlanPreviewView } from './modeler/PlanReviewDialog';
 
 const statusLabel: Record<ProposalStatus, string> = {
   proposed: 'Propuesta lista', invalid: 'Con errores', answer: 'Respuesta', failed: 'Sin respuesta',
-  applied: 'Aplicada', discarded: 'Descartada', superseded: 'Reemplazada',
+  applied: 'Aplicada', discarded: 'Descartada', superseded: 'Reemplazada', pending: 'En curso',
 };
 const statusTone: Record<ProposalStatus, 'accent' | 'danger' | 'neutral' | 'success' | 'warning'> = {
-  proposed: 'accent', invalid: 'danger', answer: 'neutral', failed: 'warning', applied: 'success', discarded: 'neutral', superseded: 'neutral',
+  proposed: 'accent', invalid: 'danger', answer: 'neutral', failed: 'warning', applied: 'success', discarded: 'neutral', superseded: 'neutral', pending: 'neutral',
 };
 
 const EXAMPLES = [
@@ -88,7 +88,7 @@ export function AssistantPage() {
   async function apply(p: Proposal) {
     setBusy(true);
     try {
-      const r = await assistantApi.apply(p.id);
+      const r = await assistantApi.apply(p.id, p.reviewHash);
       setConfirm(null);
       toast.success('Cambios aplicados', `Conjunto de cambios #${r.changeSetId}`);
       await reloadEntities();
@@ -314,6 +314,7 @@ function Turn({ p, onApply, onDiscard }: { p: Proposal; onApply: () => void; onD
             <pre className="code-block" tabIndex={0} aria-label="Plan de cambios en JSON">{JSON.stringify(p.plan, null, 2)}</pre>
           </details>
         )}
+        {p.blockedReason && <Alert tone="warning" title={p.blockedReason} />}
         {live && (
           <div className="row" style={{ justifyContent: 'flex-end', flexWrap: 'wrap' }}>
             <Button icon={Trash2} onClick={onDiscard}>Descartar</Button>

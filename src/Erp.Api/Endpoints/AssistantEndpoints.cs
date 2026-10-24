@@ -19,7 +19,10 @@ public static class AssistantEndpoints
             svc.RequestAsync(body, http, ct));
         g.MapPost("/requests/{id:int}/apply", async (int id, HttpContext http, AssistantService svc, CancellationToken ct) =>
         {
-            var (changeSetId, proposal) = await svc.ApplyAsync(id, http, ct);
+            // Spec 012: la huella viaja en el cuerpo, pero el cuerpo es opcional para responder 400/409 con su motivo (como
+            // parámetro, una petición sin JSON ni siquiera encontraba la ruta).
+            var body = http.Request.HasJsonContentType() ? await http.Request.ReadFromJsonAsync<AssistantApplyBody>(ct) : null;
+            var (changeSetId, proposal) = await svc.ApplyAsync(id, body, http, ct);
             return new { changeSetId, proposal };
         });
         g.MapPost("/requests/{id:int}/discard", (int id, HttpContext http, AssistantService svc, CancellationToken ct) =>

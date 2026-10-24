@@ -21,7 +21,7 @@ const WORKSPACE = 'wrkspc_e2e01';
 type Captured = { headers: Record<string, string | string[] | undefined>; body: {
   model: string; system: { text: string }[]; messages: { role: string; content: string | { text: string }[] }[];
   output_config?: { format?: { type: string; schema: unknown } }; max_tokens: number } };
-type Scripted = { status?: number; explanation?: string; plan?: unknown; stop?: string; raw?: string };
+type Scripted = { status?: number; explanation?: string; plan?: unknown; stop?: string; raw?: string; delayMs?: number };
 const captured: Captured[] = [];
 const verified: string[] = [];
 const script: Scripted[] = [];
@@ -62,11 +62,13 @@ test.beforeAll(async () => {
         explanation: next.explanation ?? '',
         plan: next.plan === undefined ? '' : typeof next.plan === 'string' ? next.plan : JSON.stringify(next.plan),
       });
-      res.end(JSON.stringify({
+      const reply = JSON.stringify({
         id: `msg_e2e_${captured.length}`, type: 'message', role: 'assistant', model: 'claude-sonnet-5-5',
         content: [{ type: 'text', text: output }], stop_reason: next.stop ?? 'end_turn', stop_sequence: null,
         usage: { input_tokens: 1500, output_tokens: 250 },
-      }));
+      });
+      // Spec 012: una respuesta lenta deja varias solicitudes en vuelo a la vez (límite por hora).
+      setTimeout(() => res.end(reply), next.delayMs ?? 0);
     });
   });
   await new Promise<void>((r) => server.listen(5091, '127.0.0.1', r));
@@ -122,7 +124,7 @@ test('preparar: catálogo con un dato privado, vista con filtro sobre un registr
     expect(res.status(), await res.text()).toBe(200);
     ids[name] = (await res.json()).id;
   }
-  for (const [username, role] of [['e2e-ia-modelador', 'ModeladorIA'], ['e2e-ia-modelador2', 'ModeladorIA'], ['e2e-ia-capturista', 'CapturistaIA']]) {
+  for (const [username, role] of [['e2e-ia-modelador', 'ModeladorIA'], ['e2e-ia-modelador2', 'ModeladorIA'], ['e2e-ia-modelador3', 'ModeladorIA'], ['e2e-ia-capturista', 'CapturistaIA']]) {
     const res = await admin.post('/api/admin/users', { data: { username, displayName: username, password: PWD, roleIds: [ids[role], await roleId(admin, 'Usuario')] } });
     expect(res.status(), await res.text()).toBe(201);
   }
@@ -367,7 +369,7 @@ test('H2 CA4: si el modelo cambió y el plan ya no compila, la vista previa lo m
   await page.reload();
   await expect(lastTurn(page).getByText('El plan tiene errores')).toBeVisible();
   await expect(lastTurn(page).getByRole('button', { name: 'Aplicar…' })).toBeDisabled();
-  const res = await admin.post(`/api/assistant/requests/${proposal.id}/apply`);
+  const res = await admin.post(`/api/assistant/requests/${proposal.id}/apply`, { data: { reviewHash: proposal.reviewHash } });
   expect(res.status()).toBe(400);
   expect((await (await admin.get(`/api/assistant/conversations/${id}`)).json()).turns.at(-1).status).toBe('proposed');
 });
@@ -437,6 +439,47 @@ test('H3 CA5: límites de longitud y de solicitudes por hora; fallas del proveed
   const over = await lim.post('/api/assistant/requests', { data: { prompt: 'Una más' } });
   expect(over.status()).toBe(429);
   expect((await lim.get('/api/assistant').then((r) => r.json())).remaining).toBe(0);
+});
+
+test('Spec 012 · H5 CA1: solicitudes simultáneas no rebasan el límite por hora', async () => {
+  const lim = await as('e2e-ia-modelador3');
+  // El proveedor tarda: las 35 solicitudes están en vuelo a la vez. Regresión (auditoría 012, hallazgo 5): todas pasaban el
+  // conteo antes de que la primera se guardara, y las 35 llegaban al proveedor.
+  const before = captured.length;
+  for (let i = 0; i < 35; i++) script.push({ explanation: `En paralelo ${i}`, delayMs: 400 });
+  const results = await Promise.all(Array.from({ length: 35 }, (_, i) => lim.post('/api/assistant/requests', { data: { prompt: `Paralela ${i}` } })));
+  script.length = 0; // las que no llegaron al proveedor no consumen respuesta
+  const statuses = results.map((r) => r.status());
+  expect(statuses.filter((s) => s === 200)).toHaveLength(30);
+  expect(statuses.filter((s) => s === 429)).toHaveLength(5);
+  expect(captured.length - before).toBe(30);
+  expect((await lim.get('/api/assistant').then((r) => r.json())).remaining).toBe(0);
+  // Ninguna queda «pending» al terminar.
+  const conversations = await (await lim.get('/api/assistant/conversations')).json();
+  expect(conversations.map((c: { lastStatus: string }) => c.lastStatus)).not.toContain('pending');
+});
+
+test('Spec 012 · H5 CA2: aplicar exige la huella de lo revisado y la rechaza si el modelo cambió', async () => {
+  const admin = await as('admin');
+  script.push({ explanation: 'Regla de clave en Flotas IA.', plan: { description: 'Regla', operations: [
+    { op: 'setRules', entity: 'IaFlota', rules: [{ name: 'ClaveCorta', field: 'Clave', assert: 'LEN(Clave) <= 40', message: 'Clave muy larga.' }] }] } });
+  const proposal = await (await admin.post('/api/assistant/requests', { data: { prompt: 'Limita la clave de las flotas' } })).json();
+  expect(proposal.status).toBe('proposed');
+  expect(proposal.reviewHash).toMatch(/^[0-9a-f]{64}$/);
+  expect((await admin.post(`/api/assistant/requests/${proposal.id}/apply`, { data: {} })).status()).toBe(400);
+
+  // Otra persona agrega una regla: el plan sigue compilando, pero ahora la quitaría (la advertencia cambia).
+  await applyPlan(admin, { description: 'E2E 012: regla nueva', operations: [
+    { op: 'setRules', entity: 'IaFlota', rules: [{ name: 'ClaveSinEspacios', field: 'Clave', assert: 'LEN(Clave) >= 1', message: 'Clave vacía.' }] }] });
+  // Regresión (auditoría 012, hallazgo 5): se aplicaba aunque lo revisado ya no fuera lo que se aplicaba.
+  const stale = await admin.post(`/api/assistant/requests/${proposal.id}/apply`, { data: { reviewHash: proposal.reviewHash } });
+  expect(stale.status()).toBe(409);
+  expect(await stale.text()).toContain('revisaste');
+  const fresh = (await (await admin.get(`/api/assistant/conversations/${proposal.conversationId}`)).json()).turns.at(-1);
+  expect(fresh.reviewHash).not.toBe(proposal.reviewHash);
+  expect(fresh.warnings.join(' ')).toContain('ClaveSinEspacios');
+  const ok = await admin.post(`/api/assistant/requests/${proposal.id}/apply`, { data: { reviewHash: fresh.reviewHash } });
+  expect(ok.status(), await ok.text()).toBe(200);
 });
 
 test('H4 CA1 · CA2 · CA3: cada solicitud queda registrada con su resultado, modelo, tokens y huella del contexto', async ({ page }) => {

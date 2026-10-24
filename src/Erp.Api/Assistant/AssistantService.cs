@@ -15,14 +15,19 @@ public static class ProposalStatus
     public const string Applied = "applied";
     public const string Discarded = "discarded";
     public const string Superseded = "superseded";
+    /// <summary>Spec 012: lugar reservado mientras se espera al proveedor (cuenta para el límite por hora).</summary>
+    public const string Pending = "pending";
 }
 
 public sealed record AssistantRequestBody(string? Prompt, int? ConversationId);
 
+/// <summary>Spec 012: huella de la vista previa que la persona revisó (<see cref="Proposal.ReviewHash"/>).</summary>
+public sealed record AssistantApplyBody(string? ReviewHash);
+
 /// <param name="KeySource"><c>server</c> (user-secrets o variable de entorno), <c>app</c> (guardada por un administrador) o nulo.</param>
 /// <param name="CanConfigure">Quien consulta puede poner o quitar la clave desde la app (superusuario, sin clave del servidor).</param>
 public sealed record AssistantStatus(bool Configured, string? Model, int MaxPromptChars, int RequestsPerHour, int Remaining,
-    string? KeySource, DateTime? KeyUpdatedAt, string? KeyUpdatedBy, string? WorkspaceId, bool CanConfigure);
+    string? KeySource, DateTime? KeyUpdatedAt, string? KeyUpdatedBy, string? WorkspaceId, bool CanConfigure, bool DirectChanges = true);
 
 public sealed record AssistantKeyBody(string? ApiKey, string? WorkspaceId = null);
 
@@ -49,6 +54,10 @@ public sealed record Proposal
     public int? ChangeSetId { get; init; }
     public string? Error { get; init; }
     public bool CanApply { get; init; }
+    /// <summary>Spec 012: huella de lo revisado (plan, pasos y advertencias); aplicar la exige.</summary>
+    public string? ReviewHash { get; init; }
+    /// <summary>Spec 012: por qué no se puede aplicar aunque sea válida (entorno con aprobación).</summary>
+    public string? BlockedReason { get; init; }
 }
 
 /// <summary>
@@ -56,7 +65,7 @@ public sealed record Proposal
 /// con sus permisos, sobre el plan guardado en el servidor y por el mismo <see cref="PlanService"/> del modelador.
 /// </summary>
 public sealed class AssistantService(Db db, MetadataStore store, PlanService plans, AssistantOptions options, IAssistantModel llm,
-    AssistantKeys keys, JsonSerializerOptions json, ILogger<AssistantService> log)
+    AssistantKeys keys, JsonSerializerOptions json, ILogger<AssistantService> log, Environments.EnvironmentOptions environment)
 {
     public async Task<AssistantStatus> StatusAsync(UserContext user, CancellationToken ct)
     {
@@ -67,7 +76,7 @@ public sealed class AssistantService(Db db, MetadataStore store, PlanService pla
         var configured = key.Source is not null;
         return new(configured, configured ? options.Model : null, options.MaxPromptChars, options.RequestsPerHour,
             Math.Max(0, options.RequestsPerHour - used), key.Source, key.UpdatedAt, key.UpdatedBy, key.WorkspaceId,
-            user.IsSuperuser && key.Source != AssistantKeyInfo.Server);
+            user.IsSuperuser && key.Source != AssistantKeyInfo.Server, environment.DirectChanges);
     }
 
     /// <summary>
@@ -173,18 +182,33 @@ public sealed class AssistantService(Db db, MetadataStore store, PlanService pla
         if (prompt.Length > options.MaxPromptChars) throw Invalid("prompt", $"La solicitud admite hasta {options.MaxPromptChars} caracteres.");
 
         List<Row> history = [];
+        int id;
+        // Spec 012 (H5 CA1): el lugar se reserva antes de llamar al proveedor, con un bloqueo por usuario. Antes se contaba
+        // aquí y se guardaba al final: varias solicitudes simultáneas pasaban el conteo y rebasaban el límite.
         await using (var cn = await db.OpenAsync(ct))
+        await using (var tx = await cn.BeginTransactionAsync(ct))
         {
-            if (await UsedLastHourAsync(cn, user.Id) >= options.RequestsPerHour)
+            var locked = await cn.ExecuteScalarAsync<int>("""
+                DECLARE @r int; EXEC @r = sp_getapplock @Resource = @res, @LockMode = 'Exclusive', @LockOwner = 'Transaction', @LockTimeout = 10000; SELECT @r;
+                """, new { res = $"erp-assistant:{user.Id}" }, tx);
+            if (locked < 0) throw new Conflict("Hay otra solicitud tuya en curso. Intenta de nuevo.");
+            if (await UsedLastHourAsync(cn, user.Id, tx) >= options.RequestsPerHour)
                 throw new AppException(StatusCodes.Status429TooManyRequests,
                     $"Alcanzaste el límite de {options.RequestsPerHour} solicitudes por hora al asistente. Intenta más tarde.");
             if (body.ConversationId is { } cid)
             {
-                history = await LoadTurnsAsync(cn, null, cid, user.Id);
+                history = await LoadTurnsAsync(cn, tx, cid, user.Id);
                 if (history.Count == 0) throw new NotFound("La conversación no existe.");
                 if (history.Count >= options.MaxTurns)
                     throw Invalid("conversationId", $"La conversación llegó a {options.MaxTurns} solicitudes: empieza una nueva.");
             }
+            id = await cn.ExecuteScalarAsync<int>("""
+                INSERT meta.AssistantRequest (ConversationId, UserId, Prompt, Status, Model, Attempts, InputTokens, OutputTokens, ContextHash)
+                OUTPUT inserted.Id VALUES (ISNULL(@ConversationId, 0), @UserId, @Prompt, 'pending', @Model, 0, 0, 0, REPLICATE('0', 64))
+                """, new { body.ConversationId, UserId = user.Id, Prompt = prompt, Model = options.Model }, tx);
+            if (body.ConversationId is null)
+                await cn.ExecuteAsync("UPDATE meta.AssistantRequest SET ConversationId = Id WHERE Id = @id", new { id }, tx);
+            await tx.CommitAsync(ct);
         }
 
         // Solo metadatos: modelo, tableros y nombres de roles (ver AssistantContext).
@@ -212,8 +236,18 @@ public sealed class AssistantService(Db db, MetadataStore store, PlanService pla
             outcome.Status = ProposalStatus.Failed;
             outcome.ErrorCode = ex.Code;
         }
+        catch (Exception)
+        {
+            // Nunca queda «pending»: una falla inesperada (o la cancelación) deja la solicitud como fallida.
+            outcome.Status = ProposalStatus.Failed;
+            outcome.ErrorCode ??= "error";
+            outcome.Plan = null;
+            outcome.PlanJson = null;
+            await SaveAsync(http, user, id, body.ConversationId, context.Hash, outcome, CancellationToken.None);
+            throw;
+        }
 
-        var id = await SaveAsync(http, user, body.ConversationId, prompt, context.Hash, outcome);
+        await SaveAsync(http, user, id, body.ConversationId, context.Hash, outcome, ct);
         if (outcome.Status == ProposalStatus.Failed && outcome.ErrorCode is not ("refusal" or "truncated"))
             throw new AppException(StatusCodes.Status502BadGateway, FailureMessage(outcome.ErrorCode));
         await using (var cn = await db.OpenAsync(ct))
@@ -282,44 +316,42 @@ public sealed class AssistantService(Db db, MetadataStore store, PlanService pla
         }
     }
 
-    private async Task<int> SaveAsync(HttpContext http, UserContext user, int? conversationId, string prompt, string contextHash, Outcome o)
+    /// <summary>Completa la fila reservada con el resultado.</summary>
+    private async Task SaveAsync(HttpContext http, UserContext user, int id, int? conversationId, string contextHash, Outcome o, CancellationToken ct)
     {
-        await using var cn = await db.OpenAsync();
-        await using var tx = await cn.BeginTransactionAsync();
+        await using var cn = await db.OpenAsync(ct);
+        await using var tx = await cn.BeginTransactionAsync(ct);
         // Al refinar, la propuesta anterior deja de ser aplicable: solo vale el último plan de la conversación. Una respuesta
         // sin plan (una pregunta, algo que no es metadato) o una falla no la reemplaza (regresión F-03).
         if (conversationId is { } cid && o.Plan is not null)
             await cn.ExecuteAsync("""
                 UPDATE meta.AssistantRequest SET Status = 'superseded'
-                 WHERE ConversationId = @cid AND UserId = @UserId AND Status IN ('proposed', 'invalid')
-                """, new { cid, UserId = user.Id }, tx);
-        var id = await cn.ExecuteScalarAsync<int>("""
-            INSERT meta.AssistantRequest (ConversationId, UserId, Prompt, Status, Explanation, PlanJson, ErrorsJson, ResponseJson,
-                ErrorCode, Model, Attempts, InputTokens, OutputTokens, ContextHash)
-            OUTPUT inserted.Id
-            VALUES (ISNULL(@ConversationId, 0), @UserId, @Prompt, @Status, @Explanation, @PlanJson, @ErrorsJson, @ResponseJson,
-                @ErrorCode, @Model, @Attempts, @InputTokens, @OutputTokens, @ContextHash)
+                 WHERE ConversationId = @cid AND UserId = @UserId AND Id < @id AND Status IN ('proposed', 'invalid')
+                """, new { cid, UserId = user.Id, id }, tx);
+        await cn.ExecuteAsync("""
+            UPDATE meta.AssistantRequest SET Status = @Status, Explanation = @Explanation, PlanJson = @PlanJson, ErrorsJson = @ErrorsJson,
+                   ResponseJson = @ResponseJson, ErrorCode = @ErrorCode, Attempts = @Attempts, InputTokens = @InputTokens,
+                   OutputTokens = @OutputTokens, ContextHash = @ContextHash
+             WHERE Id = @id
             """, new
         {
-            ConversationId = conversationId, UserId = user.Id, Prompt = prompt, o.Status, o.Explanation, o.PlanJson,
+            id, o.Status, o.Explanation, o.PlanJson,
             ErrorsJson = o.Errors.Count == 0 ? null : JsonSerializer.Serialize(o.Errors), o.ResponseJson, o.ErrorCode,
-            Model = options.Model, o.Attempts, InputTokens = Tokens(o.InputTokens), OutputTokens = Tokens(o.OutputTokens), ContextHash = contextHash,
+            o.Attempts, InputTokens = Tokens(o.InputTokens), OutputTokens = Tokens(o.OutputTokens), ContextHash = contextHash,
         }, tx);
-        if (conversationId is null)
-            await cn.ExecuteAsync("UPDATE meta.AssistantRequest SET ConversationId = Id WHERE Id = @id", new { id }, tx);
         await Audit.WriteAsync(cn, tx, http, AuditActions.AssistantPropose, entity: "assistant", recordId: id.ToString(), after: new
         {
             conversationId = conversationId ?? id, status = o.Status, errorCode = o.ErrorCode, model = options.Model, attempts = o.Attempts,
             inputTokens = o.InputTokens, outputTokens = o.OutputTokens, contextHash, operations = o.Plan?.Operations.Count,
         });
-        await tx.CommitAsync();
-        return id;
+        await tx.CommitAsync(ct);
     }
 
-    public async Task<(int ChangeSetId, Proposal Proposal)> ApplyAsync(int id, HttpContext http, CancellationToken ct)
+    public async Task<(int ChangeSetId, Proposal Proposal)> ApplyAsync(int id, AssistantApplyBody? body, HttpContext http, CancellationToken ct)
     {
         var user = http.CurrentUser();
         Require(user);
+        environment.RequireDirectChange("una propuesta del asistente"); // spec 012 (H4)
         int changeSetId;
         await using (var cn = await db.OpenAsync(ct))
         await using (var tx = await cn.BeginTransactionAsync(ct))
@@ -334,8 +366,17 @@ public sealed class AssistantService(Db db, MetadataStore store, PlanService pla
                     ProposalStatus.Discarded => "Esta propuesta se descartó.",
                     _ => "Esta propuesta no se puede aplicar.",
                 });
+            if (string.IsNullOrWhiteSpace(body?.ReviewHash))
+                throw Invalid("reviewHash", "Falta la huella de la propuesta revisada: recarga la conversación y revísala de nuevo.");
             // Se aplica exactamente lo guardado; PlanService lo recompila contra el modelo dentro de la transacción.
             var plan = JsonSerializer.Deserialize<ChangePlan>(row.PlanJson, json)!;
+            // Spec 012 (H5 CA2): lo que se aplica debe ser lo que la persona revisó. Se compila contra el modelo de la
+            // transacción bajo el mismo bloqueo que el aplicar (reentrante) y se compara la huella.
+            await PlanService.LockModelAsync(cn, tx);
+            var model = await MetadataStore.LoadAsync(cn, tx);
+            var preview = PlanCompiler.Compile(plan, model, await PlanService.LoadRolesAsync(cn, tx), await MetadataStore.LoadDashboardsAsync(cn, tx)).Preview;
+            if (preview.Valid && !string.Equals(body!.ReviewHash, ReviewHash.Of(row.PlanJson, preview, PlanWarnings.For(plan, model)), StringComparison.OrdinalIgnoreCase))
+                throw new Conflict("El modelo cambió desde que revisaste la propuesta: revisa la vista previa actualizada antes de aplicarla.");
             changeSetId = await plans.ApplyInTransactionAsync(cn, tx, plan, http);
             await cn.ExecuteAsync("""
                 UPDATE meta.AssistantRequest SET Status = 'applied', AppliedAt = SYSUTCDATETIME(), ChangeSetId = @changeSetId WHERE Id = @id
@@ -396,15 +437,21 @@ public sealed class AssistantService(Db db, MetadataStore store, PlanService pla
         var live = r.Status is ProposalStatus.Proposed or ProposalStatus.Invalid;
         var preview = plan is not null && live ? PlanCompiler.Compile(plan, ctx.Model, ctx.Roles, ctx.Boards).Preview : null;
         var errors = r.ErrorsJson is null ? [] : JsonSerializer.Deserialize<List<string>>(r.ErrorsJson) ?? [];
+        IReadOnlyList<string> warnings = plan is null ? [] : PlanWarnings.For(plan, ctx.Model);
+        var reviewable = r.Status == ProposalStatus.Proposed && preview?.Valid == true;
         return new Proposal
         {
             Id = r.Id, ConversationId = r.ConversationId, Prompt = r.Prompt, Status = r.Status, Explanation = r.Explanation,
-            Plan = plan, Preview = preview, Warnings = plan is null ? [] : PlanWarnings.For(plan, ctx.Model),
+            Plan = plan, Preview = preview, Warnings = warnings,
             // Con plan, los errores del compilador ya vienen en la vista previa; sin plan, se muestran los de interpretación.
             Errors = plan is null ? errors : [],
             Attempts = r.Attempts, Model = r.Model, CreatedAt = r.CreatedAt, AppliedAt = r.AppliedAt, ChangeSetId = r.ChangeSetId,
             Error = r.Status == ProposalStatus.Failed ? FailureMessage(r.ErrorCode) : null,
-            CanApply = r.Status == ProposalStatus.Proposed && preview?.Valid == true,
+            CanApply = reviewable && environment.DirectChanges,
+            ReviewHash = reviewable ? ReviewHash.Of(r.PlanJson!, preview!, warnings) : null,
+            BlockedReason = r.Status == ProposalStatus.Proposed && !environment.DirectChanges
+                ? "Este entorno exige la aprobación de otro administrador: la propuesta no se aplica aquí. Los cambios al modelo llegan como paquete desde Configuración › Entornos."
+                : null,
         };
     }
 
@@ -432,12 +479,12 @@ public sealed class AssistantService(Db db, MetadataStore store, PlanService pla
 
     private static int Tokens(long n) => (int)Math.Min(n, int.MaxValue);
 
-    private static Task<int> UsedLastHourAsync(System.Data.Common.DbConnection cn, int userId) =>
+    private static Task<int> UsedLastHourAsync(System.Data.Common.DbConnection cn, int userId, System.Data.Common.DbTransaction? tx = null) =>
         cn.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM meta.AssistantRequest WHERE UserId = @userId AND CreatedAt > DATEADD(hour, -1, SYSUTCDATETIME())",
-            new { userId });
+            new { userId }, tx);
 
     private static async Task<List<Row>> LoadTurnsAsync(System.Data.Common.DbConnection cn, System.Data.Common.DbTransaction? tx, int conversationId, int userId) =>
-        (await cn.QueryAsync<Row>(SelectRow + " WHERE ConversationId = @conversationId AND UserId = @userId ORDER BY Id",
+        (await cn.QueryAsync<Row>(SelectRow + " WHERE ConversationId = @conversationId AND UserId = @userId AND Status <> 'pending' ORDER BY Id",
             new { conversationId, userId }, tx)).ToList();
 
     private const string SelectRow = """

@@ -487,7 +487,7 @@ test('H4 CA1 · CA2: exportar el listado como se ve, sin campos ocultos ni inyec
 test('H5 CA1 · CA2 · CA3: Compras 1.5.0 trae su rol de servicio y el webhook sin destino; la orden autorizada llega sin importes', async ({ page }) => {
   const admin = await as('admin');
   const mod = (await (await admin.get('/api/admin/modules')).json()).find((m: { id: string }) => m.id === 'compras');
-  expect(mod.installedVersion).toBe('1.6.0'); // Compras 1.6.0 (spec 010) ya está instalado
+  expect(mod.installedVersion).toBe('1.7.0'); // Compras 1.7.0 (spec 012) ya está instalado
   await page.goto('/admin/integrations');
   const row = page.getByRole('row', { name: /Orden autorizada/ });
   await expect(row).toContainText('Integración de almacén');
@@ -535,17 +535,20 @@ function sql(query: string) {
 test('H5 CA1: la vista previa de una actualización dice qué roles nuevos creará', async ({ page }) => {
   // Regresión (revisión exploratoria 008, F-01): la vista previa de «Actualizar Compras» no mencionaba el rol de servicio.
   // Se simula una base en Compras 1.4.0 sin el rol, y luego se deja como estaba (acentos con NCHAR: sqlcmd y la consola).
+  const installed = ((await (await (await apiAs(ADMIN.username, ADMIN.password)).get('/api/admin/modules')).json()) as { id: string; installedVersion: string }[])
+    .find((m) => m.id === 'compras')!.installedVersion;
   sql("UPDATE meta.Module SET Version = '1.4.0' WHERE Id = 'compras'; UPDATE meta.Role SET Name = N'tmp-e2e-rol' WHERE Name = N'Integraci' + NCHAR(243) + N'n de almac' + NCHAR(233) + N'n'");
   try {
     await page.goto('/admin/modules');
     await page.getByRole('button', { name: 'Actualizar Compras' }).click();
     const dialog = page.getByRole('dialog', { name: 'Actualizar Compras' });
-    await expect(dialog.getByText('El plan es válido')).toBeVisible();
+    // La simulación vuelve a previsualizar versiones ya aplicadas al modelo (p. ej. un campo que 1.7.0 agrega y ya existe),
+    // así que el plan puede no ser válido aquí; lo que se prueba es la lista de roles.
     await expect(dialog.getByText('Roles que se crearán')).toBeVisible();
     await expect(dialog.getByText('Integración de almacén', { exact: true })).toBeVisible();
     await dialog.getByRole('button', { name: 'Cancelar' }).click();
   } finally {
-    sql("UPDATE meta.Module SET Version = '1.5.0' WHERE Id = 'compras'; UPDATE meta.Role SET Name = N'Integraci' + NCHAR(243) + N'n de almac' + NCHAR(233) + N'n' WHERE Name = N'tmp-e2e-rol'");
+    sql(`UPDATE meta.Module SET Version = '${installed}' WHERE Id = 'compras'; UPDATE meta.Role SET Name = N'Integraci' + NCHAR(243) + N'n de almac' + NCHAR(233) + N'n' WHERE Name = N'tmp-e2e-rol'`);
   }
 });
 

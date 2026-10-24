@@ -134,6 +134,52 @@ public sealed partial class RecordService
 
     // ---------------- Escrituras del motor ----------------
 
+    /// <summary>
+    /// Spec 012 (H3): antes de validar una transición, bloquea los documentos que modificarán las automatizaciones de esa
+    /// transición y del estado destino (destinos <c>target</c> del encabezado o de las partidas). Así las reglas y
+    /// condiciones que leen esos documentos (p. ej. «no exceder lo pendiente», «la orden sigue enviada») ven datos
+    /// actuales: sin esto, dos recepciones simultáneas validaban contra el mismo pendiente. Orden fijo (catálogo, id) para
+    /// no provocar interbloqueos; los bloqueos posteriores del motor sobre esos documentos son reentrantes.
+    /// </summary>
+    private static async Task LockAutomationTargetsAsync(SqlConnection cn, SqlTransaction tx, EntityDef e,
+        IReadOnlyDictionary<string, EntityDef> model, DocDraft draft, WorkflowTransition t, CancellationToken ct)
+    {
+        var refs = new HashSet<(string Entity, long Id)>();
+        foreach (var auto in e.Automations ?? [])
+        {
+            var fires = auto.On == AutomationEvents.Transition && string.Equals(auto.Transition, t.Name, StringComparison.OrdinalIgnoreCase)
+                        || auto.On == AutomationEvents.EnterState && string.Equals(auto.State, t.To, StringComparison.OrdinalIgnoreCase);
+            if (!fires) continue;
+            foreach (var a in auto.Actions.Where(a => a.Target is not null))
+            {
+                if (AutomationRules.Scope(e, a, model) is not { } scope || scope.FindField(a.Target!) is not { Type: FieldTypes.Reference } f) continue;
+                var rows = a.Lines is null ? [draft.Header] : (draft.Lines.GetValueOrDefault(a.Lines) ?? []).Select(l => l.Values);
+                foreach (var v in rows)
+                    if (v.GetValueOrDefault(f.Name) is { } raw) refs.Add((f.ReferenceEntity!, Convert.ToInt64(raw, CultureInfo.InvariantCulture)));
+            }
+        }
+        if (refs.Count == 0) return;
+
+        // Documento raíz de cada destino (una partida se bloquea por su documento, como en LockRootAsync).
+        var roots = new SortedSet<(string Entity, long Id)>(Comparer<(string Entity, long Id)>.Create((x, y) =>
+            string.CompareOrdinal(x.Entity, y.Entity) is var c && c != 0 ? c : x.Id.CompareTo(y.Id)));
+        foreach (var (entity, id) in refs)
+        {
+            if (!model.TryGetValue(entity, out var target)) continue;
+            var root = AutomationRules.Root(target, model);
+            if (!target.IsChild) { roots.Add((root.Name, id)); continue; }
+            await using var p = new SqlCommand($"SELECT {Quote(target.ParentField!.Name)} FROM {AppTable(target.Name)} WHERE [Id] = @id", cn, tx);
+            p.Parameters.Add(new SqlParameter("@id", id));
+            if (await p.ExecuteScalarAsync(ct) is long pid) roots.Add((root.Name, pid));
+        }
+        foreach (var (entity, id) in roots)
+        {
+            await using var cmd = new SqlCommand($"SELECT [Id] FROM {AppTable(entity)} WITH (UPDLOCK, HOLDLOCK) WHERE [Id] = @id", cn, tx);
+            cmd.Parameters.Add(new SqlParameter("@id", id));
+            await cmd.ExecuteScalarAsync(ct);
+        }
+    }
+
     /// <summary>Documento que contiene a <paramref name="target"/> (él mismo o, si es partida, su documento), bloqueado.</summary>
     private static async Task<(EntityDef Root, long RootId)?> LockRootAsync(AutoCtx c, EntityDef target, long id)
     {

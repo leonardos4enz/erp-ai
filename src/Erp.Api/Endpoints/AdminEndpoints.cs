@@ -291,23 +291,33 @@ public static class AuditEndpoints
 
     public static void MapAudit(this IEndpointRouteBuilder app)
     {
-        app.MapGet("/api/audit", async (string? entity, string? action, int? page, int? pageSize, HttpContext http, Db db) =>
+        app.MapGet("/api/audit", async (string? entity, string? action, int? page, int? pageSize, HttpContext http, Db db, MetadataStore store) =>
         {
-            if (!http.CurrentUser().CanViewAudit) throw new Forbidden();
+            var user = http.CurrentUser();
+            if (!user.CanViewAudit) throw new Forbidden();
             var size = Math.Clamp(pageSize ?? 50, 1, 200);
             var skip = (Math.Max(1, page ?? 1) - 1) * size;
+            var model = await store.GetAsync();
+            var args = new DynamicParameters(new { entity = Empty(entity), action = Empty(action), skip, size });
+            var where = "WHERE (@entity IS NULL OR a.EntityName = @entity) AND (@action IS NULL OR a.Action = @action)";
+            // Spec 012 (H1): filas y conteo con la seguridad del dato (catálogo, empresa y permisos por registro).
+            if (AuditFilter.Build(model, user) is { } scope)
+            {
+                where += " AND " + scope.Sql;
+                foreach (var (name, value) in scope.Parameters) args.Add(name, value);
+            }
             await using var cn = await db.OpenAsync();
-            const string where = "WHERE (@entity IS NULL OR EntityName = @entity) AND (@action IS NULL OR Action = @action)";
-            var args = new { entity = Empty(entity), action = Empty(action), skip, size };
-            var total = await cn.ExecuteScalarAsync<int>($"SELECT COUNT(*) FROM meta.AuditLog {where}", args);
+            var total = await cn.ExecuteScalarAsync<int>($"SELECT COUNT(*) FROM meta.AuditLog a {where}", args);
             var rows = await cn.QueryAsync<Row>($"""
-                SELECT Id, At, Username, Action, EntityName, RecordId, BeforeJson, AfterJson, IpAddress
-                  FROM meta.AuditLog {where} ORDER BY Id DESC OFFSET @skip ROWS FETCH NEXT @size ROWS ONLY
+                SELECT a.Id, a.At, a.Username, a.Action, a.EntityName, a.RecordId, a.BeforeJson, a.AfterJson, a.IpAddress
+                  FROM meta.AuditLog a {where} ORDER BY a.Id DESC OFFSET @skip ROWS FETCH NEXT @size ROWS ONLY
                 """, args);
             return new
             {
                 items = rows.Select(r => new AuditItem(r.Id, DateTime.SpecifyKind(r.At, DateTimeKind.Utc), r.Username, r.Action,
-                    r.EntityName, r.RecordId, Parse(r.BeforeJson), Parse(r.AfterJson), r.IpAddress)),
+                    r.EntityName, r.RecordId,
+                    AuditFilter.Redact(r.Action, r.EntityName, Parse(r.BeforeJson), user, model),
+                    AuditFilter.Redact(r.Action, r.EntityName, Parse(r.AfterJson), user, model), r.IpAddress)),
                 total,
             };
         }).RequireAuthorization();

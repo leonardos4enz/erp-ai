@@ -34,8 +34,8 @@ public static class CompanyEndpoints
             await using var cn = await db.OpenAsync();
             return await LoadAsync(cn, null);
         });
-        g.MapPost("/companies", (CompanyRequest req, HttpContext http, Db db) => Save(null, req, http, db));
-        g.MapPut("/companies/{id:int}", (int id, CompanyRequest req, HttpContext http, Db db) => Save(id, req, http, db));
+        g.MapPost("/companies", (CompanyRequest req, HttpContext http, Db db, MetadataStore store) => Save(null, req, http, db, store));
+        g.MapPut("/companies/{id:int}", (int id, CompanyRequest req, HttpContext http, Db db, MetadataStore store) => Save(id, req, http, db, store));
         g.MapGet("/exchange-rates", ListRates);
         g.MapPut("/exchange-rates", SaveRate);
         g.MapDelete("/exchange-rates/{id:int}", DeleteRate);
@@ -67,7 +67,7 @@ public static class CompanyEndpoints
 
     // ---------------- Empresas ----------------
 
-    private static async Task<CompanyDto> Save(int? id, CompanyRequest req, HttpContext http, Db db)
+    private static async Task<CompanyDto> Save(int? id, CompanyRequest req, HttpContext http, Db db, MetadataStore store)
     {
         RequireSuperuser(http);
         var errors = new Dictionary<string, string[]>();
@@ -87,6 +87,12 @@ public static class CompanyEndpoints
             before = (await LoadAsync(cn, tx)).FirstOrDefault(c => c.Id == id) ?? throw new NotFound("La empresa no existe.");
             if (before.IsDefault && !req.IsActive)
                 throw new ValidationFailed(new Dictionary<string, string[]> { ["isActive"] = ["La empresa predeterminada no se puede desactivar."] });
+            // Spec 012 (H7): sus importes «en moneda base» ya están registrados en la moneda anterior; cambiarla los reinterpreta.
+            if (!string.Equals(before.BaseCurrency.Trim(), currency, StringComparison.Ordinal))
+                foreach (var e in (await store.GetAsync()).Values.Where(e => e.PerCompany && !e.IsChild))
+                    if (await cn.ExecuteScalarAsync<int?>($"SELECT TOP 1 1 FROM {Identifiers.AppTable(e.Name)} WHERE {Identifiers.Quote(DdlGenerator.CompanyColumn)} = @id",
+                            new { id }, tx) is not null)
+                        throw new Conflict($"No se puede cambiar la moneda base: la empresa ya tiene registros en {e.LabelPlural}. Sus importes están en {before.BaseCurrency}.");
             await cn.ExecuteAsync("""
                 UPDATE meta.Company SET Name = @name, BaseCurrency = @currency, IsActive = @IsActive, UpdatedAt = SYSUTCDATETIME() WHERE Id = @id
                 """, new { id, name, currency, req.IsActive }, tx);

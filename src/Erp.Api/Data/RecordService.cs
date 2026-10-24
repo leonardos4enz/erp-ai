@@ -47,11 +47,12 @@ public sealed partial class RecordService(Db db, MetadataStore store)
 
         var page = Math.Max(1, q.Page);
         var size = Math.Clamp(q.PageSize, 1, maxPageSize);
-        var (select, from) = SelectClause(e, model);
+        var (select, from, labelParams) = SelectClause(e, model, user);
         var where = new StringBuilder("t.[IsDeleted] = 0");
 
         await using var cn = await db.OpenAsync(ct);
         await using var cmd = cn.CreateCommand();
+        foreach (var (name, value) in labelParams) cmd.Parameters.Add(new SqlParameter(name, value));
 
         // Spec 006: solo los registros a su alcance (también en el total y en los conteos por estado).
         if (RecordFilter.For(e, user, write: false) is { } scope)
@@ -334,7 +335,7 @@ public sealed partial class RecordService(Db db, MetadataStore store)
             new Writer(user, draft.Header.GetValueOrDefault(Workflow.StateField) as string));
         var env = Env(user, draft, loader);
         Compute(draft, e, model, loader, env);
-        var row = await FormatDraftAsync(cn, e, model, draft, ct);
+        var row = await FormatDraftAsync(cn, e, model, draft, user, ct);
         FieldAccess.Strip(e, row, user, model);
         // Spec 007: qué oculta el layout con los valores capturados hasta ahora.
         var layout = HasConditions(e) ? LayoutOutput(EvaluateLayout(e, model, HeaderScope(draft, e, model, loader), env, user)) : null;
@@ -353,14 +354,17 @@ public sealed partial class RecordService(Db db, MetadataStore store)
 
         await using var cn = await db.OpenAsync(ct);
         await using var tx = (SqlTransaction)await cn.BeginTransactionAsync(ct);
-        // Spec 006: basta con ver el registro; la transición exige además sus roles y condiciones.
-        await EnsureAccessAsync(cn, tx, e, id, user, write: false, ct);
-        var loader = new RelatedLoader(cn, tx, model);
+        // Spec 006: con roles declarados basta con ver el registro (autorización de proceso). Spec 012 (H2): sin roles, la
+        // autorización es «permiso de edición», así que exige también el alcance de escritura del registro.
+        await EnsureAccessAsync(cn, tx, e, id, user, write: t.Roles is not { Count: > 0 }, ct);
         var draft = await LoadDraftAsync(cn, tx, e, model, id, ct) ?? throw new NotFound("El registro no existe.");
+        // Spec 012 (H3): los documentos que tocarán sus automatizaciones se bloquean antes de validar, y se leen después.
+        await LockAutomationTargetsAsync(cn, tx, e, model, draft, t, ct);
+        var loader = new RelatedLoader(cn, tx, model);
         var before = Snapshot(draft);
         var env = Env(user, draft, loader);
 
-        var (allowed, reason, missingRole) = CanTransition(e, t, draft, model, loader, env, user);
+        var (allowed, reason, missingRole) = CanTransition(e, t, draft, model, loader, env, user, canWrite: true);
         if (!allowed) throw missingRole ? new Forbidden(reason!) : new AppException(400, reason!);
 
         var errors = new Dictionary<string, string[]>();
@@ -561,8 +565,9 @@ public sealed partial class RecordService(Db db, MetadataStore store)
     }
 
     /// <summary><c>MissingRole</c> distingue "no te toca" (403) de "no se cumplen las condiciones" (400).</summary>
+    /// <param name="canWrite">Spec 012: el registro está en el alcance de escritura del usuario (lo exige una transición sin roles).</param>
     private static (bool Allowed, string? Reason, bool MissingRole) CanTransition(EntityDef e, WorkflowTransition t, DocDraft d,
-        IReadOnlyDictionary<string, EntityDef> model, RelatedLoader loader, ExprEnv env, UserContext user)
+        IReadOnlyDictionary<string, EntityDef> model, RelatedLoader loader, ExprEnv env, UserContext user, bool canWrite)
     {
         var state = d.Header.GetValueOrDefault(Workflow.StateField) as string;
         if (t.System) return (false, $"«{t.Label}» la ejecuta el sistema automáticamente.", false);
@@ -571,6 +576,8 @@ public sealed partial class RecordService(Db db, MetadataStore store)
         var roleOk = user.IsSuperuser || (t.Roles is { Count: > 0 } ? user.HasRole(t.Roles) : user.Access(e.Name).Update);
         if (!roleOk)
             return (false, t.Roles is { Count: > 0 } ? $"Requiere el rol {string.Join(" o ", t.Roles)}." : "Requiere permiso de edición.", true);
+        if (t.Roles is not { Count: > 0 } && !canWrite)
+            return (false, CannotWrite, true);
         // Spec 006: no se puede pedir capturar un campo que el rol no ve.
         if ((t.RequiredFields ?? []).Select(e.FindField).FirstOrDefault(f => f is not null && !FieldAccess.CanSee(e, f, user)) is { } hidden)
             return (false, $"Requiere capturar «{hidden.Label}», que tu rol no puede ver.", true);
@@ -988,11 +995,12 @@ public sealed partial class RecordService(Db db, MetadataStore store)
     private async Task<Dictionary<string, object?>?> LoadOutputAsync(SqlConnection cn, SqlTransaction? tx, EntityDef e,
         IReadOnlyDictionary<string, EntityDef> model, long id, UserContext user, CancellationToken ct)
     {
-        var (select, from) = SelectClause(e, model);
+        var (select, from, labelParams) = SelectClause(e, model, user);
         Dictionary<string, object?>? row;
         await using (var cmd = new SqlCommand($"SELECT {select} FROM {from} WHERE t.[Id] = @id AND t.[IsDeleted] = 0", cn, tx))
         {
             cmd.Parameters.Add(new SqlParameter("@id", id));
+            foreach (var (name, value) in labelParams) cmd.Parameters.Add(new SqlParameter(name, value));
             await using var reader = await cmd.ExecuteReaderAsync(ct);
             row = await reader.ReadAsync(ct) ? Format(e, ReadRaw(reader)) : null;
         }
@@ -1001,9 +1009,10 @@ public sealed partial class RecordService(Db db, MetadataStore store)
         foreach (var lf in e.ActiveFields.Where(f => f.Type == FieldTypes.Lines))
         {
             if (!model.TryGetValue(lf.ChildEntity!, out var child) || child.ParentField is null) continue;
-            var (cs, cf) = SelectClause(child, model);
+            var (cs, cf, cp) = SelectClause(child, model, user);
             await using var cmd = new SqlCommand($"SELECT {cs} FROM {cf} WHERE t.{Quote(child.ParentField.Name)} = @id AND t.[IsDeleted] = 0 ORDER BY t.[Id]", cn, tx);
             cmd.Parameters.Add(new SqlParameter("@id", id));
+            foreach (var (name, value) in cp) cmd.Parameters.Add(new SqlParameter(name, value));
             await using var reader = await cmd.ExecuteReaderAsync(ct);
             var lines = new List<Dictionary<string, object?>>();
             while (await reader.ReadAsync(ct)) lines.Add(Format(child, ReadRaw(reader)));
@@ -1013,6 +1022,7 @@ public sealed partial class RecordService(Db db, MetadataStore store)
         if (e.Workflow is { } wf)
         {
             var draft = (await LoadDraftAsync(cn, tx, e, model, id, ct))!;
+            var canWrite = RecordFilter.For(e, user, write: true) is not { } w || await MatchesAsync(cn, tx, e, id, w, ct);
             var loader = new RelatedLoader(cn, tx, model);
             var env = Env(user, draft, loader);
             var stateName = draft.Header.GetValueOrDefault(Workflow.StateField) as string;
@@ -1025,7 +1035,7 @@ public sealed partial class RecordService(Db db, MetadataStore store)
                 editable = state?.Editable ?? true,
                 transitions = wf.Transitions.Where(t => !t.System && t.From.Contains(stateName ?? "", StringComparer.OrdinalIgnoreCase)).Select(t =>
                 {
-                    var (allowed, reason, _) = CanTransition(e, t, draft, model, loader, env, user);
+                    var (allowed, reason, _) = CanTransition(e, t, draft, model, loader, env, user, canWrite);
                     return new
                     {
                         name = t.Name, label = t.Label, icon = t.Icon, variant = t.Variant ?? "secondary", to = t.To,
@@ -1046,22 +1056,23 @@ public sealed partial class RecordService(Db db, MetadataStore store)
 
     /// <summary>Borrador calculado en formato de salida (para /compute): agrega etiquetas de referencias.</summary>
     private static Task<Dictionary<string, object?>> FormatDraftAsync(SqlConnection cn, EntityDef e,
-        IReadOnlyDictionary<string, EntityDef> model, DocDraft d, CancellationToken ct)
+        IReadOnlyDictionary<string, EntityDef> model, DocDraft d, UserContext user, CancellationToken ct)
     {
         var loader = new RelatedLoader(cn, null, model);
-        var row = FormatValues(e, model, d.Header, loader);
+        var row = FormatValues(e, model, d.Header, loader, user);
         foreach (var (field, lines) in d.Lines)
             if (e.FindField(field) is { ChildEntity: { } c } && model.TryGetValue(c, out var child))
                 row[field] = lines.Select(l =>
                 {
-                    var lr = FormatValues(child, model, l.Values, loader);
+                    var lr = FormatValues(child, model, l.Values, loader, user);
                     if (l.Id is { } lid) lr["id"] = lid;
                     return lr;
                 }).ToList();
         return Task.FromResult(row);
     }
 
-    private static Dictionary<string, object?> FormatValues(EntityDef e, IReadOnlyDictionary<string, EntityDef> model, Values values, RelatedLoader loader)
+    private static Dictionary<string, object?> FormatValues(EntityDef e, IReadOnlyDictionary<string, EntityDef> model, Values values, RelatedLoader loader,
+        UserContext user)
     {
         var row = new Dictionary<string, object?>(StringComparer.Ordinal);
         foreach (var f in e.StoredFields.Where(f => f.Type != FieldTypes.Parent))
@@ -1070,7 +1081,9 @@ public sealed partial class RecordService(Db db, MetadataStore store)
             row[f.Name] = FormatField(f, v);
             if (v is null) continue;
             if (f.Type == FieldTypes.Reference && model.TryGetValue(f.ReferenceEntity!, out var target))
-                row[f.Name + "__label"] = target.EffectiveDisplayField is { } d
+                // Spec 012 (H6): el mismo criterio que SelectClause.
+                row[f.Name + "__label"] = !loader.Visible(target.Name, Convert.ToInt64(v), user) ? ReportService.NoAccess
+                    : target.EffectiveDisplayField is { } d
                     ? Convert.ToString(loader.Row(target.Name, Convert.ToInt64(v))?.GetValueOrDefault(d), CultureInfo.InvariantCulture)
                     : $"#{v}";
             if (f.Type == FieldTypes.User)
@@ -1088,10 +1101,16 @@ public sealed partial class RecordService(Db db, MetadataStore store)
             _ => value,
         };
 
-    private static (string Select, string From) SelectClause(EntityDef e, IReadOnlyDictionary<string, EntityDef> model)
+    /// <summary>
+    /// Columnas del registro con las etiquetas de sus referencias. Spec 012 (H6): la etiqueta de un registro fuera del
+    /// alcance de lectura del usuario (empresa o permisos por registro, el mismo filtro del buscador) es «(sin acceso)».
+    /// </summary>
+    private static (string Select, string From, IReadOnlyList<(string Name, object Value)> Parameters) SelectClause(EntityDef e,
+        IReadOnlyDictionary<string, EntityDef> model, UserContext user)
     {
         var cols = new List<string> { "t.[Id]" };
         var from = new StringBuilder($"{AppTable(e.Name)} t");
+        var pars = new List<(string Name, object Value)>();
         var j = 0;
         foreach (var f in e.StoredFields)
         {
@@ -1100,6 +1119,14 @@ public sealed partial class RecordService(Db db, MetadataStore store)
             if (f.Type == FieldTypes.Reference && model.TryGetValue(f.ReferenceEntity!, out var target))
             {
                 var label = target.EffectiveDisplayField is { } d ? $"CAST({alias}.{Quote(d)} AS nvarchar(400))" : $"CAST({alias}.[Id] AS nvarchar(20))";
+                // El alias t de la subconsulta es el destino (oculta al t de afuera), como espera el filtro.
+                if (RecordFilter.ForRecordOrParent(target, model, user) is { } scope)
+                {
+                    var p = scope.Prefixed($"lbl{j}_");
+                    pars.AddRange(p.Parameters);
+                    label = $"CASE WHEN {alias}.[Id] IS NULL THEN NULL WHEN EXISTS (SELECT 1 FROM {AppTable(target.Name)} t WHERE t.[Id] = {alias}.[Id] AND {p.Sql}) " +
+                            $"THEN {label} ELSE N'{ReportService.NoAccess}' END";
+                }
                 cols.Add($"{label} AS [{Quote(f.Name)[1..^1]}__label]");
                 from.Append($" LEFT JOIN {AppTable(target.Name)} {alias} ON {alias}.[Id] = t.{Quote(f.Name)}");
             }
@@ -1111,7 +1138,7 @@ public sealed partial class RecordService(Db db, MetadataStore store)
         }
         cols.AddRange(["t.[CreatedAt]", "cu.[DisplayName] AS [CreatedByName]", "t.[UpdatedAt]", "uu.[DisplayName] AS [UpdatedByName]", "t.[RowVer]"]);
         from.Append(" LEFT JOIN meta.[User] cu ON cu.[Id] = t.[CreatedBy] LEFT JOIN meta.[User] uu ON uu.[Id] = t.[UpdatedBy]");
-        return (string.Join(", ", cols), from.ToString());
+        return (string.Join(", ", cols), from.ToString(), pars);
     }
 
     private static string ResolveSort(EntityDef e, string? sort, string? dir, Func<FieldDef, bool> visible)
@@ -1186,8 +1213,10 @@ public sealed partial class RecordService(Db db, MetadataStore store)
         if (RecordFilter.For(e, user, write: false) is { } read && !await MatchesAsync(cn, tx, e, id, read, ct))
             throw new NotFound("El registro no existe.");
         if (write && RecordFilter.For(e, user, write: true) is { } w && !await MatchesAsync(cn, tx, e, id, w, ct))
-            throw new Forbidden("Puedes consultar este registro, pero tu rol no puede modificarlo.");
+            throw new Forbidden(CannotWrite);
     }
+
+    private const string CannotWrite = "Puedes consultar este registro, pero tu rol no puede modificarlo.";
 
     private static async Task<bool> MatchesAsync(SqlConnection cn, SqlTransaction? tx, EntityDef e, long id, SqlPredicate p, CancellationToken ct)
     {

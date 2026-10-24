@@ -10,14 +10,30 @@ using Erp.Api.Metadata;
 namespace Erp.Api.Environments;
 
 /// <summary>Spec 009: configuración del entorno. Vive fuera del repositorio y no se cambia desde la aplicación.</summary>
-public sealed record EnvironmentOptions(string Name, bool RequireApproval, string? SigningKey)
+public sealed record EnvironmentOptions(string Name, bool RequireApproval, string? SigningKey, bool AllowDirectChanges = false)
 {
     public const int MinKeyLength = 32;
 
     public bool Signing => SigningKey is not null;
 
+    /// <summary>
+    /// Spec 012: ¿se puede cambiar el modelo sin paquete (modelador, módulos, asistente)? En un entorno con aprobación, no:
+    /// el único camino es un paquete aprobado por otro administrador. <c>AllowDirectChanges</c> lo permite de forma
+    /// explícita (suites de prueba que se comportan como producción pero preparan datos con planes).
+    /// </summary>
+    public bool DirectChanges => !RequireApproval || AllowDirectChanges;
+
+    /// <summary>Spec 012: 409 si el entorno exige aprobación (H4). Se llama antes de tocar la base.</summary>
+    public void RequireDirectChange(string what)
+    {
+        if (!DirectChanges)
+            throw new Erp.Api.Infrastructure.Conflict(
+                $"Este entorno exige la aprobación de otro administrador: {what} no se aplica directamente. Los cambios al modelo llegan como paquete desde Configuración › Entornos.");
+    }
+
     public static EnvironmentOptions From(IConfiguration config) =>
-        Create(config["Environments:Name"], config.GetValue("Environments:RequireApproval", false), config["Environments:SigningKey"]);
+        Create(config["Environments:Name"], config.GetValue("Environments:RequireApproval", false), config["Environments:SigningKey"])
+            with { AllowDirectChanges = config.GetValue("Environments:AllowDirectChanges", false) };
 
     /// <summary>Una clave corta o un nombre largo detienen el arranque: mejor no arrancar que firmar con una clave débil.</summary>
     public static EnvironmentOptions Create(string? name, bool requireApproval, string? signingKey)

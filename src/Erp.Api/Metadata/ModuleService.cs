@@ -49,7 +49,7 @@ public sealed record ModuleInfo(string Id, string Name, string Description, stri
 /// Los paquetes se leen de la carpeta del servidor; nunca se reciben por la API.
 /// </summary>
 public sealed partial class ModuleService(Db db, MetadataStore store, PlanService plans, RecordService records,
-    IConfiguration config, IWebHostEnvironment env, JsonSerializerOptions json)
+    IConfiguration config, IWebHostEnvironment env, JsonSerializerOptions json, Environments.EnvironmentOptions environment)
 {
     [GeneratedRegex("^[a-z][a-z0-9-]{1,40}$", RegexOptions.CultureInvariant)]
     private static partial Regex IdPattern();
@@ -111,6 +111,7 @@ public sealed partial class ModuleService(Db db, MetadataStore store, PlanServic
     {
         var user = http.CurrentUser();
         if (!user.IsSuperuser) throw new Forbidden("Solo un administrador puede instalar módulos.");
+        environment.RequireDirectChange("instalar un módulo"); // spec 012
         var p = Find(id);
 
         await using var cn = await db.OpenAsync(ct);
@@ -176,6 +177,7 @@ public sealed partial class ModuleService(Db db, MetadataStore store, PlanServic
     public async Task<int> UpgradeAsync(string id, HttpContext http, CancellationToken ct)
     {
         if (!http.CurrentUser().IsSuperuser) throw new Forbidden("Solo un administrador puede actualizar módulos.");
+        environment.RequireDirectChange("actualizar un módulo"); // spec 012
         var p = Find(id);
         await using var cn = await db.OpenAsync(ct);
         await using var tx = (SqlTransaction)await cn.BeginTransactionAsync(ct);

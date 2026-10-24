@@ -1,4 +1,5 @@
 using Dapper;
+using Erp.Api.Environments;
 using Erp.Api.Infrastructure;
 using Erp.Api.Metadata;
 using Erp.Api.Security;
@@ -40,9 +41,10 @@ public static class ModelEndpoints
             return await plans.PreviewAsync(plan, ct);
         });
 
-        g.MapPost("/plan/apply", async (ChangePlan plan, HttpContext http, PlanService plans, CancellationToken ct) =>
+        g.MapPost("/plan/apply", async (ChangePlan plan, HttpContext http, PlanService plans, EnvironmentOptions env, CancellationToken ct) =>
         {
             RequireModeler(http);
+            env.RequireDirectChange("un plan del modelador");
             return new { changeSetId = await plans.ApplyAsync(plan, http, ct) };
         });
 

@@ -38,12 +38,7 @@ public sealed class PlanService(Db db, MetadataStore store, JsonSerializerOption
     {
         var user = http.CurrentUser();
 
-        // Serializa los cambios de modelo: dos modeladores no pueden aplicar planes a la vez.
-        var lockResult = await cn.ExecuteScalarAsync<int>("""
-            DECLARE @r int; EXEC @r = sp_getapplock @Resource = 'erp-model', @LockMode = 'Exclusive',
-                @LockOwner = 'Transaction', @LockTimeout = 10000; SELECT @r;
-            """, transaction: tx);
-        if (lockResult < 0) throw new Conflict("Otro cambio de modelo está en curso. Intenta de nuevo.");
+        await LockModelAsync(cn, tx);
 
         // Se recompila contra el modelo leído dentro de la transacción, no contra la caché.
         var model = await MetadataStore.LoadAsync(cn, tx);
@@ -131,6 +126,16 @@ public sealed class PlanService(Db db, MetadataStore store, JsonSerializerOption
         await using var cn = await db.OpenAsync(ct);
         var roles = (await LoadRolesAsync(cn, null)).Union(extraRoles).ToHashSet(StringComparer.OrdinalIgnoreCase);
         return PlanCompiler.Compile(plan, model, roles, boards);
+    }
+
+    /// <summary>Serializa los cambios de modelo: dos modeladores no pueden aplicar planes a la vez (reentrante en la transacción).</summary>
+    internal static async Task LockModelAsync(DbConnection cn, DbTransaction tx)
+    {
+        var lockResult = await cn.ExecuteScalarAsync<int>("""
+            DECLARE @r int; EXEC @r = sp_getapplock @Resource = 'erp-model', @LockMode = 'Exclusive',
+                @LockOwner = 'Transaction', @LockTimeout = 10000; SELECT @r;
+            """, transaction: tx);
+        if (lockResult < 0) throw new Conflict("Otro cambio de modelo está en curso. Intenta de nuevo.");
     }
 
     internal static async Task<IReadOnlySet<string>> LoadRolesAsync(DbConnection cn, DbTransaction? tx) =>

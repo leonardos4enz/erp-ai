@@ -17,6 +17,7 @@ en orden, no en paralelo: casi todas tocan el núcleo del motor (`PlanCompiler`,
 | 009 Entornos | Implementado ([spec](specs/009-entornos/spec.md)) |
 | 010 Multi-empresa / multi-moneda | Implementado ([spec](specs/010-multi-empresa-moneda/spec.md)) |
 | 011 Asistente IA (Claude) | Implementado ([spec](specs/011-asistente-ia/spec.md)) |
+| 012 Endurecimiento | Implementado ([spec](specs/012-endurecimiento/spec.md)) |
 
 ## Diagnóstico
 | Brecha señalada | Situación actual | Spec |
@@ -95,6 +96,16 @@ de metadatos, más puede construir.
   El asistente recibe solo metadatos, devuelve un Plan de Cambios que pasa por el mismo compilador y vista previa, se
   corrige con los errores del compilador y lo aplica la persona que lo pidió. Pendiente: respuestas en flujo y editar el
   plan propuesto en el modelador antes de aplicarlo.
+
+### 012 — Endurecimiento
+Origen: auditoría de solo lectura (2026-10-23) que verificó en el código seis lugares donde una regla ya declarada no se
+aplicaba en todos los caminos. Sin capacidades nuevas: la bitácora respeta la seguridad del dato (006/010); una transición
+sin roles exige el alcance de escritura; el motor bloquea los documentos que tocarán las automatizaciones antes de validar
+(sobre-recepción concurrente) y Compras 1.7.0 agrega la regla en la partida; con aprobación (009) el modelo solo cambia por
+paquetes; el límite del asistente se reserva antes de llamar al proveedor y aplicar exige la huella de lo revisado; la
+etiqueta de una referencia fuera de alcance es «(sin acceso)».
+- Diferidos (con razón en la spec): acumulado en SQL en lugar de memoria, folios fuera de la transacción de importación,
+  y que un paquete no archive campos locales sin decisión explícita.
 
 ## Decisión: ¿extensión con código?
 La auditoría tiene razón en el costo: cada necesidad nueva exige una capacidad del motor. Se mantiene

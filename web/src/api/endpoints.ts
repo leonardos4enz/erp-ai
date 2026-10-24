@@ -226,6 +226,8 @@ export const assistantApi = {
   conversation: (id: number, signal?: AbortSignal) => api<Conversation>(`/assistant/conversations/${id}`, { signal }),
   request: (prompt: string, conversationId?: number) =>
     api<Proposal>('/assistant/requests', { method: 'POST', body: { prompt, conversationId } }),
-  apply: (id: number) => api<{ changeSetId: number; proposal: Proposal }>(`/assistant/requests/${id}/apply`, { method: 'POST' }),
+  /** Spec 012: con la huella de la propuesta revisada; si el modelo cambió desde entonces, el servidor responde 409. */
+  apply: (id: number, reviewHash?: string) =>
+    api<{ changeSetId: number; proposal: Proposal }>(`/assistant/requests/${id}/apply`, { method: 'POST', body: { reviewHash } }),
   discard: (id: number) => api<Proposal>(`/assistant/requests/${id}/discard`, { method: 'POST' }),
 };

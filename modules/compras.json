@@ -1,7 +1,7 @@
 {
   "id": "compras",
   "name": "Compras",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "icon": "shopping-cart",
   "description": "Requisiciones, órdenes de compra con autorización por montos y recepción de mercancía con cantidades recibidas y pendientes. Incluye proveedores, productos y catálogos base.",
   "plan": {
@@ -500,6 +500,30 @@
               { "type": "chart", "entity": "OrdenCompra", "report": "ComprasPorProveedor", "measure": 1, "wide": true },
               { "type": "table", "entity": "OrdenCompraPartida", "report": "ProductosMasComprados", "wide": true }
             ] } }
+      ] } },
+    { "version": "1.7.0",
+      "description": "Endurecimiento (spec 012): la partida de la orden nunca registra más de lo pedido (red de seguridad ante recepciones simultáneas) y el producto, que se comparte entre empresas, guarda la moneda de su costo último.",
+      "plan": { "description": "Compras 1.7.0", "operations": [
+        { "op": "setRules", "entity": "OrdenCompraPartida", "rules": [
+            { "name": "CantidadPositiva", "field": "Cantidad", "assert": "Cantidad > 0", "message": "La cantidad debe ser mayor a cero." },
+            { "name": "PrecioNoNegativo", "field": "PrecioUnitario", "assert": "PrecioUnitario >= 0", "message": "El precio no puede ser negativo." },
+            { "name": "DescuentoRango", "field": "DescuentoPct", "assert": "DescuentoPct >= 0 AND DescuentoPct <= 100", "message": "El descuento debe estar entre 0 y 100%." },
+            { "name": "IvaRango", "field": "IvaPct", "assert": "IvaPct >= 0 AND IvaPct <= 100", "message": "El IVA debe estar entre 0 y 100%." },
+            { "name": "RecibidoNoExcede", "field": "CantidadRecibida", "assert": "CantidadRecibida <= Cantidad", "message": "Lo recibido no puede exceder lo pedido en la partida." }
+          ] },
+        { "op": "addField", "entity": "Producto", "field": { "name": "MonedaCosto", "label": "Moneda del costo", "type": "text", "maxLength": 3, "editable": false, "showInList": false } },
+        { "op": "updateField", "entity": "Producto", "field": "CostoUltimo", "label": "Costo último (en la moneda del costo)" },
+        { "op": "setAutomations", "entity": "Recepcion", "merge": true, "automations": [
+            { "name": "AcumularRecibido", "label": "Acumular lo recibido en la orden", "on": "enterState", "state": "Confirmada", "actions": [
+                { "type": "rollup", "lines": "Partidas", "target": "PartidaOrden", "field": "CantidadRecibida", "sum": "Cantidad", "filter": "Recepcion.Estado = 'Confirmada'" },
+                { "type": "update", "lines": "Partidas", "target": "Producto", "set": [
+                    { "field": "CostoUltimo", "value": "PartidaOrden.CostoMXN" },
+                    { "field": "MonedaCosto", "value": "BASECURRENCY()" }
+                  ] },
+                { "type": "transition", "target": "OrdenCompra", "transition": "recibir", "when": "OrdenCompra.PendientePorRecibir <= 0" },
+                { "type": "transition", "target": "OrdenCompra", "transition": "recibirParcial", "when": "OrdenCompra.PendientePorRecibir > 0" }
+              ] }
+          ] }
       ] } }
   ],
   "roles": [    { "name": "Solicitante", "description": "Crea y envía requisiciones de compra.", "canManageModel": false, "canManageUsers": false, "canViewAudit": false,

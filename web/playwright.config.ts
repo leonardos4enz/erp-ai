@@ -59,6 +59,9 @@ export default defineConfig({
       Environments__Name: 'Producción E2E',
       Environments__RequireApproval: 'true',
       Environments__SigningKey: process.env.E2E_SIGNING_KEY ?? '',
+      // Spec 012: con aprobación, el modelo solo cambia por paquetes; la suite prepara sus datos con planes, así que lo
+      // permite de forma explícita. endurecimiento.spec.ts levanta otra instancia sin esta opción (:5092) y prueba el bloqueo.
+      Environments__AllowDirectChanges: 'true',
       // Spec 011: el asistente habla con un proveedor simulado (asistente.spec.ts) en loopback. La clave se guarda desde la
       // app en la prueba y es ficticia: la suite nunca usa una clave real de Anthropic.
       Assistant__BaseUrl: 'http://127.0.0.1:5091',

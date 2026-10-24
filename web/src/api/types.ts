@@ -528,8 +528,11 @@ export interface AssistantStatus {
   keySource: 'server' | 'app' | null; keyUpdatedAt?: string; keyUpdatedBy?: string;
   /** Espacio de trabajo de Anthropic (solo con claves de organización). */
   workspaceId?: string; canConfigure: boolean;
+  /** Spec 012: falso en un entorno con aprobación (los cambios llegan como paquete). */
+  directChanges: boolean;
 }
-export type ProposalStatus = 'proposed' | 'invalid' | 'answer' | 'failed' | 'applied' | 'discarded' | 'superseded';
+/** Spec 012: «pending» es una solicitud que espera al proveedor (reserva su lugar en el límite por hora). */
+export type ProposalStatus = 'proposed' | 'invalid' | 'answer' | 'failed' | 'applied' | 'discarded' | 'superseded' | 'pending';
 export interface Proposal {
   id: number;
   conversationId: number;
@@ -547,6 +550,10 @@ export interface Proposal {
   changeSetId?: number;
   error?: string;
   canApply: boolean;
+  /** Spec 012: huella de lo revisado (plan, pasos y advertencias); aplicar la envía. */
+  reviewHash?: string;
+  /** Spec 012: por qué no se aplica aquí aunque sea válida (entorno con aprobación). */
+  blockedReason?: string;
 }
 export interface ConversationSummary { id: number; title: string; turns: number; updatedAt: string; lastStatus: ProposalStatus }
 export interface Conversation { id: number; turns: Proposal[] }
