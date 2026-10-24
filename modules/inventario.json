@@ -1,7 +1,7 @@
 {
   "id": "inventario",
   "name": "Inventario",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "icon": "boxes",
   "description": "Existencias por almacén y producto, y movimientos de entrada, salida, ajuste y traspaso. Las recepciones confirmadas de Compras generan sus entradas solas.",
   "requires": ["compras"],
@@ -174,6 +174,47 @@
         { "op": "updateEntity", "entity": "Existencia", "perCompany": true },
         { "op": "updateEntity", "entity": "MovimientoInventario", "perCompany": true },
         { "op": "updateEntity", "entity": "Traspaso", "perCompany": true }
+      ] } },
+    { "version": "1.5.0",
+      "description": "Costo de entrada: la recepción calcula el costo unitario de cada partida en la moneda base (CONVERT a la fecha de la recepción; sin tipo de cambio, el de la orden) y la entrada al almacén lo recibe. Las entradas y ajustes manuales capturan su costo unitario y los traspasos entran al destino al costo de origen.",
+      "plan": { "description": "Inventario 1.5.0: costo de entrada", "operations": [
+        { "op": "addField", "entity": "OrdenCompra", "field": { "name": "MonedaClave", "label": "Clave de la moneda", "type": "formula", "resultType": "text", "showInList": false, "formula": "Moneda.Clave" } },
+        { "op": "addField", "entity": "Recepcion", "field": { "name": "Moneda", "label": "Moneda de la orden", "type": "text", "maxLength": 10, "showInList": false, "editable": false, "defaultValue": "OrdenCompra.MonedaClave" } },
+        { "op": "addField", "entity": "RecepcionPartida", "field": { "name": "CostoUnitario", "label": "Costo unitario (moneda base)", "type": "formula", "resultType": "decimal", "precision": 18, "scale": 4,
+            "formula": "ROUND(COALESCE(CONVERT(PartidaOrden.PrecioUnitario * (1 - PartidaOrden.DescuentoPct / 100), Recepcion.Moneda, BASECURRENCY(), Recepcion.Fecha), PartidaOrden.CostoMXN), 4)" } },
+        { "op": "addField", "entity": "RecepcionPartida", "field": { "name": "Costo", "label": "Costo (moneda base)", "type": "formula", "resultType": "decimal", "precision": 18, "scale": 2, "formula": "ROUND(Cantidad * CostoUnitario, 2)" } },
+        { "op": "addField", "entity": "Recepcion", "field": { "name": "CostoTotal", "label": "Costo total (moneda base)", "type": "formula", "resultType": "decimal", "precision": 18, "scale": 2, "formula": "SUM(Partidas.Costo)" } },
+        { "op": "addField", "entity": "MovimientoInventario", "field": { "name": "CostoUnitario", "label": "Costo unitario", "type": "decimal", "precision": 18, "scale": 4 } },
+        { "op": "setRules", "entity": "MovimientoInventario", "rules": [
+            { "name": "CantidadNoCero", "field": "Cantidad", "assert": "Cantidad <> 0", "message": "La cantidad no puede ser cero." },
+            { "name": "SoloAjusteNegativo", "field": "Cantidad", "when": "Tipo <> 'Ajuste'", "assert": "Cantidad > 0", "message": "La cantidad debe ser mayor a cero (solo un ajuste puede ser negativo)." },
+            { "name": "AjusteSupervisor", "field": "Tipo", "when": "Tipo = 'Ajuste'", "assert": "HASROLE('Supervisor de inventario') OR HASROLE('Administrador')",
+              "message": "Solo el supervisor de inventario registra ajustes." },
+            { "name": "TraspasoConDocumento", "field": "Tipo", "when": "Tipo IN ('Traspaso salida', 'Traspaso entrada')", "assert": "NOT ISBLANK(Referencia)",
+              "message": "Los traspasos se registran con un documento de traspaso." },
+            { "name": "CostoNoNegativo", "field": "CostoUnitario", "assert": "CostoUnitario >= 0", "message": "El costo unitario no puede ser negativo." }
+          ] },
+        { "op": "setAutomations", "entity": "Recepcion", "merge": true, "automations": [
+            { "name": "EntradaAlmacen", "label": "Registrar la entrada al almacén", "on": "enterState", "state": "Confirmada",
+              "actions": [
+                { "type": "create", "lines": "Partidas", "entity": "MovimientoInventario", "set": [
+                    { "field": "Tipo", "value": "'Entrada'" }, { "field": "Almacen", "value": "Recepcion.Almacen" },
+                    { "field": "Producto", "value": "Producto" }, { "field": "Cantidad", "value": "Cantidad" }, { "field": "Referencia", "value": "Recepcion.Folio" },
+                    { "field": "CostoUnitario", "value": "CostoUnitario" } ] }
+              ] }
+          ] },
+        { "op": "setAutomations", "entity": "Traspaso", "merge": true, "automations": [
+            { "name": "MoverMercancia", "label": "Mover la mercancía entre almacenes", "on": "enterState", "state": "Aplicado",
+              "actions": [
+                { "type": "create", "lines": "Partidas", "entity": "MovimientoInventario", "set": [
+                    { "field": "Tipo", "value": "'Traspaso entrada'" }, { "field": "Almacen", "value": "Traspaso.AlmacenDestino" },
+                    { "field": "Producto", "value": "Producto" }, { "field": "Cantidad", "value": "Cantidad" }, { "field": "Referencia", "value": "Traspaso.Folio" },
+                    { "field": "CostoUnitario", "value": "ROUND(UNITCOST('Existencia', Cantidad, Traspaso.AlmacenOrigen, Producto), 4)" } ] },
+                { "type": "create", "lines": "Partidas", "entity": "MovimientoInventario", "set": [
+                    { "field": "Tipo", "value": "'Traspaso salida'" }, { "field": "Almacen", "value": "Traspaso.AlmacenOrigen" },
+                    { "field": "Producto", "value": "Producto" }, { "field": "Cantidad", "value": "Cantidad" }, { "field": "Referencia", "value": "Traspaso.Folio" } ] }
+              ] }
+          ] }
       ] } }
   ],
   "roles": [

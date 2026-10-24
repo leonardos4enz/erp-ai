@@ -162,7 +162,25 @@ public static class AutomationActions
     public const string Transition = "transition";
     public const string Create = "create";
     public const string Rollup = "rollup";
-    public static readonly IReadOnlySet<string> All = new HashSet<string> { Update, Transition, Create, Rollup };
+    /// <summary>Spec 020: valúa el registro con capas de costo (promedio o FIFO).</summary>
+    public const string Cost = "cost";
+    public static readonly IReadOnlySet<string> All = new HashSet<string> { Update, Transition, Create, Rollup, Cost };
+}
+
+/// <summary>Spec 020: métodos de costeo que acepta la expresión <c>method</c> de una acción <c>cost</c>.</summary>
+public static class CostMethods
+{
+    public const string Average = "average";
+    public const string Fifo = "fifo";
+    public static readonly IReadOnlySet<string> All = new HashSet<string> { Average, Fifo };
+}
+
+/// <summary>Spec 020: partida que una acción <c>create</c> agrega al documento nuevo.</summary>
+public sealed record LineTemplate
+{
+    public required string Field { get; init; }
+    public string? When { get; init; }
+    public IReadOnlyList<FieldAssignment> Set { get; init; } = [];
 }
 
 public sealed record MatchPair(string Field, string Source);
@@ -183,6 +201,15 @@ public sealed record AutomationAction
     public string? Field { get; init; }
     public string? Sum { get; init; }
     public string? Filter { get; init; }
+    // Spec 020: create con partidas (y Transition: la que se ejecuta sobre el registro nuevo).
+    public IReadOnlyList<LineTemplate>? CreateLines { get; init; }
+    // Spec 020: cost (Entity + Match = la llave y el saldo; Field = valor restante de las capas en el saldo).
+    public string? Quantity { get; init; }
+    public string? Method { get; init; }
+    public string? UnitCost { get; init; }
+    public string? FallbackCost { get; init; }
+    public string? CostField { get; init; }
+    public string? UnitCostField { get; init; }
 }
 
 public sealed record Automation
@@ -239,6 +266,30 @@ public sealed record ScheduleDef
     public const int MaxBatchSize = 1000;
     [JsonIgnore]
     public int EffectiveBatchSize => BatchSize ?? DefaultBatchSize;
+}
+
+// ---------- Spec 020: libro de partida doble ----------
+
+/// <summary>Periodos del libro: el documento contabilizado debe caer en uno cuya condición <c>Open</c> se cumpla.</summary>
+public sealed record LedgerPeriod
+{
+    public required string Entity { get; init; }
+    public required string Start { get; init; }
+    public required string End { get; init; }
+    public required string Open { get; init; }
+}
+
+/// <summary>Ver plan 020 §1. <c>States</c> nulo = todos los estados están contabilizados.</summary>
+public sealed record LedgerDef
+{
+    public required string Lines { get; init; }
+    public required string Debit { get; init; }
+    public required string Credit { get; init; }
+    public string? Date { get; init; }
+    public IReadOnlyList<string>? States { get; init; }
+    public LedgerPeriod? Period { get; init; }
+
+    public bool IsPosted(string? state) => States is null || States.Contains(state ?? "", StringComparer.OrdinalIgnoreCase);
 }
 
 // ---------- Spec 006: seguridad por campo y por registro ----------
@@ -497,6 +548,8 @@ public sealed record EntityDef
     public IReadOnlyList<WebhookDef>? Webhooks { get; init; }
     /// <summary>Spec 016: tareas programadas (solo se envían a modeladores; si corren se decide por entorno).</summary>
     public IReadOnlyList<ScheduleDef>? Schedules { get; init; }
+    /// <summary>Spec 020: el documento es un libro de partida doble (cuadre y periodos los garantiza el motor).</summary>
+    public LedgerDef? Ledger { get; init; }
     /// <summary>Spec 010: cada registro pertenece a una empresa (columna de sistema <c>CompanyId</c>). Las partidas siguen a su documento.</summary>
     public bool PerCompany { get; init; }
 
@@ -547,7 +600,15 @@ public sealed record ChangePlan
 [JsonDerivedType(typeof(ArchiveDashboardOp), "archiveDashboard")]
 [JsonDerivedType(typeof(SetWebhooksOp), "setWebhooks")]
 [JsonDerivedType(typeof(SetSchedulesOp), "setSchedules")]
+[JsonDerivedType(typeof(SetLedgerOp), "setLedger")]
 public abstract record Operation;
+
+/// <summary>Spec 020. Declara el libro del catálogo; <c>null</c> lo quita.</summary>
+public sealed record SetLedgerOp : Operation
+{
+    public required string Entity { get; init; }
+    public LedgerDef? Ledger { get; init; }
+}
 
 /// <summary>Spec 016. Reemplaza las tareas programadas del catálogo.</summary>
 public sealed record SetSchedulesOp : Operation

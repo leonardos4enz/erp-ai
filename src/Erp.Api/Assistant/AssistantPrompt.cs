@@ -55,9 +55,18 @@ public static class AssistantPrompt
           Crea el campo Estado; los nombres de estado van en PascalCase (PorAutorizar).
         - setRules { entity, rules: [{ name, message, assert, when?, field? }] }   (reemplaza todas; assert debe ser verdadero)
         - setAutomations { entity, merge?, automations: [{ name, label, on: create|update|enterState|transition, state?,
-          transition?, when?, actions: [{ type: update|transition|create|rollup, lines?, when?, target?, set?,
-          transition?, entity?, match?: [{ field, source }], createMissing?, field?, sum?, filter? }], mode?: sync|async }] }
+          transition?, when?, actions: [{ type: update|transition|create|rollup|cost, lines?, when?, target?, set?,
+          transition?, entity?, match?: [{ field, source }], createMissing?, field?, sum?, filter?, createLines?,
+          quantity?, method?, unitCost?, fallbackCost?, costField?, unitCostField? }], mode?: sync|async }] }
           mode async: las acciones corren después, fuera de la transacción del evento (no detienen a quien guarda).
+          create: createLines [{ field (partidas del nuevo), when?, set }] agrega partidas; transition ejecuta esa transición
+          sobre el registro nuevo. cost (sin lines): valúa el registro con capas por llave (entity + match = catálogo de saldo),
+          quantity = campo con signo (+ entra, − sale), method = expresión 'average'|'fifo', unitCost = costo de una entrada,
+          fallbackCost = costo de lo que las capas no cubren, costField/unitCostField = campos del registro que reciben el
+          costo; field = campo del saldo que recibe el valor restante.
+        - setLedger { entity, ledger: { lines, debit, credit, date?, states?: string[], period?: { entity, start, end, open } } }
+          (o ledger: null). Libro de partida doble: en los estados contabilizados las partidas cuadran (cargos = abonos) y
+          la fecha cae en un periodo cuya condición open se cumple. Lo garantiza el motor por cualquier vía.
         - setSecurity { entity, security: { owner?, teamOwners?, systemManaged?, fields?: [{ field, read?: string[], edit?: string[],
           editableIn?: string[] }], records?: [{ roles?, scope?: all|unitTree|unit|own, where?, access?: read|write }] } }
           (o security: null para quitarla). Los roles deben existir (lista "roles" del modelo). unitTree = la unidad del
@@ -96,7 +105,7 @@ public static class AssistantPrompt
         rutas Campo o Referencia.Campo. Funciones: IF(c,a,b), COALESCE(a,b,…), ISBLANK(x), ROUND(x,n), ABS(x),
         MIN(a,b), MAX(a,b), LEN(s), UPPER(s), ISEMAIL(s), TODAY(), NOW(), ADDDAYS(fecha,n), DAYS(desde,hasta),
         CURRENTUSER(), CURRENTUNIT(), HASROLE('Rol'), ISCREATOR(), SUM(Partidas.Campo), COUNT(Partidas),
-        BASECURRENCY(), CURRENTCOMPANY(), RATE(de,a[,fecha]), CONVERT(importe,de,a[,fecha]). Las monedas son códigos
+        BASECURRENCY(), CURRENTCOMPANY(), RATE(de,a[,fecha]), CONVERT(importe,de,a[,fecha]), UNITCOST('CatálogoSaldo', cantidad, llave…). Las monedas son códigos
         ISO de 3 letras. Una fórmula guardada de un catálogo compartido (no perCompany) no puede usar BASECURRENCY() ni
         CURRENTCOMPANY(). Comparar contra un campo vacío da desconocido y una regla desconocida no se viola: usa
         ISBLANK() cuando importe.

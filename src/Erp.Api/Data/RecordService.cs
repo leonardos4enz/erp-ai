@@ -287,6 +287,7 @@ public sealed partial class RecordService(Db db, MetadataStore store)
             Compute(draft, e, model, loader, env);
         }
         Validate(draft, e, model, loader, env, user);
+        await CheckLedgerAsync(cn, tx, e, model, draft, company, before: null, id: null, ct);
 
         await AssignFoliosAsync(cn, tx, e, draft, c.Folios, ct);
         var id = await InsertAsync(cn, tx, e, draft.Header, extra: null, user.Id, ct, company);
@@ -326,6 +327,7 @@ public sealed partial class RecordService(Db db, MetadataStore store)
             Compute(draft, e, model, loader, env);
         }
         Validate(draft, e, model, loader, env, user);
+        await CheckLedgerAsync(cn, tx, e, model, draft, draft.CompanyId, LedgerSnapshot(e, before), id, ct);
 
         await UpdateHeaderAsync(cn, tx, e, id, draft.Header, rowVersion, user.Id, ct);
         var existingLines = await LoadDraftAsync(cn, tx, e, model, id, ct);
@@ -434,6 +436,7 @@ public sealed partial class RecordService(Db db, MetadataStore store)
                 draft.Header[f.Name] = Coerce(f, ExprEvaluator.Evaluate(s.Value, scope, env));
         Compute(draft, e, c.Model, loader, env);
         Validate(draft, e, c.Model, loader, env, c.User, checkRequired: false);
+        await CheckLedgerAsync(c.Cn, c.Tx, e, c.Model, draft, draft.CompanyId, LedgerSnapshot(e, before), id, c.Ct);
 
         await UpdateHeaderAsync(c.Cn, c.Tx, e, id, draft.Header, rowVersion, c.User.Id, c.Ct);
         await WriteHistoryAsync(c.Cn, c.Tx, e, id, from, t.To, t.Name, comment, c.User.Id, c.Ct);
@@ -470,6 +473,8 @@ public sealed partial class RecordService(Db db, MetadataStore store)
             }
         }
 
+        // Spec 020: no se elimina lo contabilizado en un periodo cerrado (lo aplicado, además, no es editable).
+        await CheckLedgerAsync(cn, tx, e, model, null, draft.CompanyId, LedgerSnapshot(e, Snapshot(draft)), id, ct);
         await SoftDeleteAsync(cn, tx, e, "[Id] = @id", id, user.Id, ct);
         foreach (var lf in e.ActiveFields.Where(f => f.Type == FieldTypes.Lines))
             if (model.TryGetValue(lf.ChildEntity!, out var child))
@@ -490,7 +495,7 @@ public sealed partial class RecordService(Db db, MetadataStore store)
     /// <summary>Spec 010: la empresa del contexto es la actual del usuario, que es la del registro (no ve los de otras).</summary>
     private static ExprEnv Env(UserContext user, DocDraft draft, ICurrencyRates rates) => new(user.Id, user.Roles, draft.CreatorId, user.Unit)
     {
-        Company = user.Company?.Code, BaseCurrency = user.Company?.BaseCurrency, Rates = rates,
+        Company = user.Company?.Code, BaseCurrency = user.Company?.BaseCurrency, Rates = rates, Costs = rates as ICostLayers,
     };
 
     private static DocScope HeaderScope(DocDraft d, EntityDef e, IReadOnlyDictionary<string, EntityDef> model, RelatedLoader loader, Dictionary<string, List<DocScope>>? lineScopes = null)

@@ -317,6 +317,7 @@ public static class ModelDiff
         if (!JsonEq(Norm(d.Webhooks), Norm(t?.Webhooks))) sets.Add(new SetWebhooksOp { Entity = name, Webhooks = d.Webhooks ?? [] });
         // Spec 016: si una tarea corre es decisión de cada entorno (meta.ScheduleState): solo viaja la definición.
         if (!JsonEq(Norm(d.Schedules), Norm(t?.Schedules))) sets.Add(new SetSchedulesOp { Entity = name, Schedules = d.Schedules ?? [] });
+        if (!JsonEq(d.Ledger, t?.Ledger)) sets.Add(new SetLedgerOp { Entity = name, Ledger = d.Ledger });
     }
 
     private static UpdateEntityOp? EntityChange(EntityDef d, EntityDef t, List<string> warnings)

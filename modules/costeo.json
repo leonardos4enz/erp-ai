@@ -1,0 +1,52 @@
+{
+  "id": "costeo",
+  "name": "Costeo",
+  "version": "1.0.0",
+  "icon": "calculator",
+  "description": "Valuación de existencias con costo promedio ponderado o FIFO por producto, y póliza de entrada por cada recepción de mercancía.",
+  "requires": ["inventario", "contabilidad"],
+  "plan": {
+    "description": "Módulo de Costeo 1.0.0",
+    "operations": [
+      { "op": "addField", "entity": "Producto", "field": { "name": "MetodoCosteo", "label": "Método de costeo", "type": "choice", "required": true,
+          "options": ["Promedio", "FIFO"], "defaultValue": "'Promedio'" } },
+      { "op": "addField", "entity": "MovimientoInventario", "field": { "name": "CostoTotal", "label": "Costo total", "type": "decimal", "precision": 18, "scale": 2, "editable": false } },
+      { "op": "addField", "entity": "Existencia", "field": { "name": "Valor", "label": "Valor", "type": "decimal", "precision": 18, "scale": 2, "editable": false, "defaultValue": "0" } },
+      { "op": "addField", "entity": "Existencia", "field": { "name": "CostoPromedio", "label": "Costo promedio", "type": "formula", "resultType": "decimal", "precision": 18, "scale": 4,
+          "formula": "IF(ISBLANK(Valor) OR Cantidad <= 0, NULL, ROUND(Valor / Cantidad, 4))" } },
+      { "op": "addField", "entity": "Almacen", "field": { "name": "CuentaInventario", "label": "Cuenta de inventario", "type": "reference", "referenceEntity": "CuentaContable", "showInList": false } },
+      { "op": "addField", "entity": "Almacen", "field": { "name": "CuentaEntradas", "label": "Cuenta de entradas por facturar", "type": "reference", "referenceEntity": "CuentaContable", "showInList": false } },
+      { "op": "setAutomations", "entity": "MovimientoInventario", "merge": true, "automations": [
+          { "name": "Valuar", "label": "Valuar el movimiento", "on": "create",
+            "actions": [
+              { "type": "cost", "entity": "Existencia", "match": [ { "field": "Almacen", "source": "Almacen" }, { "field": "Producto", "source": "Producto" } ],
+                "field": "Valor", "quantity": "Efecto", "method": "IF(Producto.MetodoCosteo = 'FIFO', 'fifo', 'average')",
+                "unitCost": "CostoUnitario",
+                "fallbackCost": "CONVERT(Producto.CostoUltimo, COALESCE(Producto.MonedaCosto, BASECURRENCY()), BASECURRENCY(), Fecha)",
+                "costField": "CostoTotal", "unitCostField": "CostoUnitario" }
+            ] }
+        ] },
+      { "op": "setAutomations", "entity": "Recepcion", "merge": true, "automations": [
+          { "name": "PolizaEntrada", "label": "Póliza de entrada", "on": "enterState", "state": "Confirmada",
+            "when": "NOT ISBLANK(Almacen.CuentaInventario) AND NOT ISBLANK(Almacen.CuentaEntradas) AND CostoTotal > 0",
+            "actions": [
+              { "type": "create", "entity": "Poliza", "transition": "aplicar",
+                "set": [
+                  { "field": "Fecha", "value": "Fecha" }, { "field": "Tipo", "value": "'Diario'" },
+                  { "field": "Concepto", "value": "'Entrada por recepción ' & Folio" }, { "field": "Referencia", "value": "Folio" },
+                  { "field": "Origen", "value": "'Automática'" } ],
+                "createLines": [
+                  { "field": "Partidas", "set": [
+                      { "field": "Cuenta", "value": "Almacen.CuentaInventario" }, { "field": "Concepto", "value": "'Inventario recibido · ' & Folio" },
+                      { "field": "Cargo", "value": "CostoTotal" }, { "field": "Abono", "value": "0" } ] },
+                  { "field": "Partidas", "set": [
+                      { "field": "Cuenta", "value": "Almacen.CuentaEntradas" }, { "field": "Concepto", "value": "'Entradas por facturar · ' & Folio" },
+                      { "field": "Cargo", "value": "0" }, { "field": "Abono", "value": "CostoTotal" } ] }
+                ] }
+            ] }
+        ] }
+    ]
+  },
+  "roles": [],
+  "seed": []
+}

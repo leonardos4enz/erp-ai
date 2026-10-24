@@ -85,6 +85,7 @@ public static partial class PlanCompiler
                 SetReportsOp op => SetReports(ctx, op),
                 SetWebhooksOp op => SetWebhooks(ctx, op),
                 SetSchedulesOp op => SetSchedules(ctx, op),
+                SetLedgerOp op => SetLedger(ctx, op),
                 _ => ctx.Fail("Operación desconocida."),
             };
             // Solo se registra el efecto si la operación fue válida; así las siguientes ven un modelo coherente.
@@ -113,6 +114,11 @@ public static partial class PlanCompiler
                     errors.Add(new(lastOp.GetValueOrDefault(e.Name, -1), message));
             if (AutomationRules.FindCycle(working) is { } cycle)
                 errors.Add(new(-1, $"Ciclo de automatizaciones: {string.Join(" → ", cycle)}. Una automatización no puede terminar disparándose a sí misma."));
+
+            // Spec 020: un libro depende de sus partidas, del proceso y del catálogo de periodos.
+            foreach (var e in working.Values.Where(e => !e.IsArchived && e.Ledger is not null))
+                foreach (var message in LedgerRules.Validate(e, e.Ledger!, working, knownRoles))
+                    errors.Add(new(lastOp.GetValueOrDefault(e.Name, -1), $"{e.Label} › libro: {message}"));
 
             // Spec 006: un campo archivado o un estado eliminado (también en el documento de una partida)
             // no puede dejar una política de seguridad rota en silencio.
@@ -603,6 +609,19 @@ public static partial class PlanCompiler
         var text = op.Schedules.Count == 0 ? $"Quitar las tareas programadas de '{e.Label}'"
             : $"Definir {op.Schedules.Count} tarea(s) programada(s) en '{e.Label}': {string.Join(", ", op.Schedules.Select(s => s.Label))}";
         return new(e with { Schedules = op.Schedules.Count == 0 ? null : op.Schedules }, text, []);
+    }
+
+    // ---------------- Spec 020: libro de partida doble ----------------
+    // La forma completa se valida en la pasada final (LedgerRules): el plan puede crear las partidas o los periodos después.
+
+    private static OpResult? SetLedger(Ctx ctx, SetLedgerOp op)
+    {
+        var e = ctx.Active(op.Entity);
+        if (e is null) return null;
+        if (op.Ledger is null) return new(e with { Ledger = null }, $"Quitar el libro de partida doble de '{e.Label}'", []);
+        var period = op.Ledger.Period is { } p ? $", con periodos de '{p.Entity}'" : "";
+        return new(e with { Ledger = op.Ledger },
+            $"Declarar '{e.Label}' como libro de partida doble (cargos = abonos en {op.Ledger.Lines}{period})", []);
     }
 
     // ---------------- Spec 008: webhooks ----------------

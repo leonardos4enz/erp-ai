@@ -18,6 +18,8 @@ public static class ExprAnalyzer
         ["SUM"] = (1, 1), ["COUNT"] = (1, 1),
         // Spec 010: empresa y monedas.
         ["BASECURRENCY"] = (0, 0), ["CURRENTCOMPANY"] = (0, 0), ["RATE"] = (2, 3), ["CONVERT"] = (3, 4),
+        // Spec 020: costo unitario de las siguientes N unidades de las capas de una llave.
+        ["UNITCOST"] = (3, 7),
     };
 
     /// <summary>Spec 010: funciones cuyo valor depende de la empresa del contexto.</summary>
@@ -95,6 +97,8 @@ public static class ExprAnalyzer
                 else if (!roles.Contains(role)) errors.Add($"El rol '{role}' no existe.");
                 return;
             }
+            if (c.Name == "UNITCOST" && (c.Args[0] is not Literal { Value: string book } || !model.TryGetValue(book, out var be) || be.IsArchived))
+                errors.Add("UNITCOST necesita entre comillas el catálogo que guarda el saldo valuado, p. ej. UNITCOST('Existencia', Cantidad, Almacen, Producto).");
             foreach (var a in c.Args) Walk(a, false);
         }
 

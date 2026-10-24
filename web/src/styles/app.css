@@ -474,6 +474,9 @@ code, pre, .mono { font-family: var(--font-mono); font-size: 0.8125rem; }
 /* Módulos */
 .module-card { display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-5); }
 .module-card-head { gap: var(--space-3); align-items: flex-start; }
+/* Regresión (revisión 020, F-03): un nombre largo («Contabilidad») pasaba por debajo de la insignia; ahora la insignia baja de renglón. */
+.module-card-head { flex-wrap: wrap; }
+.module-card-head > .grow { min-width: fit-content; }
 .module-version { font-size: var(--text-xs); }
 .module-desc { font-size: var(--text-sm); margin: 0; }
 .module-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--space-3); }

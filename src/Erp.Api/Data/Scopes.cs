@@ -34,7 +34,7 @@ public sealed class LineDraft
 /// <c>Producto.CostoUltimo</c>. Los nombres de tabla y columna salen de los metadatos. Spec 010: también los tipos de
 /// cambio de <c>RATE</c> y <c>CONVERT</c>.
 /// </summary>
-public sealed class RelatedLoader(SqlConnection cn, SqlTransaction? tx, IReadOnlyDictionary<string, EntityDef> model) : ICurrencyRates
+public sealed class RelatedLoader(SqlConnection cn, SqlTransaction? tx, IReadOnlyDictionary<string, EntityDef> model) : ICurrencyRates, ICostLayers
 {
     private readonly Dictionary<(string, long), Values?> _rows = new();
     private readonly Dictionary<int, Values?> _users = new();
@@ -99,6 +99,28 @@ public sealed class RelatedLoader(SqlConnection cn, SqlTransaction? tx, IReadOnl
             rate = r.GetInt32(0) == 0 ? value : decimal.Round(1m / value, 10);
         }
         return _rates[(from, to, date)] = rate;
+    }
+
+    /// <summary>Spec 020: UNITCOST. Lee las capas abiertas de la llave en la empresa del contexto (catálogo por empresa).</summary>
+    public decimal? UnitCost(string book, decimal quantity, IReadOnlyList<object?> key, string? company)
+    {
+        if (quantity <= 0 || key.Count == 0 || key.Any(k => k is null) || !model.TryGetValue(book, out var b)) return null;
+        int? companyId = null;
+        if (b.PerCompany)
+        {
+            using var co = new SqlCommand("SELECT Id FROM meta.Company WHERE Code = @c", cn, tx);
+            co.Parameters.Add(new SqlParameter("@c", company ?? ""));
+            if (co.ExecuteScalar() is not int id) return null;
+            companyId = id;
+        }
+        using var cmd = new SqlCommand(
+            "SELECT Id, Quantity, Value FROM meta.CostLayer WHERE Book = @b AND KeyHash = @h AND Quantity > 0 ORDER BY Id", cn, tx);
+        cmd.Parameters.Add(new SqlParameter("@b", b.Name));
+        cmd.Parameters.Add(new SqlParameter("@h", CostMath.KeyHash(b, companyId, key!)));
+        using var r = cmd.ExecuteReader();
+        var layers = new List<CostLayerState>();
+        while (r.Read()) layers.Add(new(r.GetInt64(0), r.GetDecimal(1), r.GetDecimal(2)));
+        return CostMath.PeekUnitCost(layers, quantity);
     }
 
     /// <summary>Spec 015: ¿el principal es un equipo y está activo? Null si no existe.</summary>

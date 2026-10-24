@@ -1,0 +1,144 @@
+{
+  "id": "contabilidad",
+  "name": "Contabilidad",
+  "version": "1.0.0",
+  "icon": "landmark",
+  "description": "Catálogo de cuentas, pólizas de partida doble y periodos contables con cierre. El cuadre y los periodos cerrados los garantiza el motor por cualquier vía.",
+  "plan": {
+    "description": "Módulo de Contabilidad 1.0.0",
+    "operations": [
+      { "op": "createEntity", "group": "Contabilidad", "name": "CuentaContable", "label": "Cuenta contable", "labelPlural": "Cuentas contables", "icon": "book-open", "perCompany": true,
+        "description": "Catálogo de cuentas de cada empresa. Cargos, abonos y saldo los calcula el sistema con las pólizas aplicadas.",
+        "fields": [
+          { "name": "Codigo", "label": "Código", "type": "text", "maxLength": 20, "required": true, "unique": true },
+          { "name": "Nombre", "label": "Nombre", "type": "text", "maxLength": 120, "required": true },
+          { "name": "Tipo", "label": "Tipo", "type": "choice", "required": true, "options": ["Activo", "Pasivo", "Capital", "Ingresos", "Costos", "Gastos"] },
+          { "name": "Naturaleza", "label": "Naturaleza", "type": "choice", "required": true, "options": ["Deudora", "Acreedora"],
+            "defaultValue": "IF(Tipo IN ('Activo', 'Costos', 'Gastos'), 'Deudora', 'Acreedora')" },
+          { "name": "Activa", "label": "Activa", "type": "boolean", "defaultValue": "TRUE" },
+          { "name": "Cargos", "label": "Cargos", "type": "decimal", "precision": 18, "scale": 2, "editable": false, "defaultValue": "0" },
+          { "name": "Abonos", "label": "Abonos", "type": "decimal", "precision": 18, "scale": 2, "editable": false, "defaultValue": "0" },
+          { "name": "Saldo", "label": "Saldo", "type": "formula", "resultType": "decimal", "precision": 18, "scale": 2,
+            "formula": "IF(Naturaleza = 'Deudora', Cargos - Abonos, Abonos - Cargos)" },
+          { "name": "Descripcion", "label": "Cuenta", "type": "formula", "resultType": "text", "showInList": false, "formula": "Codigo & ' · ' & Nombre" }
+        ] },
+      { "op": "updateEntity", "entity": "CuentaContable", "displayField": "Descripcion" },
+
+      { "op": "createEntity", "group": "Contabilidad", "name": "PeriodoContable", "label": "Periodo contable", "labelPlural": "Periodos contables", "icon": "calendar-range", "perCompany": true, "displayField": "Nombre",
+        "description": "Meses (o el lapso que elijas) en que se registran pólizas. Un periodo cerrado no admite pólizas nuevas, cambios ni cancelaciones.",
+        "fields": [
+          { "name": "Nombre", "label": "Nombre", "type": "text", "maxLength": 60, "required": true },
+          { "name": "Inicio", "label": "Inicio", "type": "date", "required": true },
+          { "name": "Fin", "label": "Fin", "type": "date", "required": true }
+        ] },
+      { "op": "setRules", "entity": "PeriodoContable", "rules": [
+          { "name": "FinDespuesDeInicio", "field": "Fin", "assert": "Fin >= Inicio", "message": "El fin del periodo no puede ser anterior a su inicio." }
+        ] },
+      { "op": "setWorkflow", "entity": "PeriodoContable", "workflow": {
+          "initial": "Abierto",
+          "states": [
+            { "name": "Abierto", "label": "Abierto", "color": "success", "editable": true },
+            { "name": "Cerrado", "label": "Cerrado", "color": "neutral", "editable": false }
+          ],
+          "transitions": [
+            { "name": "cerrar", "label": "Cerrar periodo", "from": ["Abierto"], "to": "Cerrado", "icon": "lock", "variant": "primary", "roles": ["Contador"] },
+            { "name": "reabrir", "label": "Reabrir", "from": ["Cerrado"], "to": "Abierto", "icon": "lock-open", "variant": "secondary", "roles": ["Administrador"], "requireComment": true }
+          ]
+        } },
+
+      { "op": "createEntity", "group": "Contabilidad", "name": "Poliza", "label": "Póliza", "labelPlural": "Pólizas", "icon": "scroll-text", "perCompany": true, "displayField": "Folio",
+        "description": "Registro contable de partida doble. Al aplicarla mueve los saldos de sus cuentas; la suma de cargos debe ser igual a la de abonos.",
+        "fields": [
+          { "name": "Folio", "label": "Folio", "type": "autonumber", "prefix": "POL-", "padding": 6 },
+          { "name": "Fecha", "label": "Fecha", "type": "date", "required": true, "defaultValue": "TODAY()" },
+          { "name": "Tipo", "label": "Tipo", "type": "choice", "required": true, "options": ["Diario", "Ingreso", "Egreso"], "defaultValue": "'Diario'" },
+          { "name": "Concepto", "label": "Concepto", "type": "text", "maxLength": 200, "required": true },
+          { "name": "Referencia", "label": "Referencia", "type": "text", "maxLength": 40 },
+          { "name": "Origen", "label": "Origen", "type": "choice", "options": ["Manual", "Automática"], "editable": false, "defaultValue": "'Manual'" }
+        ] },
+      { "op": "createEntity", "group": "Contabilidad", "name": "PolizaPartida", "label": "Partida de póliza", "labelPlural": "Partidas de póliza", "icon": "list",
+        "fields": [
+          { "name": "Poliza", "label": "Póliza", "type": "parent", "referenceEntity": "Poliza" },
+          { "name": "Cuenta", "label": "Cuenta", "type": "reference", "referenceEntity": "CuentaContable", "required": true },
+          { "name": "Concepto", "label": "Concepto", "type": "text", "maxLength": 200 },
+          { "name": "Cargo", "label": "Cargo", "type": "decimal", "precision": 18, "scale": 2, "defaultValue": "0" },
+          { "name": "Abono", "label": "Abono", "type": "decimal", "precision": 18, "scale": 2, "defaultValue": "0" }
+        ] },
+      { "op": "setRules", "entity": "PolizaPartida", "rules": [
+          { "name": "CuentaActiva", "field": "Cuenta", "assert": "Cuenta.Activa", "message": "La cuenta está inactiva: elige una cuenta activa." }
+        ] },
+      { "op": "addField", "entity": "Poliza", "field": { "name": "Partidas", "label": "Partidas", "type": "lines", "childEntity": "PolizaPartida" } },
+      { "op": "addField", "entity": "Poliza", "field": { "name": "TotalCargos", "label": "Total cargos", "type": "formula", "resultType": "decimal", "precision": 18, "scale": 2, "formula": "SUM(Partidas.Cargo)" } },
+      { "op": "addField", "entity": "Poliza", "field": { "name": "TotalAbonos", "label": "Total abonos", "type": "formula", "resultType": "decimal", "precision": 18, "scale": 2, "formula": "SUM(Partidas.Abono)" } },
+      { "op": "addField", "entity": "Poliza", "field": { "name": "Diferencia", "label": "Diferencia", "type": "formula", "resultType": "decimal", "precision": 18, "scale": 2, "showInList": false, "formula": "TotalCargos - TotalAbonos" } },
+      { "op": "setWorkflow", "entity": "Poliza", "workflow": {
+          "initial": "Borrador",
+          "states": [
+            { "name": "Borrador", "label": "Borrador", "color": "neutral", "editable": true },
+            { "name": "Aplicada", "label": "Aplicada", "color": "success", "editable": false },
+            { "name": "Cancelada", "label": "Cancelada", "color": "danger", "editable": false }
+          ],
+          "transitions": [
+            { "name": "aplicar", "label": "Aplicar póliza", "from": ["Borrador"], "to": "Aplicada", "icon": "check", "variant": "primary", "roles": ["Contador"] },
+            { "name": "cancelar", "label": "Cancelar póliza", "from": ["Borrador", "Aplicada"], "to": "Cancelada", "icon": "ban", "variant": "danger", "roles": ["Contador"], "requireComment": true }
+          ]
+        } },
+      { "op": "setLedger", "entity": "Poliza", "ledger": {
+          "lines": "Partidas", "debit": "Cargo", "credit": "Abono", "date": "Fecha", "states": ["Aplicada"],
+          "period": { "entity": "PeriodoContable", "start": "Inicio", "end": "Fin", "open": "Estado = 'Abierto'" }
+        } },
+      { "op": "setAutomations", "entity": "Poliza", "automations": [
+          { "name": "ActualizarSaldos", "label": "Actualizar los saldos de las cuentas", "on": "enterState", "state": "Aplicada",
+            "actions": [
+              { "type": "rollup", "lines": "Partidas", "target": "Cuenta", "field": "Cargos", "sum": "Cargo", "filter": "Poliza.Estado = 'Aplicada'" },
+              { "type": "rollup", "lines": "Partidas", "target": "Cuenta", "field": "Abonos", "sum": "Abono", "filter": "Poliza.Estado = 'Aplicada'" }
+            ] },
+          { "name": "RevertirSaldos", "label": "Quitar la póliza cancelada de los saldos", "on": "enterState", "state": "Cancelada",
+            "actions": [
+              { "type": "rollup", "lines": "Partidas", "target": "Cuenta", "field": "Cargos", "sum": "Cargo", "filter": "Poliza.Estado = 'Aplicada'" },
+              { "type": "rollup", "lines": "Partidas", "target": "Cuenta", "field": "Abonos", "sum": "Abono", "filter": "Poliza.Estado = 'Aplicada'" }
+            ] }
+        ] },
+
+      { "op": "setReports", "entity": "CuentaContable", "reports": [
+          { "name": "Balanza", "label": "Balanza de comprobación", "groupBy": [{ "field": "Tipo" }],
+            "measures": [{ "fn": "sum", "field": "Cargos", "label": "Cargos" }, { "fn": "sum", "field": "Abonos", "label": "Abonos" }, { "fn": "sum", "field": "Saldo", "label": "Saldo" }] }
+        ] },
+      { "op": "setReports", "entity": "Poliza", "reports": [
+          { "name": "PorMes", "label": "Pólizas por mes", "groupBy": [{ "field": "Fecha", "period": "month", "label": "Mes" }, { "field": "Estado" }],
+            "measures": [{ "fn": "count", "label": "Pólizas" }, { "fn": "sum", "field": "TotalCargos", "label": "Importe" }] }
+        ] },
+      { "op": "setSchedules", "entity": "PeriodoContable", "schedules": [
+          { "name": "CerrarVencidos", "label": "Cerrar periodos vencidos",
+            "description": "Cada mes, el día 5, cierra los periodos abiertos cuyo fin pasó hace más de 4 días. Llega en pausa: actívala cuando tu cierre sea así.",
+            "every": "month", "day": 5, "at": "06:00", "where": "Estado = 'Abierto' AND Fin < ADDDAYS(TODAY(), -4)", "role": "Cierre contable",
+            "actions": [ { "type": "transition", "transition": "cerrar" } ] }
+        ] }
+    ]
+  },
+  "roles": [
+    { "name": "Contador", "description": "Administra el catálogo de cuentas, registra y aplica pólizas y cierra periodos.", "canManageModel": false, "canManageUsers": false, "canViewAudit": true,
+      "permissions": [
+        { "entity": "CuentaContable", "canRead": true, "canCreate": true, "canUpdate": true, "canDelete": false },
+        { "entity": "PeriodoContable", "canRead": true, "canCreate": true, "canUpdate": true, "canDelete": false },
+        { "entity": "Poliza", "canRead": true, "canCreate": true, "canUpdate": true, "canDelete": true }
+      ] },
+    { "name": "Cierre contable", "description": "Rol de servicio de la tarea «Cerrar periodos vencidos».", "canManageModel": false, "canManageUsers": false, "canViewAudit": false,
+      "permissions": [
+        { "entity": "PeriodoContable", "canRead": true, "canCreate": false, "canUpdate": true, "canDelete": false }
+      ] }
+  ],
+  "seed": [
+    { "entity": "CuentaContable", "key": "Codigo", "records": [
+      { "Codigo": "1100", "Nombre": "Bancos", "Tipo": "Activo" },
+      { "Codigo": "1150", "Nombre": "Clientes", "Tipo": "Activo" },
+      { "Codigo": "1200", "Nombre": "Inventario de mercancías", "Tipo": "Activo" },
+      { "Codigo": "2100", "Nombre": "Proveedores", "Tipo": "Pasivo" },
+      { "Codigo": "2150", "Nombre": "Entradas por facturar", "Tipo": "Pasivo" },
+      { "Codigo": "3100", "Nombre": "Capital social", "Tipo": "Capital" },
+      { "Codigo": "4100", "Nombre": "Ventas", "Tipo": "Ingresos" },
+      { "Codigo": "5100", "Nombre": "Costo de ventas", "Tipo": "Costos" },
+      { "Codigo": "6100", "Nombre": "Gastos generales", "Tipo": "Gastos" }
+    ] }
+  ]
+}

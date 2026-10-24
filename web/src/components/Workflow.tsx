@@ -89,6 +89,12 @@ export function TransitionDialog({ def, row, transition: t, onClose, onDone, onC
 
   if (!t) return null;
   const toLabel = stateLabel(def, t.to);
+  // Errores del documento que el diálogo no muestra junto a un campo (una regla, el cuadre de una póliza, el periodo):
+  // sin esto solo se veía «Hay datos inválidos.» (regresión de la revisión 020).
+  const shown = new Set([...fields.map((f) => f.name.toLowerCase()), 'comment']);
+  const otherMessages = error
+    ? [...new Set(Object.entries(error.fieldErrors).filter(([k]) => !shown.has(k.toLowerCase())).flatMap(([, v]) => v))]
+    : [];
 
   async function run() {
     if (!t) return;
@@ -135,7 +141,9 @@ export function TransitionDialog({ def, row, transition: t, onClose, onDone, onC
         open
         title={t.label}
         danger={t.variant === 'danger'}
-        message={<>El documento pasará al estado <strong>{toLabel}</strong>. El cambio queda registrado en el historial.{error && <><br /><span className="field-error">{error.title}</span></>}</>}
+        message={<>El documento pasará al estado <strong>{toLabel}</strong>. El cambio queda registrado en el historial.{error && (otherMessages.length
+          ? otherMessages.map((m) => <span key={m}><br /><span className="field-error">{m}</span></span>)
+          : <><br /><span className="field-error">{error.title}</span></>)}</>}
         confirmLabel={t.label}
         loading={busy}
         onConfirm={run}
@@ -144,7 +152,7 @@ export function TransitionDialog({ def, row, transition: t, onClose, onDone, onC
     );
   }
 
-  const generalError = error && Object.keys(error.fieldErrors).length === 0 ? error : null;
+  const generalError = error && (Object.keys(error.fieldErrors).length === 0 || otherMessages.length > 0) ? error : null;
   const commentErr = clientErrors.comment ?? fieldError(error, 'comment');
   return (
     <Dialog
@@ -160,7 +168,11 @@ export function TransitionDialog({ def, row, transition: t, onClose, onDone, onC
       }
     >
       <div className="stack">
-        {generalError && <Alert tone="danger" title={generalError.title}>{generalError.detail}</Alert>}
+        {generalError && (
+          <Alert tone="danger" title={otherMessages.length ? otherMessages[0] : generalError.title}>
+            {otherMessages.length > 1 ? otherMessages.slice(1).join(' ') : otherMessages.length ? undefined : generalError.detail}
+          </Alert>
+        )}
         {fields.map((f) => (
           <FieldInput
             key={f.name}

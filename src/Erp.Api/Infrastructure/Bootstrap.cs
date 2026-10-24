@@ -521,6 +521,23 @@ public static class Bootstrap
         -- Spec 016: tareas programadas (qué hacen es metadato; si corren, de cada entorno) y bandeja de automatizaciones.
         IF COL_LENGTH('meta.Entity', 'SchedulesJson') IS NULL ALTER TABLE meta.Entity ADD SchedulesJson nvarchar(max) NULL;
 
+        -- Spec 020: libro de partida doble (metadato) y capas de costo (estado interno del motor, sin API).
+        IF COL_LENGTH('meta.Entity', 'LedgerJson') IS NULL ALTER TABLE meta.Entity ADD LedgerJson nvarchar(max) NULL;
+        IF OBJECT_ID('meta.CostLayer') IS NULL
+        CREATE TABLE meta.CostLayer (
+            Id bigint IDENTITY PRIMARY KEY,
+            Book nvarchar(63) NOT NULL,
+            KeyHash char(64) NOT NULL,
+            CompanyId int NULL,
+            SourceEntity nvarchar(63) NOT NULL,
+            SourceId bigint NOT NULL,
+            Quantity decimal(28,8) NOT NULL,
+            Value decimal(28,8) NOT NULL,
+            CreatedAt datetime2(3) NOT NULL DEFAULT SYSUTCDATETIME()
+        );
+        IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_CostLayer_Open')
+            CREATE INDEX IX_CostLayer_Open ON meta.CostLayer (Book, KeyHash, Id) INCLUDE (Quantity, Value) WHERE Quantity > 0;
+
         IF OBJECT_ID('meta.ScheduleState') IS NULL
         CREATE TABLE meta.ScheduleState (
             EntityName nvarchar(63) NOT NULL,

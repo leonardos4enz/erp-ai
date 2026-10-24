@@ -25,7 +25,7 @@ en orden, no en paralelo: casi todas tocan el núcleo del motor (`PlanCompiler`,
 | 017 Rollback de entornos | Implementado ([spec](specs/017-rollback-entornos/spec.md)) |
 | 018 OAuth2 (client credentials) y API OData | Implementado ([spec](specs/018-oauth-odata/spec.md)) |
 | 019 Editores visuales (layouts y modelador) | Implementado ([spec](specs/019-editores-visuales/spec.md)) |
-| 020 Contabilidad y costeo | Planeada |
+| 020 Contabilidad y costeo | Implementado ([spec](specs/020-contabilidad-costeo/spec.md)) |
 
 ## Diagnóstico
 | Brecha señalada | Situación actual | Spec |
@@ -218,6 +218,16 @@ Señaladas por la misma auditoría. Cada una es capacidad nueva del motor y va e
   `costeo` (valuación de existencias, póliza de entrada por recepción). Multi-moneda con `CONVERT` (010).
 - **Depende de:** 005, 010, 016 (cierres y revaluaciones programadas). Va al final por decisión del dueño (2026-10-24):
   por ahora no se necesita; antes era la 019.
+- **Estado:** implementado en la [spec 020](specs/020-contabilidad-costeo/spec.md). Tres capacidades del motor: acción
+  `cost` (capas por llave en `meta.CostLayer`, promedio ponderado o FIFO por expresión, costo del movimiento y valor
+  restante en el saldo, faltante al costo de respaldo) con `UNITCOST(catálogo, cantidad, llave…)`; libro de partida doble
+  `setLedger` (cuadre en los estados contabilizados y periodo abierto por fecha, antes y después del cambio, con `HOLDLOCK`
+  contra el cierre concurrente, y periodos sin traslapes), y `create` con `createLines` y `transition`. Módulos:
+  Inventario 1.5.0 (costo de entrada con `CONVERT` a la fecha de la recepción, traspaso al costo de origen),
+  Contabilidad 1.0.0 (cuentas, periodos con cierre y tarea de cierre en pausa, pólizas, saldos, balanza) y Costeo 1.0.0
+  (método por producto, valor de existencias, póliza de entrada por recepción). Pendiente: póliza de salidas (costo de
+  ventas), revaluación de existencias, pólizas en moneda extranjera, reversa de pólizas con otra póliza y rutas de tres
+  niveles en expresiones (una partida de póliza por producto).
 
 ## Decisión: ¿extensión con código?
 La auditoría tiene razón en el costo: cada necesidad nueva exige una capacidad del motor. Se mantiene

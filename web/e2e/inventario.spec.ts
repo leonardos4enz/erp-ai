@@ -61,7 +61,8 @@ test('H7: instalar Inventario desde la UI (ya con Compras)', async ({ page }) =>
   const dialog = page.getByRole('dialog');
   await expect(dialog.getByText('El plan es válido')).toBeVisible();
   await expect(dialog.getByText('Supervisor de inventario')).toBeVisible();
-  await expect(dialog.getByText(/Agregar o actualizar 1 automatización\(es\) en 'Recepción'/)).toBeVisible();
+  // Spec 020: la versión 1.5.0 vuelve a declarar la entrada al almacén (con su costo); la base es la que la agrega.
+  await expect(dialog.getByText(/\[base\] Agregar o actualizar 1 automatización\(es\) en 'Recepción'/)).toBeVisible();
   await dialog.getByRole('button', { name: 'Instalar módulo' }).click();
   await expect(page.getByText('Módulo instalado')).toBeVisible({ timeout: 30_000 });
   const nav = page.getByLabel('Navegación principal');

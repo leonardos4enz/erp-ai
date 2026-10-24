@@ -127,14 +127,33 @@ public sealed partial class RecordService
                 case AutomationActions.Create:
                 {
                     var target = c.Model[a.Entity!];
-                    var newValues = new Values();
+                    var newDraft = new DocDraft { CreatorId = c.User.Id };
                     foreach (var s in a.Set ?? [])
-                        if (target.FindField(s.Field) is { } f) newValues[f.Name] = Coerce(f, ExprEvaluator.Evaluate(s.Value, scope, env));
-                    await SystemCreateAsync(c, target, newValues);
+                        if (target.FindField(s.Field) is { } f) newDraft.Header[f.Name] = Coerce(f, ExprEvaluator.Evaluate(s.Value, scope, env));
+                    // Spec 020: partidas del documento nuevo (p. ej. las de una póliza), en el ámbito de la acción.
+                    foreach (var lt in a.CreateLines ?? [])
+                    {
+                        if (lt.When is not null && !ExprEvaluator.Test(lt.When, scope, env, whenNull: false)) continue;
+                        var linesField = target.FindField(lt.Field)!;
+                        var child = c.Model[linesField.ChildEntity!];
+                        var line = new LineDraft();
+                        foreach (var s in lt.Set)
+                            if (child.FindField(s.Field) is { } f) line.Values[f.Name] = Coerce(f, ExprEvaluator.Evaluate(s.Value, scope, env));
+                        (newDraft.Lines.TryGetValue(linesField.Name, out var list) ? list : newDraft.Lines[linesField.Name] = []).Add(line);
+                    }
+                    var newId = await SystemCreateAsync(c, target, newDraft);
+                    if (a.Transition is not null)
+                    {
+                        var t = target.Workflow!.Transitions.First(x => string.Equals(x.Name, a.Transition, StringComparison.OrdinalIgnoreCase));
+                        await SystemTransitionAsync(c, target, newId, t, $"Automática: {auto.Label} ({origin}).");
+                    }
                     break;
                 }
                 case AutomationActions.Rollup:
                     await RollupAsync(c, scopeEntity, values, a);
+                    break;
+                case AutomationActions.Cost:
+                    await CostAsync(c, e, id, values, scope, env, a);
                     break;
             }
         }
@@ -193,7 +212,7 @@ public sealed partial class RecordService
                     foreach (var v in rows)
                         if (v.GetValueOrDefault(f.Name) is { } raw) refs.Add((f.ReferenceEntity!, Convert.ToInt64(raw, CultureInfo.InvariantCulture)));
                 }
-                else if (a is { Type: AutomationActions.Rollup, Target: null, Match: { Count: > 0 } match } && model.TryGetValue(a.Entity ?? "", out var dest))
+                else if (a is { Type: AutomationActions.Rollup or AutomationActions.Cost, Target: null, Match: { Count: > 0 } match } && model.TryGetValue(a.Entity ?? "", out var dest))
                 {
                     foreach (var v in rows)
                     {
@@ -289,6 +308,7 @@ public sealed partial class RecordService
         if (linesField is null) RuleErrors(root, header, env, "", errors);
         else RuleErrors(target, lineScopes[linesField][lineIndex], env, "", errors);
         if (errors.Count > 0) throw new ValidationFailed(errors);
+        await CheckLedgerAsync(c.Cn, c.Tx, root, c.Model, draft, draft.CompanyId, LedgerSnapshot(root, before), rootId, c.Ct);
 
         await UpdateHeaderAsync(c.Cn, c.Tx, root, rootId, draft.Header, rowVersion: null, c.User.Id, c.Ct);
         await SaveLinesAsync(c.Cn, c.Tx, root, c.Model, rootId, draft, draft, c.User.Id, c.Ct);
@@ -297,16 +317,23 @@ public sealed partial class RecordService
     }
 
     /// <summary>Alta con valores calculados por la automatización (puede asignar campos no editables por personas).</summary>
-    private async Task<long> SystemCreateAsync(AutoCtx c, EntityDef target, Values values)
+    private async Task<long> SystemCreateAsync(AutoCtx c, EntityDef target, DocDraft draft)
     {
         var loader = new RelatedLoader(c.Cn, c.Tx, c.Model);
-        foreach (var f in target.ActiveFields)
+        void CheckRefs(EntityDef e, Values values)
         {
-            if (values.GetValueOrDefault(f.Name) is not { } v) continue;
-            if (f.Type == FieldTypes.Reference && loader.Row(f.ReferenceEntity!, Convert.ToInt64(v, CultureInfo.InvariantCulture)) is null)
-                throw new AppException(400, $"{target.Label} › {f.Label}: el registro no existe.");
+            foreach (var f in e.ActiveFields)
+            {
+                if (values.GetValueOrDefault(f.Name) is not { } v) continue;
+                if (f.Type == FieldTypes.Reference && loader.Row(f.ReferenceEntity!, Convert.ToInt64(v, CultureInfo.InvariantCulture)) is null)
+                    throw new AppException(400, $"{e.Label} › {f.Label}: el registro no existe.");
+            }
         }
-        return await InsertDraftAsync(c, target, new DocDraft { CreatorId = c.User.Id, Header = values }, "automation.create");
+        CheckRefs(target, draft.Header);
+        foreach (var (field, lines) in draft.Lines)
+            if (target.FindField(field) is { ChildEntity: { } childName } && c.Model.TryGetValue(childName, out var child))
+                foreach (var l in lines) CheckRefs(child, l.Values);
+        return await InsertDraftAsync(c, target, draft, "automation.create");
     }
 
     /// <summary>Transición del destino si está en uno de sus estados de origen (si no, se omite).</summary>
@@ -356,16 +383,7 @@ public sealed partial class RecordService
             }
             // Bloqueo por clave: dos operaciones simultáneas no crean dos destinos iguales.
             await AppLockAsync(c.Cn, c.Tx, RollupLockKey(target, keys.Select(k => k.Value)), c.Ct);
-            await using (var find = new SqlCommand { Connection = c.Cn, Transaction = c.Tx })
-            {
-                // Spec 010: en un catálogo por empresa el destino es el de la misma empresa: nunca se acumula en otra.
-                var company = target.PerCompany ? $" AND {Quote(DdlGenerator.CompanyColumn)} = @company" : "";
-                find.CommandText = $"SELECT TOP 1 [Id] FROM {AppTable(target.Name)} WITH (UPDLOCK, HOLDLOCK) WHERE " +
-                                   string.Join(" AND ", keys.Select((k, i) => $"{Quote(k.Dest.Name)} = @f{i}")) + company + " AND [IsDeleted] = 0 ORDER BY [Id]";
-                for (var i = 0; i < keys.Count; i++) find.Parameters.Add(new SqlParameter($"@f{i}", keys[i].Value));
-                if (target.PerCompany) find.Parameters.Add(new SqlParameter("@company", (object?)c.User.Company?.Id ?? 0));
-                targetId = await find.ExecuteScalarAsync(c.Ct) as long?;
-            }
+            targetId = await FindByMatchAsync(c, target, keys.Select(k => (k.Dest, k.Value)).ToList());
             for (var i = 0; i < keys.Count; i++)
             {
                 where.Add($"{Quote(keys[i].Src.Name)} = @k{i}");
@@ -379,7 +397,7 @@ public sealed partial class RecordService
                 foreach (var k in keys) nv[k.Dest.Name] = k.Value;
                 var field = target.FindField(a.Field!)!;
                 nv[field.Name] = Coerce(field, sumNew);
-                await SystemCreateAsync(c, target, nv);
+                await SystemCreateAsync(c, target, new DocDraft { CreatorId = c.User.Id, Header = nv });
                 return;
             }
         }
@@ -485,7 +503,7 @@ public sealed partial class RecordService
             var d = (await LoadDraftAsync(cn, tx, root, model, id, ct))!;
             var loader = new RelatedLoader(cn, tx, model);
             (string Code, string Currency)? company = d.CompanyId is { } co && companies.TryGetValue(co, out var info) ? info : null;
-            var env = new ExprEnv(0, [], d.CreatorId) { Company = company?.Code, BaseCurrency = company?.Currency, Rates = loader };
+            var env = new ExprEnv(0, [], d.CreatorId) { Company = company?.Code, BaseCurrency = company?.Currency, Rates = loader, Costs = loader };
             var header = HeaderScope(d, root, model, loader);
             foreach (var (field, list) in d.Lines)
             {

@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { ApiError } from '../../api/client';
 import { adminApi } from '../../api/endpoints';
-import type { Automation, ChangePlan, EntityDef, FieldDef, FieldType, FormulaResultType, Layout, Operation, ReportDef, Rule, ScheduleDef, SecurityPolicy, ViewDef, WebhookDef, Workflow } from '../../api/types';
+import type { Automation, ChangePlan, EntityDef, FieldDef, FieldType, FormulaResultType, LedgerDef, Layout, Operation, ReportDef, Rule, ScheduleDef, SecurityPolicy, ViewDef, WebhookDef, Workflow } from '../../api/types';
 import { IconPicker } from '../../components/IconPicker';
 import { TagInput } from '../../components/TagInput';
 import { Alert, Button, Field, Input, Select, Switch, Tabs, Textarea } from '../../components/ui';
@@ -79,6 +79,7 @@ interface Draft {
   reportsJson: string;
   webhooksJson: string;
   schedulesJson: string;
+  ledgerJson: string;
 }
 
 let keySeq = 0;
@@ -96,7 +97,7 @@ function draftFrom(def?: EntityDef): Draft {
   if (!def) {
     const f = blankField(0);
     f.label = 'Nombre'; f.name = 'Nombre'; f.required = true; f.maxLength = 150;
-    return { name: '', label: '', labelPlural: '', icon: 'package', description: '', displayField: '', group: '', perCompany: false, fields: [f], rulesJson: '', workflowJson: '', automationsJson: '', securityJson: '', layoutJson: '', viewsJson: '', reportsJson: '', webhooksJson: '', schedulesJson: '' };
+    return { name: '', label: '', labelPlural: '', icon: 'package', description: '', displayField: '', group: '', perCompany: false, fields: [f], rulesJson: '', workflowJson: '', automationsJson: '', securityJson: '', layoutJson: '', viewsJson: '', reportsJson: '', webhooksJson: '', schedulesJson: '', ledgerJson: '' };
   }
   const fields = def.fields
     .slice()
@@ -114,6 +115,7 @@ function draftFrom(def?: EntityDef): Draft {
     reportsJson: def.reports?.length ? pretty(def.reports) : '',
     webhooksJson: def.webhooks?.length ? pretty(def.webhooks) : '',
     schedulesJson: def.schedules?.length ? pretty(def.schedules) : '',
+    ledgerJson: def.ledger ? pretty(def.ledger) : '',
   };
 }
 
@@ -184,6 +186,11 @@ function behaviourOperations(entity: string, original: EntityDef | undefined, d:
   const schedules = parseJson<ScheduleDef[]>(d.schedulesJson, 'array');
   if (schedules.ok && canonical(schedules.value ?? []) !== canonical(original?.schedules ?? [])) {
     ops.push({ op: 'setSchedules', entity, schedules: schedules.value ?? [] });
+  }
+  // Spec 020: vacío quita el libro.
+  const ledger = parseJson<LedgerDef>(d.ledgerJson, 'object');
+  if (ledger.ok && canonical(ledger.value) !== canonical(original?.ledger ?? null)) {
+    ops.push({ op: 'setLedger', entity, ledger: ledger.value });
   }
   return ops;
 }
@@ -296,6 +303,8 @@ function validate(d: Draft, isNew: boolean, existingNames: string[]): Record<str
   if (!webhooks.ok) e.webhooksJson = webhooks.error;
   const schedules = parseJson<ScheduleDef[]>(d.schedulesJson, 'array');
   if (!schedules.ok) e.schedulesJson = schedules.error;
+  const ledger = parseJson<LedgerDef>(d.ledgerJson, 'object');
+  if (!ledger.ok) e.ledgerJson = ledger.error;
   return e;
 }
 
@@ -667,7 +676,7 @@ export function EntityEditor({ original, entities, onCancel, onReview }: EntityE
         </div>
       </section>
 
-      <details className="card card-pad advanced-section" open={!!(original?.perCompany || original?.rules?.length || original?.automations?.length || original?.security || original?.views?.length || original?.reports?.length || original?.webhooks?.length || original?.schedules?.length) || undefined}>
+      <details className="card card-pad advanced-section" open={!!(original?.perCompany || original?.rules?.length || original?.automations?.length || original?.security || original?.views?.length || original?.reports?.length || original?.webhooks?.length || original?.schedules?.length || original?.ledger) || undefined}>
         <summary className="advanced-summary">
           <span className="section-title">Reglas, automatizaciones, seguridad, vistas e integraciones</span>
           <span className="subtle">Avanzado · validaciones de negocio, efectos en otros registros, quién ve o edita qué, vistas, reportes, webhooks y tareas</span>
@@ -765,6 +774,17 @@ export function EntityEditor({ original, entities, onCancel, onReview }: EntityE
             error={visibleErrors.schedulesJson ?? (d.schedulesJson ? parseJsonError(d.schedulesJson, 'array') : undefined)}
             value={d.schedulesJson}
             onChange={(e) => setD((s) => ({ ...s, schedulesJson: e.target.value }))}
+          />
+          <Textarea
+            className="mono json-editor"
+            label="Libro de partida doble (JSON)"
+            rows={8}
+            spellCheck={false}
+            placeholder={'{\n  "lines": "Partidas", "debit": "Cargo", "credit": "Abono", "date": "Fecha", "states": ["Aplicada"],\n  "period": { "entity": "PeriodoContable", "start": "Inicio", "end": "Fin", "open": "Estado = \'Abierto\'" }\n}'}
+            hint="lines (partidas), debit y credit (campos numéricos de la partida), date, states (estados contabilizados: ahí cargos = abonos) y period (catálogo de periodos con inicio, fin y la condición de abierto). Vacío: no es un libro."
+            error={visibleErrors.ledgerJson ?? (d.ledgerJson ? parseJsonError(d.ledgerJson, 'object') : undefined)}
+            value={d.ledgerJson}
+            onChange={(e) => setD((s) => ({ ...s, ledgerJson: e.target.value }))}
           />
         </div>
       </details>

@@ -19,6 +19,13 @@ public interface ICurrencyRates
     decimal? Rate(string from, string to, DateTime date);
 }
 
+/// <summary>Spec 020: capas de costo (para UNITCOST).</summary>
+public interface ICostLayers
+{
+    /// <summary>Costo unitario de las siguientes <paramref name="quantity"/> unidades de la llave en el catálogo de saldo; null sin capas.</summary>
+    decimal? UnitCost(string book, decimal quantity, IReadOnlyList<object?> key, string? company);
+}
+
 /// <summary>
 /// Quién evalúa: necesario para HASROLE, ISCREATOR, CURRENTUSER y CURRENTUNIT. Spec 010: empresa del contexto (clave y
 /// moneda base) y tipos de cambio para BASECURRENCY, CURRENTCOMPANY, RATE y CONVERT.
@@ -29,6 +36,8 @@ public sealed record ExprEnv(int UserId, IReadOnlyCollection<string> Roles, int?
     public string? Company { get; init; }
     public string? BaseCurrency { get; init; }
     public ICurrencyRates? Rates { get; init; }
+    /// <summary>Spec 020: capas de costo para UNITCOST.</summary>
+    public ICostLayers? Costs { get; init; }
 }
 
 public static partial class ExprEvaluator
@@ -154,6 +163,11 @@ public static partial class ExprEvaluator
                 if (amount is null) return null;
                 var rate = Rate(Arg(1), Arg(2), c.Args.Count > 3 ? Arg(3) : DateTime.Today, env);
                 return rate is null ? null : Num(amount) * rate.Value;
+            }
+            case "UNITCOST":
+            {
+                var key = c.Args.Skip(2).Select(a => Eval(a, s, env)).ToList();
+                return env.Costs?.UnitCost(Text(Arg(0)), Num(Arg(1)), key, env.Company);
             }
             case "SUM":
             {

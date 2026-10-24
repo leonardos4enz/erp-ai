@@ -303,7 +303,7 @@ export interface Workflow { initial: string; states: WorkflowState[]; transition
 export type AutomationEvent = 'create' | 'update' | 'enterState' | 'transition';
 
 export interface AutomationAction {
-  type: 'update' | 'transition' | 'create' | 'rollup';
+  type: 'update' | 'transition' | 'create' | 'rollup' | 'cost';
   lines?: string;
   when?: string;
   target?: string;
@@ -315,6 +315,25 @@ export interface AutomationAction {
   field?: string;
   sum?: string;
   filter?: string;
+  /** Spec 020: partidas del documento que crea una acción create. */
+  createLines?: { field: string; when?: string; set: { field: string; value: string }[] }[];
+  /** Spec 020: valuación con capas (type: cost). */
+  quantity?: string;
+  method?: string;
+  unitCost?: string;
+  fallbackCost?: string;
+  costField?: string;
+  unitCostField?: string;
+}
+
+/** Spec 020: libro de partida doble (cuadre y periodos los garantiza el motor). */
+export interface LedgerDef {
+  lines: string;
+  debit: string;
+  credit: string;
+  date?: string;
+  states?: string[];
+  period?: { entity: string; start: string; end: string; open: string };
 }
 
 /** Spec 005: «cuando pase X en este catálogo, haz Y en otros registros». */
@@ -359,6 +378,8 @@ export interface EntityDef {
   webhooks?: WebhookDef[] | null;
   /** Spec 016: solo la reciben los modeladores. */
   schedules?: ScheduleDef[] | null;
+  /** Spec 020: libro de partida doble. */
+  ledger?: LedgerDef | null;
   /** Spec 010: un registro por empresa (las partidas siguen a su documento). */
   perCompany?: boolean;
   isChild?: boolean;
@@ -406,6 +427,7 @@ export type Operation =
   | { op: 'setReports'; entity: string; reports: ReportDef[] }
   | { op: 'setWebhooks'; entity: string; webhooks: WebhookDef[] }
   | { op: 'setSchedules'; entity: string; schedules: ScheduleDef[] }
+  | { op: 'setLedger'; entity: string; ledger: LedgerDef | null }
   | { op: 'setDashboard'; dashboard: DashboardDef }
   | { op: 'archiveDashboard'; name: string };
 
