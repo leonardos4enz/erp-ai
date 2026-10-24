@@ -156,7 +156,7 @@ public class AccountingTests
         Assert.Equal(AutomationActions.Cost, valuar.Type);
         Assert.Equal(["ActualizarExistencia", "Valuar"], m["MovimientoInventario"].Automations!.Select(a => a.Name));
         // La póliza de la recepción va después de la entrada al almacén (las automatizaciones corren en orden).
-        Assert.Equal(["AcumularRecibido", "EntradaAlmacen", "PolizaEntrada"], m["Recepcion"].Automations!.Select(a => a.Name));
+        Assert.Equal(["AcumularRecibido", "EntradaAlmacen", "PolizaEntrada", "MarcarPolizaPendiente"], m["Recepcion"].Automations!.Select(a => a.Name));
         Assert.Null(AutomationRules.FindCycle(m));
         // La tarea de cierre usa el rol de servicio del módulo.
         Assert.Equal("Cierre contable", m["PeriodoContable"].Schedules!.Single().Role);
@@ -172,7 +172,7 @@ public class AccountingTests
         var inventario = Package("inventario.json");
         roles.UnionWith(compras.AllRoles.Select(r => r.Name));
         roles.UnionWith(inventario.AllRoles.Select(r => r.Name));
-        foreach (var (_, plan) in compras.FullChain.Concat(inventario.FullChain.Where(x => x.Label != "v1.5.0")))
+        foreach (var (_, plan) in compras.FullChain.Concat(inventario.FullChain.Where(x => x.Label is not ("v1.5.0" or "v1.6.0"))))
         {
             var c = PlanCompiler.Compile(plan, model, roles, boards);
             Assert.True(c.Preview.Valid, Errors(c));
@@ -181,7 +181,7 @@ public class AccountingTests
         Assert.Null(model["MovimientoInventario"].FindField("CostoUnitario"));
 
         var pending = inventario.PendingAfter("1.4.0");
-        Assert.Equal("1.5.0", Assert.Single(pending).Version);
+        Assert.Equal(["1.5.0", "1.6.0"], pending.Select(u => u.Version)); // 1.6.0: spec 022
         var up = PlanCompiler.Compile(pending[0].Plan, model, roles, boards);
         Assert.True(up.Preview.Valid, Errors(up));
         var after = up.ResultingModel;

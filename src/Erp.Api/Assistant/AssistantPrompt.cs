@@ -53,17 +53,23 @@ public static class AssistantPrompt
           color: neutral | accent | success | warning | danger. variant: primary | secondary | danger. editable: false
           bloquea la edición en ese estado. value de set es una expresión. system: solo la ejecuta una automatización.
           Crea el campo Estado; los nombres de estado van en PascalCase (PorAutorizar).
-        - setRules { entity, rules: [{ name, message, assert, when?, field? }] }   (reemplaza todas; assert debe ser verdadero)
+        - setRules { entity, merge?, rules: [{ name, message, assert, when?, field? }] }   (reemplaza todas; con merge agrega o
+          reemplaza por nombre y conserva las demás; assert debe ser verdadero)
         - setAutomations { entity, merge?, automations: [{ name, label, on: create|update|enterState|transition, state?,
           transition?, when?, actions: [{ type: update|transition|create|rollup|cost, lines?, when?, target?, set?,
           transition?, entity?, match?: [{ field, source }], createMissing?, field?, sum?, filter?, createLines?,
-          quantity?, method?, unitCost?, fallbackCost?, costField?, unitCostField? }], mode?: sync|async }] }
+          capture?, quantity?, method?, unitCost?, fallbackCost?, costField?, unitCostField?, totalCost?, uncostedEntry?,
+          methodChange?, quantityField? }], mode?: sync|async }] }
           mode async: las acciones corren después, fuera de la transacción del evento (no detienen a quien guarda).
           create: createLines [{ field (partidas del nuevo), when?, set }] agrega partidas; transition ejecuta esa transición
-          sobre el registro nuevo. cost (sin lines): valúa el registro con capas por llave (entity + match = catálogo de saldo),
-          quantity = campo con signo (+ entra, − sale), method = expresión 'average'|'fifo', unitCost = costo de una entrada,
+          sobre el registro nuevo; capture [{ field, value }] asigna al registro que disparó la acción (o a su partida, con
+          lines) valores calculados en el registro creado. cost (sin lines): valúa el registro con capas por llave (entity +
+          match = catálogo de saldo), quantity = campo con signo (+ entra, − sale), method = expresión 'average'|'fifo',
+          unitCost = costo de una entrada, totalCost = costo total exacto de una entrada (gana sobre unitCost),
           fallbackCost = costo de lo que las capas no cubren, costField/unitCostField = campos del registro que reciben el
-          costo; field = campo del saldo que recibe el valor restante.
+          costo; field = campo del saldo que recibe el valor restante y quantityField el que recibe la cantidad costeada.
+          Políticas: uncostedEntry = entrada sin costo en llave sin capas: average (cero) | fallback (respaldo; sin él se
+          rechaza) | require (se rechaza); methodChange = promedio con varias capas: merge (fundirlas) | keep.
         - setLedger { entity, ledger: { lines, debit, credit, date?, states?: string[], period?: { entity, start, end, open } } }
           (o ledger: null). Libro de partida doble: en los estados contabilizados las partidas cuadran (cargos = abonos) y
           la fecha cae en un periodo cuya condición open se cumple. Lo garantiza el motor por cualquier vía.

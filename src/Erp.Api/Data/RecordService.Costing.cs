@@ -26,6 +26,11 @@ public sealed partial class RecordService
         var method = Convert.ToString(ExprEvaluator.Evaluate(a.Method!, scope, env), CultureInfo.InvariantCulture)?.Trim().ToLowerInvariant() ?? "";
         var unitCost = a.UnitCost is null ? null : ExprEvaluator.Normalize(ExprEvaluator.Evaluate(a.UnitCost, scope, env)) as decimal?;
         var fallback = a.FallbackCost is null ? null : ExprEvaluator.Normalize(ExprEvaluator.Evaluate(a.FallbackCost, scope, env)) as decimal?;
+        // Spec 022: políticas declaradas en la acción (omitidas = 020) y costo total exacto de una entrada.
+        var options = new CostOptions(
+            a.UncostedEntry ?? CostPolicies.Average,
+            a.MethodChange == CostPolicies.Merge,
+            a.TotalCost is null ? null : ExprEvaluator.Normalize(ExprEvaluator.Evaluate(a.TotalCost, scope, env)) as decimal?);
         var costField = e.FindField(a.CostField!)!;
         var scale = ScaleOf(costField);
 
@@ -45,11 +50,12 @@ public sealed partial class RecordService
             while (await r.ReadAsync(c.Ct)) open.Add(new(r.GetInt64(0), r.GetDecimal(1), r.GetDecimal(2)));
         }
 
-        var result = CostMath.Apply(open, method, quantity, unitCost, fallback, scale);
+        var result = CostMath.Apply(open, method, quantity, unitCost, fallback, scale, options);
         var before = open.ToDictionary(l => l.Id!.Value);
         foreach (var l in result.Layers)
         {
             if (l.Id is { } lid && before[lid] == l) continue;
+            if (l is { Id: null, Quantity: 0m, Value: 0m }) continue; // capa fundida (022) que ya se consumió o volvió a fundir
             await using var cmd = new SqlCommand { Connection = c.Cn, Transaction = c.Tx };
             if (l.Id is { } existing)
             {
@@ -86,7 +92,10 @@ public sealed partial class RecordService
         if (await FindByMatchAsync(c, book, keys) is { } balanceId)
         {
             var vf = book.FindField(a.Field!)!;
-            await SystemUpdateAsync(c, book, balanceId, [(vf, Coerce(vf, result.Remaining))]);
+            var balance = new List<(FieldDef Field, object? Value)> { (vf, Coerce(vf, result.Remaining)) };
+            // Spec 022: la cantidad que queda en las capas, para un promedio de lo costeado (no de toda la existencia).
+            if (a.QuantityField is not null && book.FindField(a.QuantityField) is { } qf) balance.Add((qf, Coerce(qf, result.RemainingQuantity)));
+            await SystemUpdateAsync(c, book, balanceId, balance);
         }
     }
 

@@ -27,6 +27,7 @@ en orden, no en paralelo: casi todas tocan el núcleo del motor (`PlanCompiler`,
 | 019 Editores visuales (layouts y modelador) | Implementado ([spec](specs/019-editores-visuales/spec.md)) |
 | 020 Contabilidad y costeo | Implementado ([spec](specs/020-contabilidad-costeo/spec.md)) |
 | 021 Endurecimiento 2 | Implementado ([spec](specs/021-endurecimiento-2/spec.md)) |
+| 022 Costeo 2: políticas de valuación | Implementado ([spec](specs/022-costeo-2/spec.md)) |
 
 ## Diagnóstico
 | Brecha señalada | Situación actual | Spec |
@@ -242,11 +243,24 @@ motor ya prometía y no se cumplían en todos los caminos.
   Contabilidad 1.1.0 no deja cancelar a mano una póliza automática aplicada; OData con tope de `$skip` y de partidas
   expandidas; tokens OAuth auditados; solicitudes de seguridad atoradas se liberan; no se quita un estado con registros;
   el editor avisa de cambios sin aplicar.
-- **Pendiente:** costeo 2 (traspaso con bases distintas cuando las capas no cubren, entrada sin costo en una llave sin
-  capas, `Costo` nulo en la recepción, fecha del movimiento frente a la de la póliza, cambio FIFO→Promedio); límite de
-  `/oauth/token` detrás de un proxy (configurar `ForwardedHeaders` con los proxies conocidos de cada despliegue, nunca a
+- **Pendiente:** ~~costeo 2~~ (resuelto en la 022); límite de `/oauth/token` detrás de un proxy (configurar `ForwardedHeaders` con los proxies conocidos de cada despliegue, nunca a
   ciegas); aviso de cambios sin aplicar también al navegar dentro de la SPA (requiere *data router*); confirmar seguridad en
   paquetes normales.
+
+### 022 — Costeo 2: políticas de valuación
+Origen: los cinco casos de costeo que difirió la 021, más dos de la misma familia, y la decisión del dueño (2026-10-24): **son
+reglas de negocio** (constitución I.1), configurables por metadatos con valores por defecto razonables, no decisiones fijas.
+- **Estado:** implementado en la [spec 022](specs/022-costeo-2/spec.md). Invariante: un traspaso no crea ni destruye valor
+  (la salida va primero y guarda su costo real con `capture`; la entrada entra a ese total exacto con `totalCost`).
+  Capacidades del motor: en `cost`, `uncostedEntry` (`average` | `fallback` | `require`), `methodChange` (`merge` | `keep`),
+  `totalCost` y `quantityField`; en `create`, `capture`; `setRules` con `merge`. Omitidas, el motor se comporta como en la
+  020. Inventario 1.6.0 (respaldo de la orden solo con base MXN, regla `TipoCambioDeLaRecepcion`, ninguna partida
+  confirmada sin costo, el movimiento con la fecha de la recepción) y Costeo 1.1.0 (entrada sin costo al costo último,
+  fundir capas al pasar a Promedio, cantidad costeada y «Costeo incompleto», regla `PolizaConCuentas` o, sin ella, *Póliza
+  pendiente*). La tabla de la spec dice qué metadato cambia cada política.
+- **Pendiente:** reglas de advertencia (avisar sin bloquear); generar la póliza de una recepción pendiente cuando el almacén
+  ya tenga cuentas; dar al rol *Contador* lectura de recepciones (dato del entorno, ADR-0004); póliza de salidas (costo de
+  ventas) y revaluación, que siguen de la 020.
 
 ## Decisión: ¿extensión con código?
 La auditoría tiene razón en el costo: cada necesidad nueva exige una capacidad del motor. Se mantiene

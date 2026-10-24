@@ -1,7 +1,7 @@
 {
   "id": "costeo",
   "name": "Costeo",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "icon": "calculator",
   "description": "Valuación de existencias con costo promedio ponderado o FIFO por producto, y póliza de entrada por cada recepción de mercancía.",
   "requires": ["inventario", "contabilidad"],
@@ -47,6 +47,60 @@
         ] }
     ]
   },
+  "upgrades": [
+    { "version": "1.1.0",
+      "description": "Políticas de valuación (spec 022): un traspaso entra al destino al costo real de su salida; una entrada sin costo y sin capas toma el costo último (y sin él se rechaza); un producto que pasa de FIFO a Promedio funde sus capas; la existencia muestra el promedio de lo costeado y avisa si hay existencia sin costeo; y una recepción con costo no se confirma en un almacén sin cuentas contables (sin la regla «PolizaConCuentas», queda como póliza pendiente).",
+      "plan": { "description": "Costeo 1.1.0: políticas de valuación", "operations": [
+        { "op": "addField", "entity": "Existencia", "field": { "name": "CantidadCosteada", "label": "Cantidad costeada", "type": "decimal", "precision": 18, "scale": 2, "editable": false, "showInList": false } },
+        { "op": "updateField", "entity": "Existencia", "field": "CostoPromedio",
+          "formula": "IF(COALESCE(CantidadCosteada, 0) > 0, ROUND(Valor / CantidadCosteada, 4), NULL)" },
+        { "op": "addField", "entity": "Existencia", "field": { "name": "CosteoIncompleto", "label": "Costeo incompleto", "type": "formula", "resultType": "boolean", "showInList": false,
+            "formula": "Cantidad > COALESCE(CantidadCosteada, 0)" } },
+        { "op": "addField", "entity": "TraspasoPartida", "field": { "name": "CostoOrigen", "label": "Costo de la salida", "type": "decimal", "precision": 18, "scale": 2, "editable": false } },
+        { "op": "addField", "entity": "Recepcion", "field": { "name": "PolizaPendiente", "label": "Póliza pendiente", "type": "boolean", "editable": false, "showInList": false } },
+
+        { "op": "setAutomations", "entity": "MovimientoInventario", "merge": true, "automations": [
+            { "name": "Valuar", "label": "Valuar el movimiento", "on": "create",
+              "actions": [
+                { "type": "cost", "entity": "Existencia", "match": [ { "field": "Almacen", "source": "Almacen" }, { "field": "Producto", "source": "Producto" } ],
+                  "field": "Valor", "quantityField": "CantidadCosteada", "quantity": "Efecto", "method": "IF(Producto.MetodoCosteo = 'FIFO', 'fifo', 'average')",
+                  "unitCost": "CostoUnitario", "totalCost": "CostoTotal",
+                  "fallbackCost": "CONVERT(Producto.CostoUltimo, COALESCE(Producto.MonedaCosto, BASECURRENCY()), BASECURRENCY(), Fecha)",
+                  "uncostedEntry": "fallback", "methodChange": "merge",
+                  "costField": "CostoTotal", "unitCostField": "CostoUnitario" }
+              ] }
+          ] },
+        { "op": "setAutomations", "entity": "Traspaso", "merge": true, "automations": [
+            { "name": "MoverMercancia", "label": "Mover la mercancía entre almacenes", "on": "enterState", "state": "Aplicado",
+              "actions": [
+                { "type": "create", "lines": "Partidas", "entity": "MovimientoInventario", "set": [
+                    { "field": "Fecha", "value": "Traspaso.Fecha" },
+                    { "field": "Tipo", "value": "'Traspaso salida'" }, { "field": "Almacen", "value": "Traspaso.AlmacenOrigen" },
+                    { "field": "Producto", "value": "Producto" }, { "field": "Cantidad", "value": "Cantidad" }, { "field": "Referencia", "value": "Traspaso.Folio" } ],
+                  "capture": [ { "field": "CostoOrigen", "value": "-CostoTotal" } ] },
+                { "type": "create", "lines": "Partidas", "entity": "MovimientoInventario", "set": [
+                    { "field": "Fecha", "value": "Traspaso.Fecha" },
+                    { "field": "Tipo", "value": "'Traspaso entrada'" }, { "field": "Almacen", "value": "Traspaso.AlmacenDestino" },
+                    { "field": "Producto", "value": "Producto" }, { "field": "Cantidad", "value": "Cantidad" }, { "field": "Referencia", "value": "Traspaso.Folio" },
+                    { "field": "CostoTotal", "value": "CostoOrigen" } ] }
+              ] }
+          ] },
+
+        { "op": "setRules", "entity": "Recepcion", "merge": true, "rules": [
+            { "name": "PolizaConCuentas", "field": "Almacen", "when": "Estado = 'Confirmada' AND CostoTotal > 0",
+              "assert": "NOT ISBLANK(Almacen.CuentaInventario) AND NOT ISBLANK(Almacen.CuentaEntradas)",
+              "message": "El almacén no tiene la cuenta de inventario y la cuenta de entradas por facturar: configúralas en el almacén para que la recepción genere su póliza." }
+          ] },
+        { "op": "setAutomations", "entity": "Recepcion", "merge": true, "automations": [
+            { "name": "MarcarPolizaPendiente", "label": "Marcar la póliza como pendiente", "on": "enterState", "state": "Confirmada",
+              "when": "CostoTotal > 0 AND (ISBLANK(Almacen.CuentaInventario) OR ISBLANK(Almacen.CuentaEntradas))",
+              "actions": [ { "type": "update", "set": [ { "field": "PolizaPendiente", "value": "TRUE" } ] } ] }
+          ] },
+        { "op": "setViews", "entity": "Recepcion", "views": [
+            { "name": "PolizasPendientes", "label": "Pólizas pendientes", "filters": [ { "field": "PolizaPendiente", "op": "eq", "value": true } ], "sort": "Fecha", "dir": "asc" }
+          ] }
+      ] } }
+  ],
   "roles": [],
   "seed": []
 }

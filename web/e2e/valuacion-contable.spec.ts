@@ -106,7 +106,9 @@ test('H4 CA1 · H5 CA4: Costeo pide Contabilidad; ambos se instalan desde la UI'
   await page.getByRole('button', { name: 'Instalar Costeo' }).click();
   dialog = page.getByRole('dialog');
   await expect(dialog.getByText('El plan es válido')).toBeVisible();
-  await expect(dialog.getByText(/Agregar o actualizar 1 automatización\(es\) en 'Movimiento de inventario': Valuar el movimiento/)).toBeVisible();
+  // Spec 022: Costeo 1.1.0 vuelve a declarar «Valuar» con sus políticas, así que aparece en la base y en v1.1.0.
+  for (const step of ['base', 'v1.1.0'])
+    await expect(dialog.getByText(new RegExp(`^\\[${step}\\] Agregar o actualizar 1 automatización\\(es\\) en 'Movimiento de inventario': Valuar el movimiento`))).toBeVisible();
   await dialog.getByRole('button', { name: 'Instalar módulo' }).click();
   await expect(page.getByText('Módulo instalado')).toBeVisible({ timeout: 30_000 });
 
@@ -399,14 +401,16 @@ test('H3 CA2: si la póliza automática no se puede aplicar, la recepción no se
   expect((await get('contador', '/api/data/Poliza', { search: rec.Folio as string })).items).toHaveLength(0);
 });
 
-test('H5 CA3: un almacén sin cuentas valúa la recepción pero no genera póliza', async () => {
+test('H5 CA3: un almacén sin cuentas no confirma una recepción con costo (política por defecto de la 022)', async () => {
+  // Spec 022 (H7): en la 020 se confirmaba y se valuaba sin póliza, sin dejar rastro. Ahora la regla `PolizaConCuentas` de
+  // Costeo 1.1.0 lo impide; la alternativa (quitarla: queda «póliza pendiente») se prueba en valuacion-politicas.spec.ts.
   const oc = await ordenEnviada({ Proveedor: ids.proveedor, Almacen: ids.almacen2, Partidas: [{ Producto: ids.fifo, Cantidad: 2, PrecioUnitario: 15, DescuentoPct: 0 }] });
   const rec = (await post('almacen', '/api/data/Recepcion', { OrdenCompra: oc.id, Factura: 'F-COS-3', Partidas: [{ PartidaOrden: (oc.Partidas as Row[])[0].id }] })).body;
-  expect((await transition('almacen', 'Recepcion', rec, 'confirmar')).status).toBe(200);
-  const entrada = ((await get('almacen', '/api/data/MovimientoInventario', { search: rec.Folio as string })).items as Row[])[0];
-  expect(entrada).toMatchObject({ CostoUnitario: 15, CostoTotal: 30 });
-  expect(await existencia(ids.almacen2, ids.fifo)).toMatchObject({ Cantidad: 6, Valor: 82 }); // 52 + 30
-  expect((await get('contador', '/api/data/Poliza', { search: rec.Folio as string })).items).toHaveLength(0);
+  const blocked = await transition('almacen', 'Recepcion', rec, 'confirmar');
+  expect(blocked.status).toBe(400);
+  expect(blocked.body.errors!.Almacen[0]).toMatch(/no tiene la cuenta de inventario/);
+  expect((await get('almacen', '/api/data/MovimientoInventario', { search: rec.Folio as string })).items).toHaveLength(0);
+  expect(await existencia(ids.almacen2, ids.fifo)).toMatchObject({ Cantidad: 4, Valor: 52 });
 });
 
 test('H2 CA5: las capas son por empresa', async () => {

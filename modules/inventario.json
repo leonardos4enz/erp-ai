@@ -1,7 +1,7 @@
 {
   "id": "inventario",
   "name": "Inventario",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "icon": "boxes",
   "description": "Existencias por almacén y producto, y movimientos de entrada, salida, ajuste y traspaso. Las recepciones confirmadas de Compras generan sus entradas solas.",
   "requires": ["compras"],
@@ -213,6 +213,31 @@
                 { "type": "create", "lines": "Partidas", "entity": "MovimientoInventario", "set": [
                     { "field": "Tipo", "value": "'Traspaso salida'" }, { "field": "Almacen", "value": "Traspaso.AlmacenOrigen" },
                     { "field": "Producto", "value": "Producto" }, { "field": "Cantidad", "value": "Cantidad" }, { "field": "Referencia", "value": "Traspaso.Folio" } ] }
+              ] }
+          ] }
+      ] } },
+    { "version": "1.6.0",
+      "description": "Políticas de la recepción (spec 022): sin tipo de cambio a su fecha no se confirma (regla «TipoCambioDeLaRecepcion»; quitarla usa el de la orden, solo con moneda base MXN); ninguna partida confirmada queda sin costo; y la entrada al almacén lleva la fecha de la recepción, la misma de su tipo de cambio y su póliza.",
+      "plan": { "description": "Inventario 1.6.0: políticas de la recepción", "operations": [
+        { "op": "updateField", "entity": "RecepcionPartida", "field": "CostoUnitario",
+          "formula": "ROUND(COALESCE(CONVERT(PartidaOrden.PrecioUnitario * (1 - PartidaOrden.DescuentoPct / 100), Recepcion.Moneda, BASECURRENCY(), Recepcion.Fecha), IF(BASECURRENCY() = 'MXN', PartidaOrden.CostoMXN, NULL)), 4)" },
+        { "op": "setRules", "entity": "Recepcion", "merge": true, "rules": [
+            { "name": "TipoCambioDeLaRecepcion", "field": "Fecha", "when": "Estado = 'Confirmada'",
+              "assert": "NOT ISBLANK(RATE(COALESCE(Moneda, OrdenCompra.MonedaClave), BASECURRENCY(), Fecha))",
+              "message": "No hay tipo de cambio de la moneda de la orden a la moneda base en o antes de la fecha de la recepción: regístralo en Configuración › Empresas › Tipos de cambio antes de confirmar." }
+          ] },
+        { "op": "setRules", "entity": "RecepcionPartida", "merge": true, "rules": [
+            { "name": "CostoCalculado", "field": "CostoUnitario", "when": "Recepcion.Estado = 'Confirmada'", "assert": "NOT ISBLANK(CostoUnitario)",
+              "message": "La partida no tiene costo en la moneda base (falta el tipo de cambio): la recepción no se confirma sin costo." }
+          ] },
+        { "op": "setAutomations", "entity": "Recepcion", "merge": true, "automations": [
+            { "name": "EntradaAlmacen", "label": "Registrar la entrada al almacén", "on": "enterState", "state": "Confirmada",
+              "actions": [
+                { "type": "create", "lines": "Partidas", "entity": "MovimientoInventario", "set": [
+                    { "field": "Fecha", "value": "Recepcion.Fecha" },
+                    { "field": "Tipo", "value": "'Entrada'" }, { "field": "Almacen", "value": "Recepcion.Almacen" },
+                    { "field": "Producto", "value": "Producto" }, { "field": "Cantidad", "value": "Cantidad" }, { "field": "Referencia", "value": "Recepcion.Folio" },
+                    { "field": "CostoUnitario", "value": "CostoUnitario" } ] }
               ] }
           ] }
       ] } }

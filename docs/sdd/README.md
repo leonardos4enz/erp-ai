@@ -65,3 +65,4 @@ y cada sesión queda como registro de una sola entrega. Al cerrar la spec:
 | 019 | [Editores visuales: diseñador del formulario y diagrama del proceso](specs/019-editores-visuales/spec.md) | Implementado |
 | 020 | [Contabilidad y costeo (promedio y FIFO)](specs/020-contabilidad-costeo/spec.md) | Implementado |
 | 021 | [Endurecimiento 2](specs/021-endurecimiento-2/spec.md) | Implementado |
+| 022 | [Costeo 2: políticas de valuación configurables](specs/022-costeo-2/spec.md) | Implementado |

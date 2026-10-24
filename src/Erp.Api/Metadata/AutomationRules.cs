@@ -92,6 +92,10 @@ public static class AutomationRules
             Check(a.Method, scope, $"{at} (método)");
             Check(a.UnitCost, scope, $"{at} (costo unitario)");
             Check(a.FallbackCost, scope, $"{at} (costo de respaldo)");
+            Check(a.TotalCost, scope, $"{at} (costo total)");
+            // Spec 022: lo capturado se calcula en el ámbito del registro creado.
+            if (a.Capture is { Count: > 0 } && Target(scope, a, model) is { } created)
+                foreach (var s in a.Capture) Check(s.Value, created, $"{at} › captura {s.Field}");
         }
         return msgs;
     }
@@ -100,6 +104,10 @@ public static class AutomationRules
     {
         var target = Target(scope, a, model);
         var byMatch = a.Type == AutomationActions.Rollup && a.Target is null;
+        if (a.Capture is not null && a.Type != AutomationActions.Create)
+            yield return "capture solo se declara en una acción create.";
+        if (a.Type != AutomationActions.Cost && (a.UncostedEntry ?? a.MethodChange ?? a.TotalCost ?? a.QuantityField) is not null)
+            yield return "uncostedEntry, methodChange, totalCost y quantityField solo se declaran en una acción cost.";
         if (target is null)
         {
             yield return a.Type is AutomationActions.Create or AutomationActions.Cost || byMatch
@@ -120,6 +128,7 @@ public static class AutomationRules
                 foreach (var m in WritableFields(target, a.Set)) yield return m;
                 foreach (var m in MissingRequired(target, (a.Set ?? []).Select(s => s.Field))) yield return m;
                 foreach (var m in ValidateCreateExtras(a, target, model)) yield return m;
+                foreach (var m in ValidateCapture(a, scope)) yield return m;
                 break;
 
             case AutomationActions.Cost:
@@ -206,6 +215,28 @@ public static class AutomationRules
             yield return $"indica el método de costeo (method: '{CostMethods.Average}', '{CostMethods.Fifo}' o una expresión).";
         else if (Literal(a.Method) is { } lit && !CostMethods.All.Contains(lit))
             yield return $"método '{lit}' no válido ({string.Join(", ", CostMethods.All)}).";
+        // Spec 022: políticas de valuación.
+        if (a.UncostedEntry is not null && !CostPolicies.UncostedEntry.Contains(a.UncostedEntry))
+            yield return $"uncostedEntry '{a.UncostedEntry}' no válido ({string.Join(", ", CostPolicies.UncostedEntry)}).";
+        if (a.MethodChange is not null && !CostPolicies.MethodChange.Contains(a.MethodChange))
+            yield return $"methodChange '{a.MethodChange}' no válido ({string.Join(", ", CostPolicies.MethodChange)}).";
+        if (a.QuantityField is not null)
+        {
+            if (target.FindField(a.QuantityField) is not { IsArchived: false } cqf || cqf.ReadOnly || !ExprAnalyzer.IsNumeric(cqf))
+                yield return $"'{a.QuantityField}' debe ser un campo numérico capturable de {target.Name} (recibe la cantidad costeada).";
+            else if (string.Equals(cqf.Name, a.Field, StringComparison.OrdinalIgnoreCase))
+                yield return "quantityField y field deben ser campos distintos.";
+        }
+    }
+
+    /// <summary>Spec 022: <c>capture</c> asigna campos del registro que disparó la acción (el encabezado o la partida).</summary>
+    private static IEnumerable<string> ValidateCapture(AutomationAction a, EntityDef scope)
+    {
+        if (a.Capture is null) yield break;
+        if (a.Capture.Count is 0 or > MaxLineTemplates) yield return $"indica de 1 a {MaxLineTemplates} valores a capturar (capture).";
+        foreach (var s in a.Capture)
+            if (scope.FindField(s.Field) is not { IsArchived: false } f || f.ReadOnly || f.Type == FieldTypes.Lines)
+                yield return $"captura: no se puede asignar '{s.Field}' en {scope.Name}.";
     }
 
     /// <summary>Texto de una expresión que es solo una literal de texto, o nulo.</summary>
@@ -244,6 +275,8 @@ public static class AutomationRules
                     yield return (target, AutomationEvents.Transition);
                     yield return (target, AutomationEvents.EnterState);
                 }
+                // Spec 022: capturar escribe en el registro que disparó la acción (su documento se guarda).
+                if (a.Capture is { Count: > 0 }) yield return (Root(scope, model), AutomationEvents.Update);
                 break;
             case AutomationActions.Cost:
                 yield return (e, AutomationEvents.Update);

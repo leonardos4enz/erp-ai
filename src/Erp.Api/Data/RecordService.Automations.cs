@@ -97,12 +97,12 @@ public sealed partial class RecordService
         var header = HeaderScope(draft, e, c.Model, loader, lineScopes);
         var scopeEntity = AutomationRules.Scope(e, a, c.Model)!;
 
-        List<(Values Values, IExprScope Scope)> items = a.Lines is null
-            ? [(draft.Header, header)]
-            : (draft.Lines.GetValueOrDefault(a.Lines) ?? []).Select((l, i) => (l.Values, (IExprScope)lineScopes[a.Lines][i])).ToList();
+        List<(Values Values, IExprScope Scope, long? Id)> items = a.Lines is null
+            ? [(draft.Header, header, id)]
+            : (draft.Lines.GetValueOrDefault(a.Lines) ?? []).Select((l, i) => (l.Values, (IExprScope)lineScopes[a.Lines][i], l.Id)).ToList();
         var origin = $"{e.Label} {DisplayOf(e, draft.Header, id)}";
 
-        foreach (var (values, scope) in items)
+        foreach (var (values, scope, sourceId) in items)
         {
             loader.Reset();
             if (a.When is not null && !ExprEvaluator.Test(a.When, scope, env, whenNull: false)) continue;
@@ -146,6 +146,18 @@ public sealed partial class RecordService
                     {
                         var t = target.Workflow!.Transitions.First(x => string.Equals(x.Name, a.Transition, StringComparison.OrdinalIgnoreCase));
                         await SystemTransitionAsync(c, target, newId, t, $"Automática: {auto.Label} ({origin}).");
+                    }
+                    // Spec 022: el registro que disparó la acción guarda lo que produjo el nuevo (p. ej. el costo real de una
+                    // salida, que la entrada del traspaso usa después). Se calcula en el ámbito del registro creado, ya completo.
+                    if (a.Capture is { Count: > 0 } capture && sourceId is { } sid)
+                    {
+                        var created = (await LoadDraftAsync(c.Cn, c.Tx, target, c.Model, newId, c.Ct))!;
+                        var createdLoader = new RelatedLoader(c.Cn, c.Tx, c.Model);
+                        var createdScope = HeaderScope(created, target, c.Model, createdLoader);
+                        var createdEnv = Env(c.User, created, createdLoader);
+                        var set = capture.Select(s => scopeEntity.FindField(s.Field)!)
+                            .Zip(capture, (f, s) => (f, Coerce(f, ExprEvaluator.Evaluate(s.Value, createdScope, createdEnv)))).ToList();
+                        await SystemUpdateAsync(c, scopeEntity, sid, set);
                     }
                     break;
                 }

@@ -508,8 +508,12 @@ public static partial class PlanCompiler
         var e = ctx.Active(op.Entity);
         if (e is null) return null;
         var start = ctx.ErrorCount;
-        if (op.Rules.Count > MaxRules) ctx.Error($"Máximo {MaxRules} reglas por catálogo.");
+        // Spec 022: con merge se conservan las reglas que el plan no nombra (como setAutomations).
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        IReadOnlyList<BusinessRule> rules = op.Merge
+            ? [.. (e.Rules ?? []).Where(r => !op.Rules.Any(n => string.Equals(n.Name, r.Name, StringComparison.OrdinalIgnoreCase))), .. op.Rules]
+            : op.Rules;
+        if (rules.Count > MaxRules) ctx.Error($"Máximo {MaxRules} reglas por catálogo.");
         foreach (var r in op.Rules)
         {
             if (!Identifiers.IsValid(r.Name, out var err)) ctx.Error($"Regla: {err}");
@@ -520,7 +524,9 @@ public static partial class PlanCompiler
                 ctx.Error($"La regla '{r.Name}' apunta al campo '{r.Field}', que no existe.");
         }
         if (ctx.ErrorCount > start) return null;
-        return new(e with { Rules = op.Rules }, $"Definir {op.Rules.Count} regla(s) de negocio en '{e.Label}'", []);
+        return new(e with { Rules = rules }, op.Merge
+            ? $"Agregar o actualizar {op.Rules.Count} regla(s) de negocio en '{e.Label}': {string.Join(", ", op.Rules.Select(r => r.Name))}"
+            : $"Definir {op.Rules.Count} regla(s) de negocio en '{e.Label}'", []);
     }
 
     /// <summary>Forma básica aquí; campos, destinos y expresiones en la pasada final (<see cref="AutomationRules"/>).</summary>

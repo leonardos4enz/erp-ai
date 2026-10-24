@@ -175,6 +175,27 @@ public static class CostMethods
     public static readonly IReadOnlySet<string> All = new HashSet<string> { Average, Fifo };
 }
 
+/// <summary>
+/// Spec 022: políticas de valuación de una acción <c>cost</c>. Omitidas, el motor se comporta como en la 020; los valores
+/// recomendados los declaran los módulos.
+/// </summary>
+public static class CostPolicies
+{
+    /// <summary>Entrada sin costo en una llave sin capas: a cero (020).</summary>
+    public const string Average = "average";
+    /// <summary>... al costo de respaldo; sin respaldo se rechaza.</summary>
+    public const string Fallback = "fallback";
+    /// <summary>... se rechaza.</summary>
+    public const string Require = "require";
+    public static readonly IReadOnlySet<string> UncostedEntry = new HashSet<string> { Average, Fallback, Require };
+
+    /// <summary>Promedio con varias capas abiertas (p. ej. después de FIFO): fundirlas antes de valuar.</summary>
+    public const string Merge = "merge";
+    /// <summary>... conservarlas y consumirlas en orden hasta la siguiente entrada (020).</summary>
+    public const string Keep = "keep";
+    public static readonly IReadOnlySet<string> MethodChange = new HashSet<string> { Merge, Keep };
+}
+
 /// <summary>Spec 020: partida que una acción <c>create</c> agrega al documento nuevo.</summary>
 public sealed record LineTemplate
 {
@@ -210,6 +231,18 @@ public sealed record AutomationAction
     public string? FallbackCost { get; init; }
     public string? CostField { get; init; }
     public string? UnitCostField { get; init; }
+    // Spec 022: políticas de cost (ver CostPolicies), costo total exacto de una entrada y cantidad costeada en el saldo.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? UncostedEntry { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? MethodChange { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TotalCost { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? QuantityField { get; init; }
+    /// <summary>Spec 022 (create): asigna al registro que disparó la acción valores calculados en el registro creado.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<FieldAssignment>? Capture { get; init; }
 }
 
 public sealed record Automation
@@ -691,6 +724,8 @@ public sealed record SetRulesOp : Operation
 {
     public required string Entity { get; init; }
     public IReadOnlyList<BusinessRule> Rules { get; init; } = [];
+    /// <summary>Spec 022: agrega o reemplaza por nombre y conserva las demás (p. ej. la política de otro módulo).</summary>
+    public bool Merge { get; init; }
 }
 
 public sealed record CreateEntityOp : Operation

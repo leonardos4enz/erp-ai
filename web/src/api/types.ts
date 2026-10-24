@@ -324,6 +324,13 @@ export interface AutomationAction {
   fallbackCost?: string;
   costField?: string;
   unitCostField?: string;
+  /** Spec 022: políticas de valuación, costo total exacto y cantidad costeada en el saldo (type: cost). */
+  uncostedEntry?: 'average' | 'fallback' | 'require';
+  methodChange?: 'merge' | 'keep';
+  totalCost?: string;
+  quantityField?: string;
+  /** Spec 022: valores del registro creado que se guardan en el que disparó la acción (type: create). */
+  capture?: { field: string; value: string }[];
 }
 
 /** Spec 020: libro de partida doble (cuadre y periodos los garantiza el motor). */
@@ -421,7 +428,7 @@ export type Operation =
   | { op: 'restoreEntity'; entity: string }
   | { op: 'restoreField'; entity: string; field: string }
   | { op: 'setWorkflow'; entity: string; workflow: Workflow }
-  | { op: 'setRules'; entity: string; rules: Rule[] }
+  | { op: 'setRules'; entity: string; rules: Rule[]; merge?: boolean }
   | { op: 'setAutomations'; entity: string; automations: Automation[]; merge?: boolean }
   | { op: 'setSecurity'; entity: string; security: SecurityPolicy | null }
   | { op: 'setLayout'; entity: string; layout: Layout | null }
