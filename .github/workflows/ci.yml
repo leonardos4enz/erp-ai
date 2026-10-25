@@ -73,21 +73,38 @@ jobs:
           if (-not $sqlcmd) { throw 'sqlcmd no está en el PATH del runner (lo usan run.mjs e instancia.mjs).' }
           sqlcmd -S "(localdb)\MSSQLLocalDB" -E -b -Q "SELECT @@VERSION"
       - name: Pruebas de integración (SQL real)
+        id: integracion
         # Revisión adversarial 030 (F-J): una prueba colgada no consume los 90 minutos.
-        run: dotnet test tests/Erp.IntegrationTests --blame-hang-timeout 10m
+        shell: bash
+        run: |
+          set -o pipefail
+          dotnet test tests/Erp.IntegrationTests --blame-hang-timeout 10m 2>&1 | tee integracion-salida.log
+      - name: Motivo de la falla de integración como anotaciones
+        if: failure() && steps.integracion.outcome == 'failure'
+        shell: bash
+        run: node web/e2e/anotar-ci.mjs integracion-salida.log Integración
       - name: Dependencias de la SPA y Chromium
         working-directory: web
         run: |
           npm ci
           npx playwright install chromium
       - name: Suite E2E completa
-        run: npm --prefix web run e2e
+        id: e2e
+        shell: bash
+        run: |
+          set -o pipefail
+          npm --prefix web run e2e 2>&1 | tee e2e-salida.log
+      - name: Motivo de la falla como anotaciones (se leen sin iniciar sesión)
+        if: failure() && steps.e2e.outcome == 'failure'
+        shell: bash
+        run: node web/e2e/anotar-ci.mjs e2e-salida.log E2E
       - name: Reporte de Playwright (video y trace de las fallas)
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report
           path: |
+            e2e-salida.log
             web/e2e/.report
             web/e2e/.results
           retention-days: 14

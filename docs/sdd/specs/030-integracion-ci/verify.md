@@ -145,7 +145,9 @@ espera, foco al cerrar diálogos, aviso de conflicto) se recorrieron en las prue
 - [x] Alcance congelado: D-06, D-07, R-021-5 y R-021-6 quedan en el roadmap antes de Ventas
 
 ### CI
-(pendiente: primera corrida tras el push)
+| Corrida | Commit | Resultado |
+|---|---|---|
+| [40235967108](https://github.com/leonardos4enz/erp-ai/actions/runs/40235967108) | `257c438` | Rápido (Ubuntu) **en verde** en 1 min 03 s: unitarias, build, Vitest y `npm audit`. Completo (`windows-2025`): LocalDB y `sqlcmd` presentes, integración **en verde** (1 min 13 s), **E2E falló** a los 11 min sin dejar reporte de Playwright. Los registros de un repositorio público solo se ven con sesión iniciada y la sesión no inicia sesiones: la spec se reabre y el workflow publica el motivo como anotaciones (`web/e2e/anotar-ci.mjs`, legibles por la API sin credenciales) |
 
 ## 5. Riesgos residuales
 Registrados en [riesgos.md](../../riesgos.md#030): R-030-1 (caché del modelo por instancia), R-030-2 (workflow sin prueba fuera
