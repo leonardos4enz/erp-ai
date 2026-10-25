@@ -5,6 +5,8 @@ import { LoadingBlock } from './components/ui';
 import { Layout } from './components/Layout';
 import { LoginPage } from './pages/LoginPage';
 import { HomePage } from './pages/HomePage';
+import { AppHomePage } from './pages/AppHomePage';
+import { AdminHomePage } from './pages/AdminHomePage';
 import { EntityListPage } from './pages/EntityListPage';
 import { EntityFormPage } from './pages/EntityFormPage';
 import { ModelerPage } from './pages/ModelerPage';
@@ -45,6 +47,9 @@ export function App() {
         }
       >
         <Route index element={<HomePage />} />
+        {/* Spec 024: página de un módulo y entrada al área de configuración. */}
+        <Route path="m/:app" element={<AppHomePage />} />
+        <Route path="admin" element={<AdminHomePage />} />
         <Route path="c/:entity" element={<EntityListPage />} />
         <Route path="c/:entity/new" element={<EntityFormPage />} />
         <Route path="c/:entity/:id" element={<EntityFormPage />} />

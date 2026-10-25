@@ -1,6 +1,6 @@
 import { api } from './client';
 import type {
-  AuditEntry, AutomationRun, AutomationRunDetail, ScheduleSummary, ChangePlan, Company, ExchangeRate, ChangeSetSummary, DashboardResult, DashboardSummary, EntityDef, HistoryEntry, LayoutState, LookupItem, Me,
+  AppSummary, SearchHit, AuditEntry, AutomationRun, AutomationRunDetail, ScheduleSummary, ChangePlan, Company, ExchangeRate, ChangeSetSummary, DashboardResult, DashboardSummary, EntityDef, HistoryEntry, LayoutState, LookupItem, Me,
   ApiKey, AssistantStatus, OAuthClient, OAuthScope, BusinessUnit, PendingChange, SecurityChange, Team, Conversation, ConversationSummary, Proposal, EnvironmentInfo, ExportableCatalogs, ExportPreview, ExportRequest, ImportResult, ModuleInfo, PackageImport, ModulePreview, WebhookDelivery, WebhookSummary, Paged, PlanPreview, ReportResult, ReportSummary, Role, Row, RowList, SavedView, User, ViewFilter, ViewList,
 } from './types';
 
@@ -24,6 +24,8 @@ export const modelApi = {
   preview: (plan: ChangePlan) => api<PlanPreview>('/model/plan/preview', { method: 'POST', body: plan }),
   apply: (plan: ChangePlan) => api<{ changeSetId: number }>('/model/plan/apply', { method: 'POST', body: plan }),
   changes: () => api<ChangeSetSummary[]>('/model/changes'),
+  /** Spec 024: módulos del usuario; `all` (modeladores): también declarados sin catálogos o archivados. */
+  apps: (all = false, signal?: AbortSignal) => api<AppSummary[]>('/model/apps', { query: { all: all || undefined }, signal }),
 };
 
 export interface ListQuery {
@@ -118,6 +120,11 @@ export const reportsApi = {
     if (f) qs.set('filters', f);
     return `/api/reports/${enc(entity)}/${enc(name)}/export?${qs.toString()}`;
   },
+};
+
+/** Spec 024 (H5): documentos por folio. */
+export const searchApi = {
+  records: (q: string, signal?: AbortSignal) => api<SearchHit[]>('/search', { query: { q }, signal }),
 };
 
 export const dashboardsApi = {

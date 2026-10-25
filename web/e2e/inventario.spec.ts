@@ -65,6 +65,9 @@ test('H7: instalar Inventario desde la UI (ya con Compras)', async ({ page }) =>
   await expect(dialog.getByText(/\[base\] Agregar o actualizar 1 automatización\(es\) en 'Recepción'/)).toBeVisible();
   await dialog.getByRole('button', { name: 'Instalar módulo' }).click();
   await expect(page.getByText('Módulo instalado')).toBeVisible({ timeout: 30_000 });
+  // Spec 024: el módulo Inventario aparece en el selector y su menú tiene sus catálogos.
+  await page.getByRole('banner').getByRole('button', { name: 'Cambiar de módulo' }).click();
+  await page.getByRole('main').getByRole('link', { name: /^Inventario/ }).click();
   const nav = page.getByLabel('Navegación principal');
   await expect(nav.getByRole('link', { name: 'Existencias' })).toBeVisible();
   await expect(nav.getByRole('link', { name: 'Movimientos de inventario' })).toBeVisible();

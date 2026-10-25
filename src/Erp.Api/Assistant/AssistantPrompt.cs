@@ -38,7 +38,9 @@ public static class AssistantPrompt
 
         Operaciones (campo "op"):
         - createEntity { name, label, labelPlural, icon?, description?, group?, displayField?, perCompany?, fields: Field[] }
-          icon: nombre de icono Lucide en kebab-case (truck, package, users…). group: sección del menú (p. ej. "Flotilla").
+          icon: nombre de icono Lucide en kebab-case (truck, package, users…). group: nombre del módulo de navegación al que
+          pertenece (uno de "apps" del modelo, p. ej. "Compras"; sin group queda en el módulo General). Si el catálogo inicia un
+          área nueva, declara también el módulo con setApp.
         - updateEntity { entity, label?, labelPlural?, icon?, description?, displayField?, group?, perCompany? }
           perCompany solo acepta true (pasar a un registro por empresa; no se revierte).
         - archiveEntity { entity }   (no destruye datos)
@@ -88,6 +90,9 @@ public static class AssistantPrompt
           limit?, chart?: bar|line|pie }] }
         - setDashboard { dashboard: { name, label, icon?, description?, roles?, widgets: [{ type: kpi|chart|table,
           entity, report, label?, measure?, wide? }] } }   - archiveDashboard { name }
+        - setApp { app: { name, label, icon?, description?, order? } }   - archiveApp { name }
+          Módulo de navegación (spec 024): name es el group de sus catálogos (puede llevar espacios y acentos, máx. 60);
+          icon Lucide kebab-case; description breve (máx. 300) para su tarjeta; order 0-9999 (omitido 100).
         - setWebhooks { entity, merge?, webhooks: [{ name, label, description?, events: [{ on, state?, transition? }], when?,
           role, fields? }] }   role: rol existente con el que se arma la carga.
         - setSchedules { entity, merge?, schedules: [{ name, label, description?, every: minutes|hour|day|week|month, interval?

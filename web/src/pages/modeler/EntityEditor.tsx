@@ -4,7 +4,8 @@ import {
   Archive, ArchiveRestore, ArrowDown, ArrowUp, ChevronDown, ChevronUp, Eye, LayoutTemplate, Plus, Table2, Trash2, Workflow as WorkflowIcon,
 } from 'lucide-react';
 import { ApiError } from '../../api/client';
-import { adminApi } from '../../api/endpoints';
+import { adminApi, modelApi } from '../../api/endpoints';
+import { GENERAL_APP } from '../../lib/apps';
 import type { Automation, ChangePlan, EntityDef, FieldDef, FieldType, FormulaResultType, LedgerDef, Layout, Operation, ReportDef, Rule, ScheduleDef, SecurityPolicy, ViewDef, WebhookDef, Workflow } from '../../api/types';
 import { ConfirmDialog } from '../../components/Dialog';
 import { IconPicker } from '../../components/IconPicker';
@@ -493,19 +494,29 @@ export interface EntityEditorProps {
 
 export function EntityEditor({ original, entities, onCancel, onReview }: EntityEditorProps) {
   const isNew = !original;
-  const [d, setD] = useState<Draft>(() => draftFrom(original));
+  const [params, setParams] = useSearchParams();
+  // Spec 024 (H2 CA2): al crear desde un módulo (`?app=`), el catálogo nuevo se propone en ese módulo.
+  const [d, setD] = useState<Draft>(() => {
+    const draft = draftFrom(original);
+    const app = params.get('app')?.trim();
+    return isNew && app && app.toLowerCase() !== GENERAL_APP.toLowerCase() ? { ...draft, group: app.slice(0, 60) } : draft;
+  });
+  const [appNames, setAppNames] = useState<string[]>([]);
   const [nameTouched, setNameTouched] = useState(!isNew);
   const [pluralTouched, setPluralTouched] = useState(!isNew);
   const [showErrors, setShowErrors] = useState(false);
   const [roleNames, setRoleNames] = useState<string[] | null>(null);
   // Spec 019: pestañas del editor en la URL; el borrador es uno solo para las tres.
-  const [params, setParams] = useSearchParams();
   const tab = editorTab(params.get('tab'));
   const setTab = (t: EditorTab) => {
     const p = new URLSearchParams(params);
     if (t === 'catalogo') p.delete('tab'); else p.set('tab', t);
     setParams(p, { replace: true });
   };
+
+  useEffect(() => {
+    modelApi.apps(true).then((a) => setAppNames(a.filter((x) => !x.isArchived && x.name !== GENERAL_APP).map((x) => x.name))).catch(() => setAppNames([]));
+  }, []);
 
   useEffect(() => {
     adminApi.roles().then((r) => setRoleNames(r.map((x) => x.name))).catch((e) => { if (e instanceof ApiError) setRoleNames(null); });
@@ -657,7 +668,8 @@ export function EntityEditor({ original, entities, onCancel, onReview }: EntityE
           />
           <IconPicker value={d.icon} onChange={(icon) => setD((s) => ({ ...s, icon: icon ?? 'package' }))} />
           <Textarea wrapClassName="span-2" label="Descripción" placeholder="Para qué sirve este catálogo" rows={2} style={{ minHeight: 64 }} value={d.description} onChange={(e) => setD((s) => ({ ...s, description: e.target.value }))} maxLength={500} />
-          <Input label="Grupo del menú" hint="Sección del menú lateral, p. ej. Compras. Vacío: Catálogos." maxLength={60} value={d.group} onChange={(e) => setD((s) => ({ ...s, group: e.target.value }))} />
+          <Input label="Módulo" list="modeler-apps" autoComplete="off" hint="Módulo del menú, p. ej. Compras. Vacío: General." maxLength={60} value={d.group} onChange={(e) => setD((s) => ({ ...s, group: e.target.value }))} />
+          <datalist id="modeler-apps">{appNames.map((n) => <option key={n} value={n} />)}</datalist>
           <Select label="Campo para mostrar en referencias" hint="Se usa cuando otro catálogo apunta a este" value={d.displayField} onChange={(e) => setD((s) => ({ ...s, displayField: e.target.value }))}>
             <option value="">Automático</option>
             {textFields.map((f) => <option key={f._key} value={f.name}>{f.label || f.name}</option>)}

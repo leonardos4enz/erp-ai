@@ -127,6 +127,7 @@ public sealed class EnvironmentService(Db db, MetadataStore store, PlanService p
     {
         var model = await store.GetAsync(ct);
         var boards = await store.GetDashboardsAsync(ct);
+        var apps = await store.GetAppsAsync(ct);
         var errors = new Dictionary<string, string[]>();
         var header = PackageRules.ValidateHeader(req.Id?.Trim(), req.Name, req.Version?.Trim(), req.Icon, req.Description, ServerModules()).ToList();
         if (header.Count > 0) errors["package"] = [.. header];
@@ -150,7 +151,7 @@ public sealed class EnvironmentService(Db db, MetadataStore store, PlanService p
 
         var name0 = req.Name!.Trim();
         var version = req.Version!.Trim();
-        var diff = ModelDiff.Export(model, boards, entities, dashboards, $"{name0} {version}");
+        var diff = ModelDiff.Export(model, boards, entities, dashboards, $"{name0} {version}", apps);
 
         await using var cn = await db.OpenAsync(ct);
         var roles = await LoadRolesAsync(cn, null);
@@ -167,7 +168,7 @@ public sealed class EnvironmentService(Db db, MetadataStore store, PlanService p
         // Todos los roles de este entorno: el compilador también revisa los catálogos que no viajan (y sus roles existen en el
         // destino). Los roles que cita el paquete viajan con él (ExportRoles), así que no hace falta restringir aquí.
         var known = roles.Keys.ToHashSet(Ci);
-        var (_, _, compileErrors, steps) = ModelDiff.Desired(package, model, boards, known);
+        var (_, _, _, compileErrors, steps) = ModelDiff.DesiredState(package, model, boards, known, apps);
         var dependencies = Dependencies(model, boards, entities, dashboards);
         var preview = new ExportPreviewDto(compileErrors.Count == 0, compileErrors, steps, diff.Plan.Operations.Count,
             entities.Order(Ci).ToList(), packageRoles.Select(r => new PackageRoleDto(r.Name, true, r.CanViewAudit,
@@ -356,18 +357,19 @@ public sealed class EnvironmentService(Db db, MetadataStore store, PlanService p
 
         var model = await MetadataStore.LoadAsync(cn, null);
         var boards = await MetadataStore.LoadDashboardsAsync(cn, null);
+        var apps = await MetadataStore.LoadAppsAsync(cn, null);
         var roles = await LoadRolesAsync(cn, null);
         PackageDiffDto diff;
         string? versionBlock;
         if (row.Kind == KindRevert)
         {
             // Una instantánea alterada no se revisa ni se aplica (H3 CA3): se explica en lugar del diff.
-            try { (diff, _, versionBlock) = await RevertDiffAsync(cn, null, row, model, boards, roles); }
+            try { (diff, _, versionBlock) = await RevertDiffAsync(cn, null, row, model, boards, apps, roles); }
             catch (Conflict ex) { return dto with { BlockedReason = ex.Message }; }
         }
         else
         {
-            diff = ComputeDiff(Parse(row.ContentJson), model, boards, roles);
+            diff = ComputeDiff(Parse(row.ContentJson), model, boards, apps, roles);
             versionBlock = PackageRules.IsNewer(row.Version, installed) ? null
                 : $"Este entorno ya tiene la versión {installed} de «{row.Name}»: ya no se puede aplicar la {row.Version}.";
         }
@@ -407,14 +409,14 @@ public sealed class EnvironmentService(Db db, MetadataStore store, PlanService p
         if (row.UploadedById == user.Id)
             throw new Forbidden(row.Kind == KindRevert ? "La debe aprobar un administrador distinto de quien pidió la reversión."
                 : "Lo debe aprobar un administrador distinto de quien lo subió.");
-        var (model, boards, roles) = (await MetadataStore.LoadAsync(cn, tx), await MetadataStore.LoadDashboardsAsync(cn, tx), await LoadRolesAsync(cn, tx));
+        var (model, boards, apps, roles) = (await MetadataStore.LoadAsync(cn, tx), await MetadataStore.LoadDashboardsAsync(cn, tx), await MetadataStore.LoadAppsAsync(cn, tx), await LoadRolesAsync(cn, tx));
         PackageDiffDto diff;
         if (row.Kind == KindRevert)
         {
-            (diff, _, var versionBlock) = await RevertDiffAsync(cn, tx, row, model, boards, roles);
+            (diff, _, var versionBlock) = await RevertDiffAsync(cn, tx, row, model, boards, apps, roles);
             if (versionBlock is not null) throw new Conflict(versionBlock);
         }
-        else diff = ComputeDiff(Parse(row.ContentJson), model, boards, roles);
+        else diff = ComputeDiff(Parse(row.ContentJson), model, boards, apps, roles);
         if (!diff.Valid) throw new Conflict("El paquete tiene errores o conflictos con este entorno: no se puede aprobar.");
         if (!string.Equals(req.DiffHash, diff.DiffHash, StringComparison.Ordinal))
             throw new Conflict("El entorno cambió mientras revisabas: vuelve a abrir el paquete y revisa el diff.");
@@ -504,7 +506,8 @@ public sealed class EnvironmentService(Db db, MetadataStore store, PlanService p
             var model = await MetadataStore.LoadAsync(cn, tx);
             var roles = await LoadRolesAsync(cn, tx);
             var boards = await MetadataStore.LoadDashboardsAsync(cn, tx);
-            var diff = ComputeDiff(p, model, boards, roles, out var plan);
+            var apps = await MetadataStore.LoadAppsAsync(cn, tx);
+            var diff = ComputeDiff(p, model, boards, apps, roles, out var plan);
             if (!diff.Valid) throw new Conflict("El paquete tiene errores o conflictos con este entorno.");
             if (!string.Equals(req.DiffHash, diff.DiffHash, StringComparison.Ordinal))
                 throw new Conflict("El entorno cambió desde que revisaste el paquete: vuelve a abrirlo y revisa el diff.");
@@ -523,8 +526,9 @@ public sealed class EnvironmentService(Db db, MetadataStore store, PlanService p
             await ModuleService.GrantAsync(cn, tx, grants, roleIds, afterModel);
             // Spec 017 (H1): cómo estaba y cómo quedó lo que el paquete puede tocar, en la misma transacción.
             var (scope, scopeBoards) = ModelDiff.SnapshotScope(p); // spec 023: también lo que extiende
-            var snapshot = await SaveSnapshotsAsync(cn, tx, id, ModelSnapshot.Take(scope, scopeBoards, model, boards),
-                ModelSnapshot.Take(scope, scopeBoards, afterModel, await MetadataStore.LoadDashboardsAsync(cn, tx)));
+            var scopeApps = ModelDiff.ScopeApps(p); // spec 024: y los módulos que declara
+            var snapshot = await SaveSnapshotsAsync(cn, tx, id, ModelSnapshot.Take(scope, scopeBoards, model, boards, scopeApps, apps),
+                ModelSnapshot.Take(scope, scopeBoards, afterModel, await MetadataStore.LoadDashboardsAsync(cn, tx), scopeApps, await MetadataStore.LoadAppsAsync(cn, tx)));
 
             await cn.ExecuteAsync("""
                 MERGE meta.Module AS t USING (SELECT @PackageId AS Id) AS s ON t.Id = s.Id
@@ -653,7 +657,7 @@ public sealed class EnvironmentService(Db db, MetadataStore store, PlanService p
     /// permisos (roles = []); la huella cubre el plan y a qué aplicación deshace. <c>VersionBlock</c>: si ya no se puede revertir.
     /// </summary>
     private async Task<(PackageDiffDto Diff, ChangePlan Plan, string? VersionBlock)> RevertDiffAsync(DbConnection cn, DbTransaction? tx, ImportRow row,
-        IReadOnlyDictionary<string, EntityDef> model, IReadOnlyDictionary<string, DashboardDef> boards, IReadOnlyDictionary<string, RoleRow> roles)
+        IReadOnlyDictionary<string, EntityDef> model, IReadOnlyDictionary<string, DashboardDef> boards, IReadOnlyDictionary<string, AppDef> apps, IReadOnlyDictionary<string, RoleRow> roles)
     {
         if (Sha(row.ContentJson) != row.ContentHash) throw new Conflict("El contenido guardado de la reversión no coincide con su huella: no se aplica.");
         var content = RevertContent.Parse(row.ContentJson);
@@ -665,13 +669,13 @@ public sealed class EnvironmentService(Db db, MetadataStore store, PlanService p
         var versionBlock = await RevertBlockedAsync(cn, tx, reverted, installed, checkPending: false);
 
         var result = ModelDiff.Revert(snaps.Before.Snapshot, snaps.After.Snapshot, model, boards,
-            $"Revertir {row.Name} {row.Version} (paquete {row.PackageId})");
+            $"Revertir {row.Name} {row.Version} (paquete {row.PackageId})", apps);
         var plan = result.Plan;
         var errors = new List<PlanError>();
         var steps = new List<PlanStep>();
         if (plan.Operations.Count > 0)
         {
-            var compiled = PlanCompiler.Compile(plan, model, roles.Keys.ToHashSet(Ci), boards).Preview;
+            var compiled = PlanCompiler.Compile(plan, model, roles.Keys.ToHashSet(Ci), boards, apps).Preview;
             errors.AddRange(compiled.Errors);
             steps.AddRange(compiled.Steps);
         }
@@ -696,7 +700,8 @@ public sealed class EnvironmentService(Db db, MetadataStore store, PlanService p
         var installed = await cn.ExecuteScalarAsync<string?>("SELECT Version FROM meta.Module WITH (UPDLOCK, HOLDLOCK) WHERE Id = @PackageId", new { row.PackageId }, tx);
         var model = await MetadataStore.LoadAsync(cn, tx);
         var boards = await MetadataStore.LoadDashboardsAsync(cn, tx);
-        var (diff, plan, versionBlock) = await RevertDiffAsync(cn, tx, row, model, boards, await LoadRolesAsync(cn, tx));
+        var apps = await MetadataStore.LoadAppsAsync(cn, tx);
+        var (diff, plan, versionBlock) = await RevertDiffAsync(cn, tx, row, model, boards, apps, await LoadRolesAsync(cn, tx));
         if (versionBlock is not null) throw new Conflict(versionBlock);
         if (!diff.Valid) throw new Conflict("La reversión tiene errores o conflictos con este entorno.");
         if (!string.Equals(req.DiffHash, diff.DiffHash, StringComparison.Ordinal))
@@ -709,8 +714,9 @@ public sealed class EnvironmentService(Db db, MetadataStore store, PlanService p
         int? changeSetId = plan.Operations.Count > 0 ? await plans.ApplyInTransactionAsync(cn, tx, plan, http) : null;
         var scopeBefore = (await LoadSnapshotsAsync(cn, tx, reverted.Id))!.Value.Before.Snapshot;
         var (scope, scopeBoards) = (scopeBefore.Entities.ToHashSet(Ci), scopeBefore.Dashboards.ToHashSet(Ci));
-        var snapshot = await SaveSnapshotsAsync(cn, tx, row.Id, ModelSnapshot.Take(scope, scopeBoards, model, boards),
-            ModelSnapshot.Take(scope, scopeBoards, await MetadataStore.LoadAsync(cn, tx), await MetadataStore.LoadDashboardsAsync(cn, tx)));
+        var scopeApps = scopeBefore.Apps?.ToHashSet(Ci);
+        var snapshot = await SaveSnapshotsAsync(cn, tx, row.Id, ModelSnapshot.Take(scope, scopeBoards, model, boards, scopeApps, apps),
+            ModelSnapshot.Take(scope, scopeBoards, await MetadataStore.LoadAsync(cn, tx), await MetadataStore.LoadDashboardsAsync(cn, tx), scopeApps, await MetadataStore.LoadAppsAsync(cn, tx)));
 
         // La versión vuelve a la anterior; si no había, el paquete deja de figurar como instalado.
         await cn.ExecuteAsync("""
@@ -735,24 +741,24 @@ public sealed class EnvironmentService(Db db, MetadataStore store, PlanService p
     // ---------------- Diff ----------------
 
     private PackageDiffDto ComputeDiff(ModulePackage p, IReadOnlyDictionary<string, EntityDef> model, IReadOnlyDictionary<string, DashboardDef> boards,
-        IReadOnlyDictionary<string, RoleRow> roles) => ComputeDiff(p, model, boards, roles, out _);
+        IReadOnlyDictionary<string, AppDef> apps, IReadOnlyDictionary<string, RoleRow> roles) => ComputeDiff(p, model, boards, apps, roles, out _);
 
     /// <summary>
     /// Estado deseado → plan mínimo → compilado contra este entorno. La huella cubre el plan y los roles y permisos que se
     /// otorgarán: aprobar o revisar un diff es aprobar exactamente eso.
     /// </summary>
     private static PackageDiffDto ComputeDiff(ModulePackage p, IReadOnlyDictionary<string, EntityDef> model, IReadOnlyDictionary<string, DashboardDef> boards,
-        IReadOnlyDictionary<string, RoleRow> roles, out ChangePlan plan)
+        IReadOnlyDictionary<string, AppDef> apps, IReadOnlyDictionary<string, RoleRow> roles, out ChangePlan plan)
     {
         var known = roles.Keys.Union(p.AllRoles.Select(r => r.Name)).ToHashSet(Ci);
-        var (desired, desiredBoards, errors, _) = ModelDiff.Desired(p, model, boards, known);
-        var diff = ModelDiff.Compute(desired, desiredBoards, model, boards, $"{p.Name} {p.Version} (paquete {p.Id})");
+        var (desired, desiredBoards, desiredApps, errors, _) = ModelDiff.DesiredState(p, model, boards, known, apps);
+        var diff = ModelDiff.Compute(desired, desiredBoards, model, boards, $"{p.Name} {p.Version} (paquete {p.Id})", null, desiredApps, apps);
         plan = diff.Plan;
         var allErrors = new List<PlanError>(errors);
         var steps = new List<PlanStep>();
         if (errors.Count == 0 && plan.Operations.Count > 0)
         {
-            var compiled = PlanCompiler.Compile(plan, model, known, boards).Preview;
+            var compiled = PlanCompiler.Compile(plan, model, known, boards, apps).Preview;
             allErrors.AddRange(compiled.Errors);
             steps.AddRange(compiled.Steps);
         }

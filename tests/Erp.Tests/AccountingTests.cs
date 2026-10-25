@@ -181,7 +181,7 @@ public class AccountingTests
         Assert.Null(model["MovimientoInventario"].FindField("CostoUnitario"));
 
         var pending = inventario.PendingAfter("1.4.0");
-        Assert.Equal(["1.5.0", "1.6.0", "1.6.1", "1.7.0"], pending.Select(u => u.Version)); // 1.6.x: spec 022; 1.7.0: spec 023
+        Assert.Equal(["1.5.0", "1.6.0", "1.6.1", "1.7.0", "1.8.0"], pending.Select(u => u.Version)); // 1.6.x: spec 022; 1.7.0: spec 023; 1.8.0: spec 024
         var up = PlanCompiler.Compile(pending[0].Plan, model, roles, boards);
         Assert.True(up.Preview.Valid, Errors(up));
         var after = up.ResultingModel;

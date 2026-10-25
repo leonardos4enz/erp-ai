@@ -73,6 +73,10 @@ public static class DataEndpoints
             return Results.NoContent();
         });
 
+        // Spec 024 (H5): búsqueda global de documentos por folio.
+        app.MapGet("/api/search", (string? q, HttpContext http, RecordService records, CancellationToken ct) =>
+            records.SearchAsync(q, http.CurrentUser(), ct)).RequireAuthorization();
+
         app.MapGet("/api/users/lookup", (string? search, bool? teams, RecordService records, CancellationToken ct) =>
             records.UserLookupAsync(search, ct, teams == true)).RequireAuthorization();
     }

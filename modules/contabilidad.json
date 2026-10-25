@@ -1,7 +1,7 @@
 {
   "id": "contabilidad",
   "name": "Contabilidad",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "icon": "landmark",
   "description": "Catálogo de cuentas, pólizas de partida doble y periodos contables con cierre. El cuadre y los periodos cerrados los garantiza el motor por cualquier vía.",
   "plan": {
@@ -134,6 +134,12 @@
                 "whenMessage": "Una póliza automática aplicada no se cancela: la generó su documento de origen. Registra una póliza manual de ajuste." }
             ]
           } }
+      ] } },
+    { "version": "1.2.0",
+      "description": "Navegación por módulos (spec 024): declara el módulo Contabilidad con su ícono, descripción y orden para el selector de módulos.",
+      "plan": { "description": "Contabilidad 1.2.0: módulo de navegación", "operations": [
+        { "op": "setApp", "app": { "name": "Contabilidad", "label": "Contabilidad", "icon": "landmark", "order": 30,
+            "description": "Catálogo de cuentas, pólizas de partida doble y periodos contables con cierre." } }
       ] } }
   ],
   "roles": [

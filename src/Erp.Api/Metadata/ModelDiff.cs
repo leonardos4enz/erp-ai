@@ -17,23 +17,29 @@ public sealed record ModelDiffResult(ChangePlan Plan, IReadOnlyList<string> Conf
 /// es «local» (requiere confirmación, 014) si tampoco estaba ahí.
 /// </summary>
 public sealed record DiffOptions(IReadOnlySet<string> ArchiveEntities, IReadOnlySet<string> ArchiveDashboards,
-    IReadOnlyDictionary<string, EntityDef>? Applied = null);
+    IReadOnlyDictionary<string, EntityDef>? Applied = null, IReadOnlySet<string>? ArchiveApps = null);
 
 /// <summary>
 /// Spec 017: lo que el paquete podía tocar (sus catálogos con sus partidas y sus tableros) tal como estaba en un momento.
-/// <c>Entities</c>/<c>Dashboards</c> son el alcance; las definiciones, solo las que existían.
+/// <c>Entities</c>/<c>Dashboards</c> son el alcance; las definiciones, solo las que existían. Spec 024: <c>Apps</c>/<c>AppDefs</c>,
+/// los módulos de navegación (nulos en las instantáneas anteriores a la 024: sin módulos).
 /// </summary>
 public sealed record ModelSnapshot(IReadOnlyList<string> Entities, IReadOnlyList<string> Dashboards,
-    IReadOnlyList<EntityDef> EntityDefs, IReadOnlyList<DashboardDef> DashboardDefs)
+    IReadOnlyList<EntityDef> EntityDefs, IReadOnlyList<DashboardDef> DashboardDefs,
+    IReadOnlyList<string>? Apps = null, IReadOnlyList<AppDef>? AppDefs = null)
 {
     public static ModelSnapshot Take(IReadOnlySet<string> entities, IReadOnlySet<string> dashboards,
-        IReadOnlyDictionary<string, EntityDef> model, IReadOnlyDictionary<string, DashboardDef> boards) =>
+        IReadOnlyDictionary<string, EntityDef> model, IReadOnlyDictionary<string, DashboardDef> boards,
+        IReadOnlySet<string>? apps = null, IReadOnlyDictionary<string, AppDef>? appDefs = null) =>
         new(entities.Order(StringComparer.OrdinalIgnoreCase).ToList(), dashboards.Order(StringComparer.OrdinalIgnoreCase).ToList(),
             model.Values.Where(e => entities.Contains(e.Name)).OrderBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList(),
-            boards.Values.Where(d => dashboards.Contains(d.Name)).OrderBy(d => d.Name, StringComparer.OrdinalIgnoreCase).ToList());
+            boards.Values.Where(d => dashboards.Contains(d.Name)).OrderBy(d => d.Name, StringComparer.OrdinalIgnoreCase).ToList(),
+            apps?.Order(StringComparer.OrdinalIgnoreCase).ToList(),
+            apps is null ? null : (appDefs ?? new Dictionary<string, AppDef>()).Values.Where(a => apps.Contains(a.Name)).OrderBy(a => a.Name, StringComparer.OrdinalIgnoreCase).ToList());
 
     public IReadOnlyDictionary<string, EntityDef> EntityMap() => EntityDefs.ToDictionary(e => e.Name, StringComparer.OrdinalIgnoreCase);
     public IReadOnlyDictionary<string, DashboardDef> DashboardMap() => DashboardDefs.ToDictionary(d => d.Name, StringComparer.OrdinalIgnoreCase);
+    public IReadOnlyDictionary<string, AppDef> AppMap() => (AppDefs ?? []).ToDictionary(a => a.Name, StringComparer.OrdinalIgnoreCase);
 }
 
 /// <summary>
@@ -53,7 +59,8 @@ public static class ModelDiff
         IReadOnlyDictionary<string, DashboardDef> desiredBoards,
         IReadOnlyDictionary<string, EntityDef> target,
         IReadOnlyDictionary<string, DashboardDef> targetBoards,
-        string description, DiffOptions? options = null)
+        string description, DiffOptions? options = null,
+        IReadOnlyDictionary<string, AppDef>? desiredApps = null, IReadOnlyDictionary<string, AppDef>? targetApps = null)
     {
         var conflicts = new List<string>();
         var warnings = new List<string>();
@@ -155,6 +162,20 @@ public static class ModelDiff
             if (tb is null || tb.IsArchived || !JsonEq(wanted, tb)) boards.Add(new SetDashboardOp { Dashboard = wanted });
         }
 
+        // Spec 024: módulos de navegación del paquete (los demás no se tocan).
+        var apps = new List<Operation>();
+        targetApps ??= new Dictionary<string, AppDef>();
+        foreach (var da in (desiredApps ?? new Dictionary<string, AppDef>()).Values.Where(a => !a.IsArchived).OrderBy(a => a.Name, Ci))
+        {
+            targetApps.TryGetValue(da.Name, out var ta);
+            var wanted = da with { Name = ta?.Name ?? da.Name, IsArchived = false };
+            if (ta is null || ta.IsArchived || !JsonEq(wanted, ta)) apps.Add(new SetAppOp { App = wanted });
+        }
+        if (options?.ArchiveApps is { } archiveApps)
+            foreach (var n in archiveApps.Order(Ci))
+                if (targetApps.TryGetValue(n, out var ta) && !ta.IsArchived && !(desiredApps?.TryGetValue(n, out var dap) == true && !dap.IsArchived))
+                    apps.Add(new ArchiveAppOp { Name = ta.Name });
+
         // Spec 017 (reversión): lo que existe en el alcance y no en lo deseado se archiva; nunca se borra.
         var archiveEntities = new List<Operation>();
         if (options is not null)
@@ -177,7 +198,7 @@ public static class ModelDiff
         {
             Description = description,
             Operations = [.. restoreEntities, .. creates, .. restoreFields, .. adds, .. updates, .. workflows, .. sets, .. archives,
-                .. archiveEntities, .. boards],
+                .. archiveEntities, .. boards, .. apps],
         };
         return new ModelDiffResult(plan, conflicts, warnings, created) { LocalArchives = localArchives };
     }
@@ -187,13 +208,18 @@ public static class ModelDiff
     /// catálogos que no viajan resueltas contra el resto del modelo.
     /// </summary>
     public static ModelDiffResult Export(IReadOnlyDictionary<string, EntityDef> model, IReadOnlyDictionary<string, DashboardDef> boards,
-        IReadOnlySet<string> entities, IReadOnlySet<string> dashboards, string description)
+        IReadOnlySet<string> entities, IReadOnlySet<string> dashboards, string description, IReadOnlyDictionary<string, AppDef>? apps = null)
     {
         var desired = model.Where(kv => entities.Contains(kv.Key) && !kv.Value.IsArchived).ToDictionary(kv => kv.Key, kv => kv.Value, Ci);
         var rest = model.Where(kv => !entities.Contains(kv.Key)).ToDictionary(kv => kv.Key, kv => kv.Value, Ci);
         var desiredBoards = boards.Where(kv => dashboards.Contains(kv.Key) && !kv.Value.IsArchived).ToDictionary(kv => kv.Key, kv => kv.Value, Ci);
         var restBoards = boards.Where(kv => !dashboards.Contains(kv.Key)).ToDictionary(kv => kv.Key, kv => kv.Value, Ci);
-        return Compute(desired, desiredBoards, rest, restBoards, description);
+        // Spec 024: el módulo declarado de cada catálogo exportado viaja con él.
+        var appNames = desired.Values.Select(Apps.Of).ToHashSet(Ci);
+        var allApps = apps ?? new Dictionary<string, AppDef>();
+        var desiredApps = allApps.Where(kv => appNames.Contains(kv.Key) && !kv.Value.IsArchived).ToDictionary(kv => kv.Key, kv => kv.Value, Ci);
+        var restApps = allApps.Where(kv => !desiredApps.ContainsKey(kv.Key)).ToDictionary(kv => kv.Key, kv => kv.Value, Ci);
+        return Compute(desired, desiredBoards, rest, restBoards, description, null, desiredApps, restApps);
     }
 
     /// <summary>
@@ -201,14 +227,15 @@ public static class ModelDiff
     /// que cambió vuelve y lo que archivó se reactiva. <paramref name="after"/> distingue lo que cambió aquí después de aplicar.
     /// </summary>
     public static ModelDiffResult Revert(ModelSnapshot before, ModelSnapshot after, IReadOnlyDictionary<string, EntityDef> current,
-        IReadOnlyDictionary<string, DashboardDef> currentBoards, string description)
+        IReadOnlyDictionary<string, DashboardDef> currentBoards, string description, IReadOnlyDictionary<string, AppDef>? currentApps = null)
     {
         var applied = after.EntityMap();
         var appliedBoards = after.DashboardMap();
         var scope = before.Entities.Concat(after.Entities).ToHashSet(Ci);
         var scopeBoards = before.Dashboards.Concat(after.Dashboards).ToHashSet(Ci);
+        var scopeApps = (before.Apps ?? []).Concat(after.Apps ?? []).ToHashSet(Ci);
         var diff = Compute(before.EntityMap(), before.DashboardMap(), current, currentBoards, description,
-            new DiffOptions(scope, scopeBoards, applied));
+            new DiffOptions(scope, scopeBoards, applied, scopeApps), before.AppMap(), currentApps);
 
         // Deriva: el modelador cambió algo del alcance después de aplicar; revertir también lo deshace.
         var warnings = new List<string>(diff.Warnings);
@@ -255,6 +282,10 @@ public static class ModelDiff
                 ops.OfType<SetDashboardOp>().Select(o => o.Dashboard?.Name ?? "").ToHashSet(Ci));
     }
 
+    /// <summary>Spec 024: módulos de navegación que declara un paquete.</summary>
+    public static IReadOnlySet<string> ScopeApps(ModulePackage p) =>
+        p.FullChain.SelectMany(c => c.Plan.Operations).OfType<SetAppOp>().Select(o => o.App?.Name?.Trim() ?? "").Where(n => n.Length > 0).ToHashSet(Ci);
+
     /// <summary>
     /// Spec 023: catálogos que el paquete modifica sin crearlos (un campo, una regla o una automatización en un catálogo de
     /// otro módulo). Entran al estado deseado y a la instantánea de la reversión; no a los permisos del paquete.
@@ -292,7 +323,21 @@ public static class ModelDiff
     public static (IReadOnlyDictionary<string, EntityDef> Entities, IReadOnlyDictionary<string, DashboardDef> Dashboards, IReadOnlyList<PlanError> Errors,
         IReadOnlyList<PlanStep> Steps) Desired(ModulePackage p, IReadOnlyDictionary<string, EntityDef> target, IReadOnlyDictionary<string, DashboardDef> targetBoards, IReadOnlySet<string> roles)
     {
+        var d = DesiredState(p, target, targetBoards, roles, null);
+        return (d.Entities, d.Dashboards, d.Errors, d.Steps);
+    }
+
+    /// <summary>Spec 024: el estado deseado con los módulos de navegación que declara el paquete.</summary>
+    public sealed record DesiredResult(IReadOnlyDictionary<string, EntityDef> Entities, IReadOnlyDictionary<string, DashboardDef> Dashboards,
+        IReadOnlyDictionary<string, AppDef> Apps, IReadOnlyList<PlanError> Errors, IReadOnlyList<PlanStep> Steps);
+
+    public static DesiredResult DesiredState(ModulePackage p, IReadOnlyDictionary<string, EntityDef> target,
+        IReadOnlyDictionary<string, DashboardDef> targetBoards, IReadOnlySet<string> roles, IReadOnlyDictionary<string, AppDef>? targetApps)
+    {
         var (entities, dashboards) = Scope(p);
+        var appScope = ScopeApps(p);
+        IReadOnlyDictionary<string, AppDef> apps = (targetApps ?? new Dictionary<string, AppDef>())
+            .Where(kv => !appScope.Contains(kv.Key)).ToDictionary(kv => kv.Key, kv => kv.Value, Ci);
         IReadOnlyDictionary<string, EntityDef> model = target.Where(kv => !entities.Contains(kv.Key)).ToDictionary(kv => kv.Key, kv => kv.Value, Ci);
         IReadOnlyDictionary<string, DashboardDef> boards = targetBoards.Where(kv => !dashboards.Contains(kv.Key)).ToDictionary(kv => kv.Key, kv => kv.Value, Ci);
         var errors = new List<PlanError>();
@@ -300,15 +345,16 @@ public static class ModelDiff
         var chain = p.FullChain;
         foreach (var (label, plan) in chain)
         {
-            var c = PlanCompiler.Compile(plan, model, roles, boards);
+            var c = PlanCompiler.Compile(plan, model, roles, boards, apps);
             var prefix = chain.Count > 1 ? $"[{label}] " : "";
             errors.AddRange(c.Preview.Errors.Select(e => e with { Message = prefix + e.Message }));
             steps.AddRange(c.Preview.Steps.Select(s => s with { Description = prefix + s.Description }));
-            (model, boards) = (c.ResultingModel, c.Dashboards!);
+            (model, boards, apps) = (c.ResultingModel, c.Dashboards!, c.Apps!);
         }
         var extended = Extended(p);
-        return (model.Where(kv => entities.Contains(kv.Key) || extended.Contains(kv.Key)).ToDictionary(kv => kv.Key, kv => kv.Value, Ci),
+        return new(model.Where(kv => entities.Contains(kv.Key) || extended.Contains(kv.Key)).ToDictionary(kv => kv.Key, kv => kv.Value, Ci),
                 boards.Where(kv => dashboards.Contains(kv.Key)).ToDictionary(kv => kv.Key, kv => kv.Value, Ci),
+                apps.Where(kv => appScope.Contains(kv.Key)).ToDictionary(kv => kv.Key, kv => kv.Value, Ci),
                 errors, steps);
     }
 

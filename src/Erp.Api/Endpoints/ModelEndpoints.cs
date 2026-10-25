@@ -35,6 +35,20 @@ public static class ModelEndpoints
             return ForUser(e, u);
         });
 
+        // Spec 024: módulos de navegación con al menos un catálogo que el usuario puede leer (filtrado aquí, no en el cliente).
+        // `all` (solo modeladores): también los declarados sin catálogos o archivados, para el modelador.
+        g.MapGet("/apps", async (HttpContext http, MetadataStore store, bool? all, CancellationToken ct) =>
+        {
+            var u = http.CurrentUser();
+            var (model, apps) = (await store.GetAsync(ct), await store.GetAppsAsync(ct));
+            if (all == true)
+            {
+                if (!u.CanManageModel) throw new Forbidden();
+                return Apps.All(model, apps);
+            }
+            return Apps.Effective(model, apps, e => u.IsSuperuser || u.Access(e.Name).Read);
+        });
+
         g.MapPost("/plan/preview", async (ChangePlan plan, HttpContext http, PlanService plans, CancellationToken ct) =>
         {
             RequireModeler(http);

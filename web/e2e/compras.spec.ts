@@ -73,20 +73,17 @@ test('H7: instalar el módulo de Compras desde la UI', async ({ page }) => {
   await expectAccessible(page);
   await dialog.getByRole('button', { name: 'Instalar módulo' }).click();
   await expect(page.getByText('Módulo instalado')).toBeVisible({ timeout: 30_000 });
-  // El menú se actualiza sin recargar y las partidas no aparecen como catálogos.
+  await expect(page.getByText('Instalado', { exact: true })).toBeVisible();
+
+  // Spec 024: el módulo aparece solo en el selector (sin recargar) y su menú no mezcla la configuración.
+  // Antes (revisión exploratoria 003) el menú plano empujaba «Configuración» fuera de la pantalla.
+  await page.getByRole('banner').getByRole('button', { name: 'Cambiar de módulo' }).click();
+  await page.getByRole('main').getByRole('link', { name: /^Compras/ }).click();
+  await expect(page).toHaveURL(/\/m\/Compras$/);
   const nav = page.getByLabel('Navegación principal');
   await expect(nav.getByRole('link', { name: 'Órdenes de compra' })).toBeVisible();
   await expect(nav.getByRole('link', { name: /Partidas de/ })).toHaveCount(0);
-  await expect(page.getByText('Instalado', { exact: true })).toBeVisible();
-
-  // Regresión (revisión exploratoria 003): con un módulo, el menú plano empujaba "Configuración" fuera
-  // de la pantalla. Ahora el módulo es una sección plegable y la configuración sigue a la vista.
-  const group = nav.getByRole('button', { name: 'Compras' });
-  await expect(group).toHaveAttribute('aria-expanded', 'true');
-  await group.click();
-  await expect(nav.getByRole('link', { name: 'Órdenes de compra' })).toHaveCount(0);
-  await expect(nav.getByRole('link', { name: 'Auditoría' })).toBeInViewport();
-  await group.click();
+  await expect(nav.getByRole('link', { name: 'Auditoría' })).toHaveCount(0);
 });
 
 test('preparar usuarios por rol y datos de referencia', async () => {

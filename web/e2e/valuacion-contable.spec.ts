@@ -124,6 +124,9 @@ test('H4 CA1 · H5 CA4: Costeo pide Contabilidad; ambos se instalan desde la UI'
   await page.setViewportSize({ width: 1280, height: 800 });
   expect(overflow).toEqual([]);
 
+  // Spec 024: el módulo Contabilidad (declarado por la 1.2.0) tiene su propio menú.
+  await page.getByRole('banner').getByRole('button', { name: 'Cambiar de módulo' }).click();
+  await page.getByRole('main').getByRole('link', { name: /^Contabilidad/ }).click();
   const nav = page.getByLabel('Navegación principal');
   for (const link of ['Pólizas', 'Cuentas contables', 'Periodos contables']) await expect(nav.getByRole('link', { name: link })).toBeVisible();
   // Catálogo mínimo en la empresa de quien instala.

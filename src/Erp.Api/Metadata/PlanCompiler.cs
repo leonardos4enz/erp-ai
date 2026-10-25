@@ -9,7 +9,9 @@ public sealed record CompiledPlan(
     IReadOnlyList<string> Sql,
     IReadOnlySet<string> TouchedEntities,
     IReadOnlyDictionary<string, DashboardDef>? Dashboards = null,
-    IReadOnlySet<string>? TouchedDashboards = null);
+    IReadOnlySet<string>? TouchedDashboards = null,
+    IReadOnlyDictionary<string, AppDef>? Apps = null,
+    IReadOnlySet<string>? TouchedApps = null);
 
 /// <summary>
 /// Valida un <see cref="ChangePlan"/> contra el modelo actual simulando cada operación en orden.
@@ -31,12 +33,15 @@ public static partial class PlanCompiler
         ChangePlan plan,
         IReadOnlyDictionary<string, EntityDef> model,
         IReadOnlySet<string> knownRoles,
-        IReadOnlyDictionary<string, DashboardDef>? dashboards = null)
+        IReadOnlyDictionary<string, DashboardDef>? dashboards = null,
+        IReadOnlyDictionary<string, AppDef>? apps = null)
     {
         var working = new Dictionary<string, EntityDef>(model, StringComparer.OrdinalIgnoreCase);
         var boards = new Dictionary<string, DashboardDef>(dashboards ?? new Dictionary<string, DashboardDef>(), StringComparer.OrdinalIgnoreCase);
         var touchedBoards = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var lastBoardOp = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var appDefs = new Dictionary<string, AppDef>(apps ?? new Dictionary<string, AppDef>(), StringComparer.OrdinalIgnoreCase);
+        var touchedApps = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var errors = new List<PlanError>();
         var steps = new List<PlanStep>();
         var sql = new List<string>();
@@ -63,6 +68,17 @@ public static partial class PlanCompiler
                     touchedBoards.Add(board.Def.Name);
                     lastBoardOp[board.Def.Name] = i;
                     steps.Add(new(i, board.Description, null));
+                }
+                continue;
+            }
+            // Spec 024: los módulos de navegación tampoco.
+            if (plan.Operations[i] is SetAppOp or ArchiveAppOp)
+            {
+                if (AppOp(ctx, plan.Operations[i], appDefs) is { } app && errors.Count == before)
+                {
+                    appDefs[app.Def.Name] = app.Def;
+                    touchedApps.Add(app.Def.Name);
+                    steps.Add(new(i, app.Description, null));
                 }
                 continue;
             }
@@ -152,7 +168,7 @@ public static partial class PlanCompiler
                     errors.Add(new(lastBoardOp.GetValueOrDefault(d.Name, -1), $"Tablero '{d.Label}': {m}"));
         }
 
-        return new CompiledPlan(new PlanPreview(errors.Count == 0, errors, steps), working, sql, touched, boards, touchedBoards);
+        return new CompiledPlan(new PlanPreview(errors.Count == 0, errors, steps), working, sql, touched, boards, touchedBoards, appDefs, touchedApps);
     }
 
     private static IEnumerable<string> ValidateFinal(EntityDef e, IReadOnlyDictionary<string, EntityDef> model, IReadOnlySet<string> roles)
@@ -679,6 +695,43 @@ public static partial class PlanCompiler
         var name = prev?.Name ?? d.Name;
         return new(d with { Name = name, IsArchived = false, Icon = d.Icon ?? "layout-dashboard" },
             $"{(exists ? "Actualizar" : "Definir")} el tablero '{d.Label}' con {d.Widgets.Count} tarjeta(s)");
+    }
+
+    private sealed record AppResult(AppDef Def, string Description);
+
+    public const int MaxAppDescription = 300;
+    public const int MaxAppOrder = 9999;
+
+    /// <summary>Spec 024. El nombre es el <c>group</c> de sus catálogos: mismo tope que el grupo y sin caracteres de control.</summary>
+    private static AppResult? AppOp(Ctx ctx, Operation op, Dictionary<string, AppDef> apps)
+    {
+        if (op is ArchiveAppOp a)
+        {
+            if (!apps.TryGetValue(a.Name?.Trim() ?? "", out var existing) || existing.IsArchived) { ctx.Error($"El módulo '{a.Name}' no existe."); return null; }
+            return new(existing with { IsArchived = true }, $"Archivar el módulo '{existing.Label}' (sus catálogos conservan su grupo)");
+        }
+        var d = ((SetAppOp)op).App;
+        if (d is null) { ctx.Error("Indica el módulo."); return null; }
+        var name = d.Name?.Trim() ?? "";
+        if (name.Length == 0 || name.Length > MaxGroup || name.Any(char.IsControl))
+        {
+            ctx.Error($"El nombre del módulo es obligatorio, de máximo {MaxGroup} caracteres y sin caracteres de control.");
+            return null;
+        }
+        var label = d.Label?.Trim() ?? "";
+        if (label.Length == 0 || label.Length > MaxLabel || label.Any(char.IsControl)) { ctx.Error($"La etiqueta del módulo es obligatoria (máximo {MaxLabel} caracteres)."); return null; }
+        var before = ctx.ErrorCount;
+        if (d.Icon is not null) ValidateIcon(ctx, d.Icon);
+        if (d.Description?.Length > MaxAppDescription) ctx.Error($"La descripción del módulo admite máximo {MaxAppDescription} caracteres.");
+        if (d.Order is < 0 or > MaxAppOrder) ctx.Error($"El orden del módulo va de 0 a {MaxAppOrder}.");
+        if (ctx.ErrorCount > before) return null;
+        var exists = apps.TryGetValue(name, out var prev) && !prev.IsArchived;
+        // El nombre guardado conserva la capitalización original: es la llave de sus catálogos y del enlace.
+        return new(new AppDef
+        {
+            Name = prev?.Name ?? name, Label = label, Icon = d.Icon,
+            Description = string.IsNullOrWhiteSpace(d.Description) ? null : d.Description.Trim(), Order = d.Order,
+        }, $"{(exists ? "Actualizar" : "Declarar")} el módulo '{label}'");
     }
 
     /// <summary>Al archivar un campo se retira del layout y de las columnas de las vistas (no hay nada que mostrar).</summary>

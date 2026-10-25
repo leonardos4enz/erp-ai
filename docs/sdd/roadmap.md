@@ -29,8 +29,9 @@ en orden, no en paralelo: casi todas tocan el núcleo del motor (`PlanCompiler`,
 | 021 Endurecimiento 2 | Implementado ([spec](specs/021-endurecimiento-2/spec.md)) |
 | 022 Costeo 2: políticas de valuación | Implementado ([spec](specs/022-costeo-2/spec.md)) |
 | 023 Capacidades del motor (merge, avisos, rutas) | Implementado ([spec](specs/023-capacidades-motor/spec.md)) |
-| 024 Módulo de Ventas | Planeado |
-| 025 CFDI 4.0 con PAC | Planeado |
+| 024 Navegación por módulos | Implementado ([spec](specs/024-navegacion-modulos/spec.md)) |
+| 025 Módulo de Ventas | Planeado |
+| 026 CFDI 4.0 con PAC | Planeado |
 
 ## Diagnóstico
 | Brecha señalada | Situación actual | Spec |
@@ -269,7 +270,7 @@ reglas de negocio** (constitución I.1), configurables por metadatos con valores
   ventas) y revaluación, que siguen de la 020.
 
 ### 023 — Capacidades del motor: listas que se fusionan, reglas de aviso y rutas de tres niveles
-Origen: pendientes de la 022 que limitan a los módulos y que Ventas (024) necesitará; plan del dueño (2026-10-24).
+Origen: pendientes de la 022 que limitan a los módulos y que Ventas (024, ahora 025) necesitará; plan del dueño (2026-10-24).
 - **Estado:** implementado en la [spec 023](specs/023-capacidades-motor/spec.md). `merge` en las seis listas del catálogo
   (reglas, automatizaciones, vistas, reportes, webhooks, tareas): agrega o reemplaza por nombre en su lugar; la vista previa
   ya no dice que quita lo que un `merge` conserva, y un paquete de Entornos que extiende un catálogo que no crea llega al
@@ -282,11 +283,26 @@ Origen: pendientes de la 022 que limitan a los módulos y que Ventas (024) neces
 - **Pendiente:** quitar un elemento con `merge` (hoy, reemplazo completo); rutas en reportes agrupados y en reglas de
   acceso; avisos en listados.
 
-## Specs planeadas (después de la 023)
+### 024 — Navegación por módulos
+Origen: pedido del dueño (2026-10-24) antes de Ventas: el menú lateral ya no cabía y mezclaba operación con administración.
+- **Estado:** implementado en la [spec 024](specs/024-navegacion-modulos/spec.md). Módulo de navegación como metadato
+  (`setApp`/`archiveApp`, `meta.App`; el `group` de cada catálogo es el nombre de su módulo; un grupo sin declarar es un
+  módulo implícito y los catálogos sin grupo forman *General*), que viaja en paquetes de Entornos (export, diff, instantánea
+  y reversión) y que el asistente conoce. Compras 1.9.0, Inventario 1.8.0 y Contabilidad 1.2.0 declaran su módulo. En la
+  SPA: selector de módulos en el inicio (`/`) y en la barra superior, página de cada módulo (`/m/:módulo`) con su
+  análisis, menú lateral solo del módulo actual (el último se recuerda por usuario), área de configuración aparte con
+  engrane y menú agrupado (`/admin`), `?app=` en reportes y tableros, y búsqueda global Ctrl+K (módulos, catálogos,
+  análisis, configuración y documentos por folio con `GET /api/search`, con la seguridad del servidor). El modelador gana
+  la pestaña *Módulos* y el campo *Módulo* con sugerencias.
+- **Pendiente:** favoritos y recientes en el menú, búsqueda de texto completo en registros y preferencias del usuario en
+  el servidor (el último módulo vive en el navegador).
+
+## Specs planeadas (después de la 024)
 En este orden, por decisión del dueño (2026-10-24):
-1. **024 — Módulo de Ventas:** clientes, cotización, pedido, salida de almacén con costo de ventas (póliza de salidas),
-   factura y cobranza. Usa `merge` para extender Producto e Inventario, avisos (límite de crédito) y rutas de tres niveles.
-2. **025 — CFDI 4.0 con PAC:** timbrado de la factura de Ventas con un proveedor autorizado, cancelación y complemento de
+1. **025 — Módulo de Ventas:** clientes, cotización, pedido, salida de almacén con costo de ventas (póliza de salidas),
+   factura y cobranza. Usa `merge` para extender Producto e Inventario, avisos (límite de crédito) y rutas de tres niveles;
+   declara su módulo con `setApp` (orden 15, entre Compras e Inventario).
+2. **026 — CFDI 4.0 con PAC:** timbrado de la factura de Ventas con un proveedor autorizado, cancelación y complemento de
    pago; el secreto del PAC fuera del código (constitución II.7).
 3. **Pólizas en moneda extranjera** (pendiente de la 020).
 4. **Revaluación de existencias** (pendiente de la 020).

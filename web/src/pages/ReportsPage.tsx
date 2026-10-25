@@ -11,30 +11,38 @@ import { ReportTable } from '../components/ReportTable';
 import { Alert, Button, EmptyState, LoadingBlock, PageHeader, Spinner } from '../components/ui';
 import { useAsync } from '../lib/hooks';
 import { useEntityDef } from '../lib/entity';
+import { useApps } from '../lib/apps';
 import { NotFoundPage } from './StatusPages';
 
-/** Spec 007: reportes disponibles para el usuario, agrupados por módulo. */
+/** Spec 007: reportes disponibles para el usuario, agrupados por módulo. Spec 024 (H4): `?app=` los acota a un módulo. */
 export function ReportsPage() {
   const { data, loading, error } = useAsync<ReportSummary[]>((s) => reportsApi.list(s), []);
+  const [params] = useSearchParams();
+  const { appOfGroup, find } = useApps();
+  const only = find(params.get('app'));
   const groups = useMemo(() => {
     const out = new Map<string, ReportSummary[]>();
     for (const r of data ?? []) {
-      const g = r.group || 'Catálogos';
+      const app = appOfGroup(r.group);
+      if (only && app?.name !== only.name) continue;
+      const g = app?.label ?? (r.group || 'General');
       out.set(g, [...(out.get(g) ?? []), r]);
     }
     return [...out.entries()];
-  }, [data]);
+  }, [data, appOfGroup, only]);
 
   return (
     <div className="page">
-      <PageHeader icon={BarChart3} title="Reportes" subtitle="Agrupaciones y totales calculados con los registros que puedes ver." />
+      <PageHeader icon={BarChart3} title={only ? `Reportes de ${only.label}` : 'Reportes'}
+        subtitle="Agrupaciones y totales calculados con los registros que puedes ver."
+        actions={only && <Link className="btn btn-secondary" to="/reports">Ver todos los reportes</Link>} />
       {loading && !data ? <LoadingBlock />
         : error ? <Alert tone="danger" title={error instanceof ApiError ? error.title : 'No se pudieron cargar los reportes'} />
         : !groups.length ? (
           <div className="card"><EmptyState icon={Inbox} title="No hay reportes" description="Cuando un modelador defina reportes para los catálogos que puedes consultar, aparecerán aquí." /></div>
-        ) : groups.map(([g, list]) => (
-          <section key={g} className="stack" style={{ marginBottom: 'var(--space-6)' }} aria-labelledby={`rg-${g}`}>
-            <h2 id={`rg-${g}`} className="section-title">{g}</h2>
+        ) : groups.map(([g, list], gi) => (
+          <section key={g} className="stack" style={{ marginBottom: 'var(--space-6)' }} aria-labelledby={`rg-${gi}`}>
+            <h2 id={`rg-${gi}`} className="section-title">{g}</h2>
             <div className="report-grid">
               {list.map((r) => (
                 <Link key={`${r.entity}.${r.name}`} to={`/reports/${encodeURIComponent(r.entity)}/${encodeURIComponent(r.name)}`} className="card entity-card">

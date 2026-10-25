@@ -353,7 +353,7 @@ test('H4 CA4: solo el superusuario ve y usa Entornos', async ({ browser }) => {
   expect((await catalogador.post('/api/admin/environments/export', { data: { id: 'x-y', name: 'x', version: '1.0.0', entities: ['EnvMarca'], dashboards: [] } })).status()).toBe(403);
 
   const page = await pageAs(browser, 'e2e-env-catalogador');
-  await expect(page.getByLabel('Navegación principal').getByRole('link', { name: 'Entornos' })).toHaveCount(0);
+  await expect(page.getByLabel('Navegación principal').getByRole('link', { name: 'Entornos', exact: true })).toHaveCount(0);
   await page.goto('/admin/environments');
   await expect(page.getByText('Sin acceso')).toBeVisible();
   await page.context().close();

@@ -1,7 +1,7 @@
 {
   "id": "inventario",
   "name": "Inventario",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "icon": "boxes",
   "description": "Existencias por almacén y producto, y movimientos de entrada, salida, ajuste y traspaso. Las recepciones confirmadas de Compras generan sus entradas solas.",
   "requires": ["compras"],
@@ -252,6 +252,12 @@
       "plan": { "description": "Inventario 1.7.0: moneda de la orden en el costo de la recepción", "operations": [
         { "op": "updateField", "entity": "RecepcionPartida", "field": "CostoUnitario",
           "formula": "IF(ISBLANK(COALESCE(CONVERT(PartidaOrden.PrecioUnitario * (1 - PartidaOrden.DescuentoPct / 100), COALESCE(Recepcion.Moneda, Recepcion.OrdenCompra.Moneda.Clave), BASECURRENCY(), Recepcion.Fecha), IF(BASECURRENCY() = 'MXN', PartidaOrden.CostoMXN, NULL))), NULL, ROUND(COALESCE(CONVERT(PartidaOrden.PrecioUnitario * (1 - PartidaOrden.DescuentoPct / 100), COALESCE(Recepcion.Moneda, Recepcion.OrdenCompra.Moneda.Clave), BASECURRENCY(), Recepcion.Fecha), IF(BASECURRENCY() = 'MXN', PartidaOrden.CostoMXN, NULL)), 4))" }
+      ] } },
+    { "version": "1.8.0",
+      "description": "Navegación por módulos (spec 024): declara el módulo Inventario con su ícono, descripción y orden para el selector de módulos.",
+      "plan": { "description": "Inventario 1.8.0: módulo de navegación", "operations": [
+        { "op": "setApp", "app": { "name": "Inventario", "label": "Inventario", "icon": "boxes", "order": 20,
+            "description": "Existencias por almacén y producto, movimientos de entrada, salida, ajuste y traspaso." } }
       ] } }
   ],
   "roles": [

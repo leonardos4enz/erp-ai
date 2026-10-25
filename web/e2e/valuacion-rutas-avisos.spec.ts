@@ -303,7 +303,7 @@ test('H1 CA1 · CA4: setViews con merge agrega una vista a Recepción sin quitar
 
 test('H4: Inventario 1.7.0 está instalado y la partida de recepción usa la moneda de la orden por la ruta de tres saltos', async () => {
   const mods = (await get('/api/admin/modules')) as { id: string; installedVersion?: string }[];
-  expect(mods.find((m) => m.id === 'inventario')).toMatchObject({ installedVersion: '1.7.0' });
+  expect(mods.find((m) => m.id === 'inventario')).toMatchObject({ installedVersion: '1.8.0' });
   const e = (await get('/api/model/entities/RecepcionPartida')) as { fields: { name: string; formula?: string }[] };
   expect(e.fields.find((f) => f.name === 'CostoUnitario')!.formula).toContain('COALESCE(Recepcion.Moneda, Recepcion.OrdenCompra.Moneda.Clave)');
 });

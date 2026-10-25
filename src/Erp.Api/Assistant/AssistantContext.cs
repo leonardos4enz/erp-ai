@@ -22,16 +22,19 @@ public static class AssistantContext
     public sealed record Result(string Json, string Hash, int Summarized);
 
     public static Result Build(IReadOnlyDictionary<string, EntityDef> model, IReadOnlyDictionary<string, DashboardDef> dashboards,
-        IEnumerable<string> roles, int maxChars)
+        IEnumerable<string> roles, int maxChars, IReadOnlyDictionary<string, AppDef>? apps = null)
     {
         var entities = model.Values.Where(e => !e.IsArchived).OrderBy(e => e.Name, StringComparer.OrdinalIgnoreCase).Select(Full).ToList();
         var boards = dashboards.Values.Where(d => !d.IsArchived).OrderBy(d => d.Name, StringComparer.OrdinalIgnoreCase)
             .Select(d => d with { IsArchived = false }).ToList();
         var roleNames = roles.Order(StringComparer.OrdinalIgnoreCase).ToList();
+        // Spec 024: módulos de navegación declarados (el group de un catálogo es el nombre de su módulo).
+        var modules = (apps ?? new Dictionary<string, AppDef>()).Values.Where(a => !a.IsArchived).OrderBy(a => a.Order ?? Apps.DefaultOrder)
+            .ThenBy(a => a.Name, StringComparer.OrdinalIgnoreCase).Select(a => a with { IsArchived = false }).ToList();
 
         // < y > solo pueden aparecer dentro de cadenas: se escapan para que un texto de los metadatos no cierre el
         // bloque <modelo> en el que viaja el contexto (inyección indirecta).
-        string Serialize() => JsonSerializer.Serialize(new { entities, dashboards = boards, roles = roleNames }, Json)
+        string Serialize() => JsonSerializer.Serialize(new { entities, dashboards = boards, apps = modules, roles = roleNames }, Json)
             .Replace("<", "\\u003c").Replace(">", "\\u003e");
         var json = Serialize();
         var summarized = 0;

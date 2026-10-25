@@ -214,9 +214,10 @@ public sealed class AssistantService(Db db, MetadataStore store, PlanService pla
         // Solo metadatos: modelo, tableros y nombres de roles (ver AssistantContext).
         var model = await store.GetAsync(ct);
         var boards = await store.GetDashboardsAsync(ct);
+        var apps = await store.GetAppsAsync(ct);
         IReadOnlySet<string> roles;
         await using (var cn = await db.OpenAsync(ct)) roles = await PlanService.LoadRolesAsync(cn, null);
-        var context = AssistantContext.Build(model, boards, roles, options.MaxContextChars);
+        var context = AssistantContext.Build(model, boards, roles, options.MaxContextChars, apps);
 
         var messages = new List<AssistantTurn>();
         foreach (var turn in history.Where(t => t.ResponseJson is not null))
@@ -229,7 +230,7 @@ public sealed class AssistantService(Db db, MetadataStore store, PlanService pla
         var outcome = new Outcome();
         try
         {
-            await RunAsync(credential, messages, context.Json, model, roles, boards, outcome, ct);
+            await RunAsync(credential, messages, context.Json, model, roles, boards, apps, outcome, ct);
         }
         catch (AssistantProviderException ex)
         {
@@ -253,13 +254,13 @@ public sealed class AssistantService(Db db, MetadataStore store, PlanService pla
         await using (var cn = await db.OpenAsync(ct))
         {
             var row = (await cn.QueryAsync<Row>(SelectRow + " WHERE Id = @id", new { id })).Single();
-            return ToProposal(row, (model, roles, boards));
+            return ToProposal(row, (model, roles, boards, apps));
         }
     }
 
     /// <summary>Llama al modelo y, si el plan no se interpreta o no compila, le devuelve los errores para que lo corrija.</summary>
     private async Task RunAsync(AssistantCredential credential, List<AssistantTurn> messages, string context, IReadOnlyDictionary<string, EntityDef> model,
-        IReadOnlySet<string> roles, IReadOnlyDictionary<string, DashboardDef> boards, Outcome outcome, CancellationToken ct)
+        IReadOnlySet<string> roles, IReadOnlyDictionary<string, DashboardDef> boards, IReadOnlyDictionary<string, AppDef> apps, Outcome outcome, CancellationToken ct)
     {
         for (var attempt = 0; ; attempt++)
         {
@@ -299,7 +300,7 @@ public sealed class AssistantService(Db db, MetadataStore store, PlanService pla
             {
                 outcome.Plan = parsed.Plan;
                 outcome.PlanJson = parsed.PlanJson;
-                var preview = PlanCompiler.Compile(parsed.Plan!, model, roles, boards).Preview;
+                var preview = PlanCompiler.Compile(parsed.Plan!, model, roles, boards, apps).Preview;
                 if (preview.Valid)
                 {
                     outcome.Status = ProposalStatus.Proposed;
@@ -375,11 +376,12 @@ public sealed class AssistantService(Db db, MetadataStore store, PlanService pla
             await PlanService.LockModelAsync(cn, tx);
             var model = await MetadataStore.LoadAsync(cn, tx);
             var boards = await MetadataStore.LoadDashboardsAsync(cn, tx);
-            var compiled = PlanCompiler.Compile(plan, model, await PlanService.LoadRolesAsync(cn, tx), boards);
+            var apps = await MetadataStore.LoadAppsAsync(cn, tx);
+            var compiled = PlanCompiler.Compile(plan, model, await PlanService.LoadRolesAsync(cn, tx), boards, apps);
             var preview = compiled.Preview;
             // Spec 021 (H2 CA3): la huella incluye lo que el plan toca tal como estaba (un setLayout compila igual aunque
             // otra persona haya cambiado el layout entre medio).
-            var baseHash = ModelVersion.Base(model, boards, compiled.TouchedEntities, compiled.TouchedDashboards);
+            var baseHash = ModelVersion.Base(model, boards, compiled.TouchedEntities, compiled.TouchedDashboards, apps, compiled.TouchedApps);
             if (preview.Valid && !string.Equals(body!.ReviewHash, ReviewHash.Of(row.PlanJson, preview, PlanWarnings.For(plan, model), baseHash), StringComparison.OrdinalIgnoreCase))
                 throw new Conflict("El modelo cambió desde que revisaste la propuesta: revisa la vista previa actualizada antes de aplicarla.");
             changeSetId = await plans.ApplyInTransactionAsync(cn, tx, plan, http);
@@ -420,18 +422,18 @@ public sealed class AssistantService(Db db, MetadataStore store, PlanService pla
         return ToProposal(row, await CompileContextAsync(ct));
     }
 
-    private async Task<(IReadOnlyDictionary<string, EntityDef> Model, IReadOnlySet<string> Roles, IReadOnlyDictionary<string, DashboardDef> Boards)>
+    private async Task<(IReadOnlyDictionary<string, EntityDef> Model, IReadOnlySet<string> Roles, IReadOnlyDictionary<string, DashboardDef> Boards, IReadOnlyDictionary<string, AppDef> Apps)>
         CompileContextAsync(CancellationToken ct)
     {
         var model = await store.GetAsync(ct);
         var boards = await store.GetDashboardsAsync(ct);
         await using var cn = await db.OpenAsync(ct);
-        return (model, await PlanService.LoadRolesAsync(cn, null), boards);
+        return (model, await PlanService.LoadRolesAsync(cn, null), boards, await store.GetAppsAsync(ct));
     }
 
     /// <summary>Las propuestas vigentes se recompilan al leerlas: si el modelo cambió, la vista previa lo refleja.</summary>
     private Proposal ToProposal(Row r,
-        (IReadOnlyDictionary<string, EntityDef> Model, IReadOnlySet<string> Roles, IReadOnlyDictionary<string, DashboardDef> Boards) ctx)
+        (IReadOnlyDictionary<string, EntityDef> Model, IReadOnlySet<string> Roles, IReadOnlyDictionary<string, DashboardDef> Boards, IReadOnlyDictionary<string, AppDef> Apps) ctx)
     {
         ChangePlan? plan = null;
         if (r.PlanJson is not null)
@@ -440,7 +442,7 @@ public sealed class AssistantService(Db db, MetadataStore store, PlanService pla
             catch (JsonException ex) { log.LogWarning("Propuesta {Id} con plan ilegible: {Message}", r.Id, ex.Message); }
         }
         var live = r.Status is ProposalStatus.Proposed or ProposalStatus.Invalid;
-        var compiled = plan is not null && live ? PlanCompiler.Compile(plan, ctx.Model, ctx.Roles, ctx.Boards) : null;
+        var compiled = plan is not null && live ? PlanCompiler.Compile(plan, ctx.Model, ctx.Roles, ctx.Boards, ctx.Apps) : null;
         var preview = compiled?.Preview;
         var errors = r.ErrorsJson is null ? [] : JsonSerializer.Deserialize<List<string>>(r.ErrorsJson) ?? [];
         IReadOnlyList<string> warnings = plan is null ? [] : PlanWarnings.For(plan, ctx.Model);
@@ -455,7 +457,7 @@ public sealed class AssistantService(Db db, MetadataStore store, PlanService pla
             Error = r.Status == ProposalStatus.Failed ? FailureMessage(r.ErrorCode) : null,
             CanApply = reviewable && environment.DirectChanges,
             ReviewHash = reviewable ? ReviewHash.Of(r.PlanJson!, preview!, warnings,
-                ModelVersion.Base(ctx.Model, ctx.Boards, compiled!.TouchedEntities, compiled.TouchedDashboards)) : null,
+                ModelVersion.Base(ctx.Model, ctx.Boards, compiled!.TouchedEntities, compiled.TouchedDashboards, ctx.Apps, compiled.TouchedApps)) : null,
             BlockedReason = r.Status == ProposalStatus.Proposed && !environment.DirectChanges
                 ? "Este entorno exige la aprobación de otro administrador: la propuesta no se aplica aquí. Los cambios al modelo llegan como paquete desde Configuración › Entornos."
                 : null,

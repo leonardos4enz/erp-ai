@@ -18,16 +18,17 @@ public sealed class PlanService(Db db, MetadataStore store, JsonSerializerOption
     {
         var model = await store.GetAsync(ct);
         var boards = await store.GetDashboardsAsync(ct);
+        var apps = await store.GetAppsAsync(ct);
         await using var cn = await db.OpenAsync(ct);
         var roles = await LoadRolesAsync(cn, null);
-        var compiled = PlanCompiler.Compile(plan, model, roles, boards);
+        var compiled = PlanCompiler.Compile(plan, model, roles, boards, apps);
         var errors = compiled.Preview.Errors
             .Concat(ModelVersion.Stale(model, plan.BaseVersions).Select(StaleError))
             .Concat(await RemovedStatesInUseAsync(cn, null, plan, model)).ToList();
         return compiled.Preview with
         {
             Valid = errors.Count == 0, Errors = errors,
-            BaseHash = ModelVersion.Base(model, boards, compiled.TouchedEntities, compiled.TouchedDashboards),
+            BaseHash = ModelVersion.Base(model, boards, compiled.TouchedEntities, compiled.TouchedDashboards, apps, compiled.TouchedApps),
         };
     }
 
@@ -61,8 +62,9 @@ public sealed class PlanService(Db db, MetadataStore store, JsonSerializerOption
         // Se recompila contra el modelo leído dentro de la transacción, no contra la caché.
         var model = await MetadataStore.LoadAsync(cn, tx);
         var boards = await MetadataStore.LoadDashboardsAsync(cn, tx);
+        var apps = await MetadataStore.LoadAppsAsync(cn, tx);
         var roles = await LoadRolesAsync(cn, tx);
-        var compiled = PlanCompiler.Compile(plan, model, extraRoles is null ? roles : roles.Union(extraRoles).ToHashSet(StringComparer.OrdinalIgnoreCase), boards);
+        var compiled = PlanCompiler.Compile(plan, model, extraRoles is null ? roles : roles.Union(extraRoles).ToHashSet(StringComparer.OrdinalIgnoreCase), boards, apps);
         // Spec 021 (H8 CA3): un estado que desaparece no puede tener registros (quedarían en un estado inexistente).
         var errors = compiled.Preview.Errors.Concat(await RemovedStatesInUseAsync(cn, tx, plan, model)).ToList();
         if (errors.Count > 0)
@@ -73,7 +75,7 @@ public sealed class PlanService(Db db, MetadataStore store, JsonSerializerOption
         if (ModelVersion.Stale(model, plan.BaseVersions).FirstOrDefault() is { } stale)
             throw new Conflict(StaleError(stale).Message);
         if (plan.BaseHash is not null &&
-            !string.Equals(plan.BaseHash, ModelVersion.Base(model, boards, compiled.TouchedEntities, compiled.TouchedDashboards), StringComparison.OrdinalIgnoreCase))
+            !string.Equals(plan.BaseHash, ModelVersion.Base(model, boards, compiled.TouchedEntities, compiled.TouchedDashboards, apps, compiled.TouchedApps), StringComparison.OrdinalIgnoreCase))
             throw new Conflict("El modelo cambió desde la vista previa (otra persona aplicó un cambio a lo mismo): vuelve a revisar los cambios.");
 
         foreach (var statement in compiled.Sql)
@@ -83,6 +85,8 @@ public sealed class PlanService(Db db, MetadataStore store, JsonSerializerOption
             await UpsertAsync(cn, tx, compiled.ResultingModel[name]);
         foreach (var name in compiled.TouchedDashboards ?? new HashSet<string>())
             await UpsertDashboardAsync(cn, tx, compiled.Dashboards![name]);
+        foreach (var name in compiled.TouchedApps ?? new HashSet<string>())
+            await UpsertAppAsync(cn, tx, compiled.Apps![name]);
         // Spec 021 (H4 CA2): una tarea activa cuyo contenido cambia, se quita o pierde su catálogo vuelve a la pausa.
         await Automations.ScheduleStates.PauseChangedAsync(cn, tx, model, compiled.ResultingModel, http);
 
@@ -132,14 +136,15 @@ public sealed class PlanService(Db db, MetadataStore store, JsonSerializerOption
     {
         IReadOnlyDictionary<string, EntityDef> model = await store.GetAsync(ct);
         IReadOnlyDictionary<string, DashboardDef> boards = await store.GetDashboardsAsync(ct);
+        IReadOnlyDictionary<string, AppDef> apps = await store.GetAppsAsync(ct);
         await using var cn = await db.OpenAsync(ct);
         var roles = (await LoadRolesAsync(cn, null)).Union(extraRoles).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var errors = new List<PlanError>();
         var steps = new List<PlanStep>();
         foreach (var (label, plan) in chain)
         {
-            var compiled = PlanCompiler.Compile(plan, model, roles, boards);
-            boards = compiled.Dashboards!;
+            var compiled = PlanCompiler.Compile(plan, model, roles, boards, apps);
+            (boards, apps) = (compiled.Dashboards!, compiled.Apps!);
             var prefix = chain.Count > 1 ? $"[{label}] " : "";
             errors.AddRange(compiled.Preview.Errors.Select(e => e with { Message = prefix + e.Message }));
             steps.AddRange(compiled.Preview.Steps.Select(s => s with { Description = prefix + s.Description }));
@@ -155,7 +160,7 @@ public sealed class PlanService(Db db, MetadataStore store, JsonSerializerOption
         var boards = await store.GetDashboardsAsync(ct);
         await using var cn = await db.OpenAsync(ct);
         var roles = (await LoadRolesAsync(cn, null)).Union(extraRoles).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        return PlanCompiler.Compile(plan, model, roles, boards);
+        return PlanCompiler.Compile(plan, model, roles, boards, await store.GetAppsAsync(ct));
     }
 
     /// <summary>
@@ -201,6 +206,13 @@ public sealed class PlanService(Db db, MetadataStore store, JsonSerializerOption
             WHEN MATCHED THEN UPDATE SET Label = @Label, DefinitionJson = @Json, IsArchived = @IsArchived, UpdatedAt = SYSUTCDATETIME()
             WHEN NOT MATCHED THEN INSERT (Name, Label, DefinitionJson, IsArchived) VALUES (@Name, @Label, @Json, @IsArchived);
             """, new { d.Name, d.Label, Json = JsonSerializer.Serialize(d with { IsArchived = false }, MetadataStore.Json), d.IsArchived }, tx);
+
+    private static Task UpsertAppAsync(DbConnection cn, DbTransaction tx, AppDef a) =>
+        cn.ExecuteAsync("""
+            MERGE meta.App AS t USING (SELECT @Name AS Name) AS s ON t.Name = s.Name
+            WHEN MATCHED THEN UPDATE SET Label = @Label, DefinitionJson = @Json, IsArchived = @IsArchived, UpdatedAt = SYSUTCDATETIME()
+            WHEN NOT MATCHED THEN INSERT (Name, Label, DefinitionJson, IsArchived) VALUES (@Name, @Label, @Json, @IsArchived);
+            """, new { a.Name, a.Label, Json = JsonSerializer.Serialize(a with { IsArchived = false }, MetadataStore.Json), a.IsArchived }, tx);
 
     private static async Task UpsertAsync(DbConnection cn, DbTransaction tx, EntityDef e)
     {

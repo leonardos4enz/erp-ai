@@ -421,6 +421,7 @@ test('H3 CA3: si el rol pierde la lectura del catálogo, la ocurrencia falla sin
 
 test('H4 CA4: solo el superusuario ve Automatizaciones en el menú y llega por la ruta', async ({ browser, page }) => {
   await page.goto('/');
+  await page.getByRole('banner').getByRole('button', { name: 'Configuración' }).click(); // spec 024: área de configuración
   const nav = page.getByLabel('Navegación principal');
   await nav.getByRole('link', { name: 'Automatizaciones' }).click();
   await expect(page).toHaveURL(/\/admin\/automations$/);

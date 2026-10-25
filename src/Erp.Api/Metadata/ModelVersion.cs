@@ -18,15 +18,20 @@ public static class ModelVersion
 
     public static string Of(DashboardDef d) => Sha(JsonSerializer.Serialize(d, MetadataStore.Json));
 
-    /// <summary>Huella de los catálogos y tableros tocados (un nombre que aún no existe cuenta como «-»).</summary>
+    public static string Of(AppDef a) => Sha(JsonSerializer.Serialize(a, MetadataStore.Json));
+
+    /// <summary>Huella de los catálogos, tableros y (spec 024) módulos tocados (un nombre que aún no existe cuenta como «-»).</summary>
     public static string Base(IReadOnlyDictionary<string, EntityDef> model, IReadOnlyDictionary<string, DashboardDef> boards,
-        IReadOnlySet<string> entities, IReadOnlySet<string>? dashboards)
+        IReadOnlySet<string> entities, IReadOnlySet<string>? dashboards,
+        IReadOnlyDictionary<string, AppDef>? apps = null, IReadOnlySet<string>? touchedApps = null)
     {
         var sb = new StringBuilder();
         foreach (var name in entities.Order(StringComparer.OrdinalIgnoreCase))
             sb.Append("e:").Append(name.ToLowerInvariant()).Append('=').Append(model.TryGetValue(name, out var e) ? Of(e) : "-").Append('\n');
         foreach (var name in (dashboards ?? new HashSet<string>()).Order(StringComparer.OrdinalIgnoreCase))
             sb.Append("d:").Append(name.ToLowerInvariant()).Append('=').Append(boards.TryGetValue(name, out var d) ? Of(d) : "-").Append('\n');
+        foreach (var name in (touchedApps ?? new HashSet<string>()).Order(StringComparer.OrdinalIgnoreCase))
+            sb.Append("a:").Append(name.ToLowerInvariant()).Append('=').Append(apps is not null && apps.TryGetValue(name, out var a) ? Of(a) : "-").Append('\n');
         return Sha(sb.ToString());
     }
 

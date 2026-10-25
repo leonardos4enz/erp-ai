@@ -559,6 +559,20 @@ public sealed record DashboardDef
     public bool IsArchived { get; init; }
 }
 
+/// <summary>
+/// Spec 024: módulo de navegación. Sus catálogos son los que tienen <c>Group</c> = <c>Name</c> (sin distinguir mayúsculas);
+/// un grupo sin declaración es un módulo implícito y los catálogos sin grupo forman «General».
+/// </summary>
+public sealed record AppDef
+{
+    public required string Name { get; init; }
+    public required string Label { get; init; }
+    public string? Icon { get; init; }
+    public string? Description { get; init; }
+    public int? Order { get; init; }
+    public bool IsArchived { get; init; }
+}
+
 // ---------- Spec 008: integraciones ----------
 
 /// <summary>Evento que dispara un webhook: los mismos de las automatizaciones (spec 005).</summary>
@@ -672,7 +686,21 @@ public sealed record ChangePlan
 [JsonDerivedType(typeof(SetWebhooksOp), "setWebhooks")]
 [JsonDerivedType(typeof(SetSchedulesOp), "setSchedules")]
 [JsonDerivedType(typeof(SetLedgerOp), "setLedger")]
+[JsonDerivedType(typeof(SetAppOp), "setApp")]
+[JsonDerivedType(typeof(ArchiveAppOp), "archiveApp")]
 public abstract record Operation;
+
+/// <summary>Spec 024. Crea o reemplaza la declaración de un módulo de navegación.</summary>
+public sealed record SetAppOp : Operation
+{
+    public required AppDef App { get; init; }
+}
+
+/// <summary>Spec 024. La declaración se conserva archivada; sus catálogos quedan en un módulo implícito con su nombre.</summary>
+public sealed record ArchiveAppOp : Operation
+{
+    public required string Name { get; init; }
+}
 
 /// <summary>Spec 020. Declara el libro del catálogo; <c>null</c> lo quita.</summary>
 public sealed record SetLedgerOp : Operation

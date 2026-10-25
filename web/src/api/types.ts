@@ -269,7 +269,13 @@ export interface ReportResult {
 }
 export interface DashboardWidgetDef { type: 'kpi' | 'chart' | 'table'; label?: string; entity: string; report: string; measure?: number; wide?: boolean }
 export interface DashboardDef { name: string; label: string; icon?: string; description?: string; roles?: string[]; widgets: DashboardWidgetDef[] }
-export interface DashboardSummary { name: string; label: string; icon: string; description?: string | null }
+/** Spec 024: `apps`, módulos de los catálogos de sus tarjetas visibles. */
+export interface DashboardSummary { name: string; label: string; icon: string; description?: string | null; apps?: string[] }
+/** Spec 024: módulo de navegación tal como lo ve el usuario (`isArchived` solo en la lista del modelador). */
+export interface AppSummary { name: string; label: string; icon: string; description?: string | null; order: number; declared: boolean; entities: string[]; isArchived?: boolean | null }
+export interface AppDef { name: string; label: string; icon?: string; description?: string; order?: number }
+/** Spec 024: documento encontrado por folio. */
+export interface SearchHit { entity: string; entityLabel: string; id: number; label: string }
 export interface DashboardResult {
   name: string;
   label: string;
@@ -443,7 +449,9 @@ export type Operation =
   | { op: 'setSchedules'; entity: string; schedules: ScheduleDef[]; merge?: boolean }
   | { op: 'setLedger'; entity: string; ledger: LedgerDef | null }
   | { op: 'setDashboard'; dashboard: DashboardDef }
-  | { op: 'archiveDashboard'; name: string };
+  | { op: 'archiveDashboard'; name: string }
+  | { op: 'setApp'; app: AppDef }
+  | { op: 'archiveApp'; name: string };
 
 /** Spec 021: `baseVersions` = versión de cada catálogo al abrirlo; `baseHash` = huella de la vista previa revisada. */
 export interface ChangePlan { description: string; operations: Operation[]; baseVersions?: Record<string, string>; baseHash?: string }

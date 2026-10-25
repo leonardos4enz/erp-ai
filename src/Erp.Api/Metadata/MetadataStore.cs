@@ -13,14 +13,17 @@ public sealed class MetadataStore(Db db)
 {
     private static readonly TimeSpan Ttl = TimeSpan.FromSeconds(30);
     private readonly SemaphoreSlim _gate = new(1, 1);
-    private (IReadOnlyDictionary<string, EntityDef> Model, IReadOnlyDictionary<string, DashboardDef> Dashboards, DateTime LoadedAt)? _cache;
+    private (IReadOnlyDictionary<string, EntityDef> Model, IReadOnlyDictionary<string, DashboardDef> Dashboards, IReadOnlyDictionary<string, AppDef> Apps, DateTime LoadedAt)? _cache;
 
     public async Task<IReadOnlyDictionary<string, EntityDef>> GetAsync(CancellationToken ct = default) => (await GetAllAsync(ct)).Model;
 
     /// <summary>Spec 007: tableros (incluye archivados; quien consulta filtra).</summary>
     public async Task<IReadOnlyDictionary<string, DashboardDef>> GetDashboardsAsync(CancellationToken ct = default) => (await GetAllAsync(ct)).Dashboards;
 
-    private async Task<(IReadOnlyDictionary<string, EntityDef> Model, IReadOnlyDictionary<string, DashboardDef> Dashboards, DateTime LoadedAt)> GetAllAsync(CancellationToken ct)
+    /// <summary>Spec 024: módulos de navegación declarados (incluye archivados; quien consulta filtra).</summary>
+    public async Task<IReadOnlyDictionary<string, AppDef>> GetAppsAsync(CancellationToken ct = default) => (await GetAllAsync(ct)).Apps;
+
+    private async Task<(IReadOnlyDictionary<string, EntityDef> Model, IReadOnlyDictionary<string, DashboardDef> Dashboards, IReadOnlyDictionary<string, AppDef> Apps, DateTime LoadedAt)> GetAllAsync(CancellationToken ct)
     {
         if (_cache is { } c && DateTime.UtcNow - c.LoadedAt < Ttl) return c;
         await _gate.WaitAsync(ct);
@@ -30,7 +33,7 @@ public sealed class MetadataStore(Db db)
             await using var cn = await db.OpenAsync(ct);
             var model = await LoadAsync(cn, null);
             var boards = await LoadDashboardsAsync(cn, null);
-            _cache = (model, boards, DateTime.UtcNow);
+            _cache = (model, boards, await LoadAppsAsync(cn, null), DateTime.UtcNow);
             return _cache.Value;
         }
         finally { _gate.Release(); }
@@ -40,6 +43,11 @@ public sealed class MetadataStore(Db db)
         (await cn.QueryAsync<(string Name, string DefinitionJson, bool IsArchived)>("SELECT Name, DefinitionJson, IsArchived FROM meta.Dashboard", transaction: tx))
             .Select(r => JsonSerializer.Deserialize<DashboardDef>(r.DefinitionJson, Json)! with { Name = r.Name, IsArchived = r.IsArchived })
             .ToDictionary(d => d.Name, StringComparer.OrdinalIgnoreCase);
+
+    internal static async Task<IReadOnlyDictionary<string, AppDef>> LoadAppsAsync(DbConnection cn, DbTransaction? tx) =>
+        (await cn.QueryAsync<(string Name, string DefinitionJson, bool IsArchived)>("SELECT Name, DefinitionJson, IsArchived FROM meta.App", transaction: tx))
+            .Select(r => JsonSerializer.Deserialize<AppDef>(r.DefinitionJson, Json)! with { Name = r.Name, IsArchived = r.IsArchived })
+            .ToDictionary(a => a.Name, StringComparer.OrdinalIgnoreCase);
 
     public void Invalidate() => _cache = null;
 

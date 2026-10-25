@@ -160,7 +160,7 @@ public static partial class PackageRules
         if (chain.Any(c => c.Plan?.Operations is null)) { errors.Add("Cada plan del paquete necesita operaciones."); return errors; }
         if (chain.Any(c => c.Plan.Operations.Count > PlanCompiler.MaxOperations)) errors.Add($"Un plan del paquete excede {PlanCompiler.MaxOperations} operaciones.");
         var (entities, dashboards) = ModelDiff.Scope(p);
-        if (entities.Count == 0 && dashboards.Count == 0) errors.Add("El paquete no crea ningún catálogo ni tablero.");
+        if (entities.Count == 0 && dashboards.Count == 0 && ModelDiff.ScopeApps(p).Count == 0) errors.Add("El paquete no crea ningún catálogo ni tablero.");
         if (p.Seed is { Count: > 0 }) errors.Add("Un paquete de entorno no lleva datos (seed): solo metadatos.");
 
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);

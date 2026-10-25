@@ -29,6 +29,9 @@ test('H1: crear un catálogo desde el modelador y capturar datos sin programar',
 
   await expect(page.getByText('Cambios aplicados')).toBeVisible();
   const nav = page.getByLabel('Navegación principal');
+  // Spec 024: un catálogo sin módulo queda en General; se llega por el selector de módulos.
+  await page.getByRole('banner').getByRole('button', { name: 'Cambiar de módulo' }).click();
+  await page.getByRole('main').getByRole('link', { name: /^General/ }).click();
   await nav.getByRole('link', { name: 'Camiones' }).click();
 
   // CA1: el catálogo nuevo ya permite capturar información.

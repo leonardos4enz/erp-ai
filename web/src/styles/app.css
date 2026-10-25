@@ -755,3 +755,46 @@ code, pre, .mono { font-family: var(--font-mono); font-size: 0.8125rem; }
 .wf-assign { gap: var(--space-2); align-items: flex-start; }
 .wf-assign > :first-child { width: 40%; flex-shrink: 0; }
 .wf-assign > .input { flex: 1; width: auto; min-width: 0; }
+
+/* ---------- Spec 024: navegación por módulos ---------- */
+.app-grid { list-style: none; margin: 0; padding: 0; }
+.app-grid > li { display: flex; min-width: 0; }
+.app-grid > li > .app-card { flex: 1; min-width: 0; }
+.app-card-icon { width: 44px; height: 44px; border-radius: var(--radius-lg); background: var(--accent-soft); color: var(--accent-text); display: grid; place-items: center; }
+.nav-app { font-weight: 600; color: var(--text); }
+.nav-app-icon { width: 24px; height: 24px; border-radius: var(--radius-sm); background: var(--accent-soft); color: var(--accent-text); display: grid; place-items: center; flex-shrink: 0; }
+.nav-app.active .nav-app-icon { background: var(--surface); }
+.search-btn { display: flex; align-items: center; gap: var(--space-2); height: 32px; min-width: 0; padding: 0 var(--space-2) 0 var(--space-3);
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-md); color: var(--text-muted); cursor: pointer; font: inherit; font-size: var(--text-sm); }
+.search-btn:hover { border-color: var(--border-strong); color: var(--text); }
+.search-btn:focus-visible { outline: none; box-shadow: var(--focus-ring); border-color: var(--accent); }
+.search-btn-text { min-width: 64px; text-align: left; }
+.search-btn-kbd, .cp-foot kbd { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--text-muted); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 1px 5px; white-space: nowrap; }
+/* Las migas anteriores no se encogen (se ocultan cuando no caben); solo la última se recorta con puntos suspensivos. */
+.breadcrumb .crumb:not(:last-child) { flex-shrink: 0; }
+@media (max-width: 1100px) {
+  .search-btn { padding: 0 var(--space-2); }
+  .search-btn-text, .search-btn-kbd { display: none; }
+  .topbar .breadcrumb .crumb:not(:nth-last-child(-n + 2)) { display: none; }
+}
+@media (max-width: 700px) {
+  .topbar { gap: var(--space-1); padding: 0 var(--space-3); }
+  .topbar .breadcrumb .crumb:not(:last-child) { display: none; }
+}
+.cp { display: flex; flex-direction: column; gap: var(--space-3); }
+.cp-input { position: relative; }
+.cp-spinner { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); }
+.cp-list { max-height: min(52vh, 420px); overflow-y: auto; margin: 0 calc(-1 * var(--space-2)); padding: 0 var(--space-2); }
+.cp-group { font-size: var(--text-xs); font-weight: 500; color: var(--text-subtle); text-transform: uppercase; letter-spacing: 0.05em; padding: var(--space-3) var(--space-2) var(--space-1); }
+.cp-option { display: flex; align-items: center; gap: var(--space-3); min-height: 38px; padding: 6px var(--space-2); border-radius: var(--radius-md); cursor: pointer; color: var(--text); }
+.cp-option.active { background: var(--accent-soft); color: var(--accent-text); }
+.cp-icon { width: 28px; height: 28px; border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text-muted); display: grid; place-items: center; flex-shrink: 0; }
+.cp-option.active .cp-icon { background: var(--surface); color: var(--accent-text); }
+.cp-label { font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cp-hint { margin-left: auto; padding-left: var(--space-3); color: var(--text-subtle); font-size: var(--text-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 45%; }
+.cp-option.active .cp-hint { color: var(--accent-text); }
+.cp-empty { padding: var(--space-6) var(--space-2); text-align: center; color: var(--text-muted); }
+.cp-foot { display: flex; gap: var(--space-4); font-size: var(--text-xs); flex-wrap: wrap; }
+@media (max-width: 700px) { .cp-foot { display: none; } .cp-hint { display: none; } }
+/* Regresión (revisión 024, F-01): «Automatización e integraciones» no cabía en una línea y se cortaba en el borde del menú. */
+.sidebar:not(.collapsed) .nav-section-title { white-space: normal; overflow-wrap: anywhere; }

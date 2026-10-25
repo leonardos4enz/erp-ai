@@ -183,7 +183,9 @@ test('H3 CA4: sin clave el asistente lo explica; solo el administrador la guarda
 
 test('H1 CA1 · CA2 + H3 CA2: propone con la vista previa del modelador y solo envía metadatos', async ({ page }) => {
 
+  // Spec 024: el asistente está en el área de configuración (engrane de la barra superior).
   await page.goto('/');
+  await page.getByRole('banner').getByRole('button', { name: 'Configuración' }).click();
   await page.getByLabel('Navegación principal').getByRole('link', { name: 'Asistente IA' }).click();
   await expect(page.getByRole('heading', { name: 'Asistente IA' })).toBeVisible();
   await expect(page.getByText('¿Qué necesitas en el modelo?')).toBeVisible();
@@ -250,7 +252,11 @@ test('H2 CA1 · CA2 + H4 CA2: aplicar pide confirmación con advertencias, aplic
   await expect(page.getByText('Cambios aplicados')).toBeVisible();
   await expect(lastTurn(page).getByText('Aplicada')).toBeVisible();
   await expect(lastTurn(page).getByText(/Conjunto de cambios #\d+/)).toBeVisible();
-  await expect(page.getByLabel('Navegación principal').getByRole('link', { name: 'Rutas IA' })).toBeVisible();
+  // Spec 024: el catálogo nuevo se encuentra al instante con la búsqueda global (el menú lateral es el de configuración).
+  await page.keyboard.press('Control+k');
+  await page.getByRole('combobox', { name: /Buscar/ }).fill('Rutas IA');
+  await expect(page.getByRole('option', { name: /Rutas IA/ })).toBeVisible();
+  await page.keyboard.press('Escape');
 
   const entity = (await (await admin.get('/api/model/entities/IaFlota')).json());
   expect(entity.security.records[0].roles).toEqual(['ModeladorIA']);
@@ -382,6 +388,7 @@ test('H3 CA1: solo modeladores usan el asistente, y cada quien ve solo sus propu
   expect((await capturista.post('/api/assistant/requests', { data: { prompt: 'hola' } })).status()).toBe(403);
   const page = await pageAs(browser, 'e2e-ia-capturista');
   await expect(page.getByLabel('Navegación principal').getByRole('link', { name: 'Asistente IA' })).toHaveCount(0);
+  await expect(page.getByRole('banner').getByRole('button', { name: 'Configuración' })).toHaveCount(0); // spec 024: sin capacidad, sin engrane
   await page.goto('/admin/assistant');
   await expect(page.getByText('Sin acceso')).toBeVisible();
   await page.context().close();
@@ -397,6 +404,7 @@ test('H3 CA1: solo modeladores usan el asistente, y cada quien ve solo sus propu
 
   // Un modelador que no es superusuario sí lo usa desde la UI.
   const modelador = await pageAs(browser, 'e2e-ia-modelador');
+  await modelador.getByRole('banner').getByRole('button', { name: 'Configuración' }).click(); // spec 024
   await modelador.getByLabel('Navegación principal').getByRole('link', { name: 'Asistente IA' }).click();
   script.push({ explanation: 'Agrego Notas internas a Flotas IA.', plan: { description: 'Notas', operations: [
     { op: 'addField', entity: 'IaFlota', field: { name: 'NotasInternas', label: 'Notas internas', type: 'longtext' } }] } });

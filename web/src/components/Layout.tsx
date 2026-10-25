@@ -1,16 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
-  BarChart3, Blocks, Building2, CalendarClock, Check, ChevronDown, ChevronRight, Gauge, GitCompareArrows, History, LayoutDashboard, LogOut, Moon, PanelLeftClose, PanelLeftOpen,
-  ShieldCheck, Sparkles, Sun, Webhook, Workflow,
+  ArrowLeft, BarChart3, Building2, Check, ChevronDown, ChevronRight, Gauge, LayoutDashboard, LayoutGrid, LogOut, Moon, PanelLeftClose, PanelLeftOpen,
+  Search, Settings, Sun,
 } from 'lucide-react';
 import { dashboardsApi, reportsApi } from '../api/endpoints';
-import type { EntityDef } from '../api/types';
+import type { AppSummary, EntityDef } from '../api/types';
 import { useAsync } from '../lib/hooks';
 import { useAuth } from '../auth/AuthContext';
 import { useTheme } from '../lib/theme';
 import { initials } from '../lib/format';
 import { safeStorageGet, safeStorageSet } from '../lib/hooks';
+import { ADMIN_GROUPS, adminGroupsFor } from '../lib/adminNav';
+import { AppsProvider, useApps } from '../lib/apps';
+import { CommandPalette } from './CommandPalette';
 import { DynamicIcon } from './DynamicIcon';
 import { Button } from './ui';
 
@@ -18,6 +21,7 @@ const SIDEBAR_KEY = 'erp.sidebar.collapsed';
 const NARROW_QUERY = '(max-width: 900px)'; // igual que el @media del sidebar flotante en app.css
 
 const isNarrowViewport = () => window.matchMedia(NARROW_QUERY).matches;
+const isMac = () => /Mac|iPhone|iPad/.test(navigator.platform);
 
 function useNarrowViewport(): boolean {
   const [narrow, setNarrow] = useState(isNarrowViewport);
@@ -40,25 +44,34 @@ function Brand() {
   );
 }
 
+const ADMIN_LABELS: Record<string, string> = Object.fromEntries(ADMIN_GROUPS.flatMap((g) => g.items.map((i) => [i.to.split('/')[2], i.label])));
+
+/** Spec 024: la miga de pan lleva el módulo (enlace a su página) y «Configuración» enlaza al área. */
 function useBreadcrumb(): { label: string; to?: string }[] {
   const { pathname } = useLocation();
   const { entities } = useAuth();
+  const { appOf, find } = useApps();
   const parts = pathname.split('/').filter(Boolean);
   const crumbs: { label: string; to?: string }[] = [{ label: 'Inicio', to: '/' }];
-  if (parts[0] === 'c' && parts[1]) {
+  const appCrumb = (a?: AppSummary) => { if (a) crumbs.push({ label: a.label, to: `/m/${encodeURIComponent(a.name)}` }); };
+  if (parts[0] === 'm' && parts[1]) {
+    const a = find(decodeURIComponent(parts[1]));
+    crumbs.push({ label: a?.label ?? decodeURIComponent(parts[1]) });
+  } else if (parts[0] === 'c' && parts[1]) {
     const name = decodeURIComponent(parts[1]);
     const def = entities.find((e) => e.name.toLowerCase() === name.toLowerCase());
+    appCrumb(appOf(name));
     crumbs.push({ label: def?.labelPlural ?? name, to: `/c/${encodeURIComponent(name)}` });
     if (parts[2] === 'new') crumbs.push({ label: 'Nuevo' });
     else if (parts[2]) crumbs.push({ label: `#${decodeURIComponent(parts[2])}` });
   } else if (parts[0] === 'reports' || parts[0] === 'dashboards') {
     const reports = parts[0] === 'reports';
+    if (reports && parts[1]) appCrumb(appOf(decodeURIComponent(parts[1])));
     crumbs.push({ label: reports ? 'Reportes' : 'Tableros', to: reports ? '/reports' : '/dashboards' });
     if (parts[1]) crumbs.push({ label: reports ? 'Reporte' : decodeURIComponent(parts[1]) });
   } else if (parts[0] === 'admin') {
-    crumbs.push({ label: 'Configuración' });
-    const map: Record<string, string> = { model: 'Modelador', security: 'Usuarios y roles', audit: 'Auditoría', modules: 'Módulos', integrations: 'Integraciones', automations: 'Automatizaciones', environments: 'Entornos', companies: 'Empresas', assistant: 'Asistente IA' };
-    if (parts[1]) crumbs.push({ label: map[parts[1]] ?? parts[1] });
+    crumbs.push({ label: 'Configuración', to: parts[1] ? '/admin' : undefined });
+    if (parts[1]) crumbs.push({ label: ADMIN_LABELS[parts[1]] ?? parts[1] });
   }
   return crumbs;
 }
@@ -201,35 +214,116 @@ function EntityLink({ e }: { e: EntityDef }) {
   );
 }
 
-/** Sección plegable de un módulo. Recuerda si estaba abierta y se abre sola si contiene la página actual. */
-function NavGroup({ name, entities, sidebarCollapsed }: { name: string; entities: readonly EntityDef[]; sidebarCollapsed: boolean }) {
-  const key = `erp.nav.${name}`;
-  const { pathname } = useLocation();
-  const active = entities.some((e) => pathname.startsWith(`/c/${encodeURIComponent(e.name)}`));
-  const [open, setOpen] = useState(() => safeStorageGet(key) !== '0');
-  useEffect(() => { if (active) setOpen(true); }, [active]);
-  const toggleOpen = () => { safeStorageSet(key, open ? '0' : '1'); setOpen(!open); };
-  const id = `nav-group-${name.replace(/\W+/g, '-')}`;
-  const expanded = open || sidebarCollapsed; // con el menú contraído solo hay iconos: siempre visibles
+/**
+ * Spec 024 (H1 CA2): menú lateral del módulo actual. Solo sus documentos (con proceso, primero) y catálogos, y su
+ * análisis si tiene tableros o reportes para el usuario.
+ */
+function AppNav({ app }: { app: AppSummary | undefined }) {
+  const { entities, entitiesLoading, me } = useAuth();
+  const { appOfGroup, loading } = useApps();
+  const { search } = useLocation();
+  const { data: boards } = useAsync((s) => (me ? dashboardsApi.list(s) : Promise.resolve([])), [me?.id, entities]);
+  const { data: reports } = useAsync((s) => (me ? reportsApi.list(s) : Promise.resolve([])), [me?.id, entities]);
+
+  if (!app) {
+    return !entitiesLoading && !loading ? <div className="nav-empty">Aún no hay catálogos</div> : null;
+  }
+  const own = app.entities.map((n) => entities.find((e) => e.name.toLowerCase() === n.toLowerCase())).filter((e): e is EntityDef => !!e);
+  const docs = own.filter((e) => e.workflow);
+  const catalogs = own.filter((e) => !e.workflow);
+  const hasBoards = (boards ?? []).some((d) => d.apps?.some((a) => a.toLowerCase() === app.name.toLowerCase()));
+  const hasReports = (reports ?? []).some((r) => appOfGroup(r.group)?.name === app.name);
+  const appQuery = `?app=${encodeURIComponent(app.name)}`;
+  // El enlace de análisis del módulo se marca activo solo con su propio filtro, no en la vista general.
+  const analysisActive = ({ isActive }: { isActive: boolean }) =>
+    `nav-link${isActive && new URLSearchParams(search).get('app')?.toLowerCase() === app.name.toLowerCase() ? ' active' : ''}`;
+
   return (
-    <div className="nav-section">
-      <button type="button" className="nav-section-title nav-group-toggle" aria-expanded={expanded} aria-controls={id} onClick={toggleOpen}>
-        <ChevronRight size={13} aria-hidden className={expanded ? 'rot-90' : undefined} />
-        <span>{name}</span>
-      </button>
-      {expanded && <div id={id}>{entities.map((e) => <EntityLink key={e.name} e={e} />)}</div>}
-    </div>
+    <>
+      <div className="nav-section">
+        <NavLink to={`/m/${encodeURIComponent(app.name)}`} end className="nav-link nav-app" title={`Resumen de ${app.label}`}>
+          <span className="nav-app-icon"><DynamicIcon name={app.icon} size={16} /></span><span>{app.label}</span>
+        </NavLink>
+      </div>
+      {docs.length > 0 && (
+        <div className="nav-section">
+          <div className="nav-section-title">Documentos</div>
+          {docs.map((e) => <EntityLink key={e.name} e={e} />)}
+        </div>
+      )}
+      {catalogs.length > 0 && (
+        <div className="nav-section">
+          <div className="nav-section-title">Catálogos</div>
+          {catalogs.map((e) => <EntityLink key={e.name} e={e} />)}
+        </div>
+      )}
+      {(hasBoards || hasReports) && (
+        <div className="nav-section">
+          <div className="nav-section-title">Análisis</div>
+          {hasBoards && (
+            <NavLink to={`/dashboards${appQuery}`} end className={analysisActive} title={`Tableros de ${app.label}`}>
+              <Gauge size={17} aria-hidden /><span>Tableros</span>
+            </NavLink>
+          )}
+          {hasReports && (
+            <NavLink to={`/reports${appQuery}`} end className={analysisActive} title={`Reportes de ${app.label}`}>
+              <BarChart3 size={17} aria-hidden /><span>Reportes</span>
+            </NavLink>
+          )}
+        </div>
+      )}
+    </>
+  );
+}
+
+/** Spec 024 (H3 CA1): menú del área de configuración, agrupado; cada opción con su capacidad. */
+function AdminNav({ back }: { back: AppSummary | undefined }) {
+  const { me } = useAuth();
+  return (
+    <>
+      <div className="nav-section">
+        <Link to={back ? `/m/${encodeURIComponent(back.name)}` : '/'} className="nav-link" title={back ? `Volver a ${back.label}` : 'Volver al inicio'}>
+          <ArrowLeft size={17} aria-hidden /><span>{back ? `Volver a ${back.label}` : 'Volver al inicio'}</span>
+        </Link>
+        <NavLink to="/admin" end className="nav-link" title="Configuración">
+          <Settings size={17} aria-hidden /><span>Configuración</span>
+        </NavLink>
+      </div>
+      {adminGroupsFor(me).map((g) => (
+        <div key={g.label} className="nav-section" role="group" aria-label={g.label}>
+          <div className="nav-section-title" aria-hidden>{g.label}</div>
+          {g.items.map((i) => (
+            <NavLink key={i.to} to={i.to} className="nav-link" title={i.label}>
+              <i.icon size={17} aria-hidden /><span>{i.label}</span>
+            </NavLink>
+          ))}
+        </div>
+      ))}
+    </>
   );
 }
 
 export function Layout() {
-  const { me, entities, entitiesLoading } = useAuth();
+  return (
+    <AppsProvider>
+      <Shell />
+    </AppsProvider>
+  );
+}
+
+function Shell() {
+  const { me } = useAuth();
+  const { current } = useApps();
   const { theme, toggle } = useTheme();
+  const navigate = useNavigate();
   // En pantallas angostas el menú es un panel flotante: arranca cerrado y su estado no se guarda.
   const narrow = useNarrowViewport();
   const [collapsed, setCollapsed] = useState(() => isNarrowViewport() || safeStorageGet(SIDEBAR_KEY) === '1');
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const crumbs = useBreadcrumb();
   const location = useLocation();
+  const adminArea = location.pathname === '/admin' || location.pathname.startsWith('/admin/');
+  const showAdmin = adminGroupsFor(me).length > 0;
 
   useEffect(() => { if (!narrow) safeStorageSet(SIDEBAR_KEY, collapsed ? '1' : '0'); }, [collapsed, narrow]);
   useEffect(() => { if (narrow) setCollapsed(true); }, [narrow, location.pathname]);
@@ -240,21 +334,17 @@ export function Layout() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [narrow, collapsed]);
-
-  // Catálogos agrupados por módulo (metadato `group`); los documentos con proceso van primero.
-  const ungrouped = entities.filter((e) => !e.group);
-  const groups = Object.entries(
-    entities.filter((e) => e.group).reduce<Record<string, EntityDef[]>>((acc, e) => ((acc[e.group!] ??= []).push(e), acc), {}),
-  )
-    .sort(([a], [b]) => a.localeCompare(b, 'es'))
-    .map(([g, list]) => [g, list.slice().sort((a, b) => Number(!!b.workflow) - Number(!!a.workflow) || a.labelPlural.localeCompare(b.labelPlural, 'es'))] as const);
-
-  const canModel = !!(me?.canManageModel || me?.isSuperuser);
-  // Spec 007: «Análisis» solo aparece si hay tableros o reportes para el usuario (se recalcula al cambiar el modelo).
-  const { data: boards } = useAsync((s) => (me ? dashboardsApi.list(s) : Promise.resolve([])), [me?.id, entities]);
-  const { data: reports } = useAsync((s) => (me ? reportsApi.list(s) : Promise.resolve([])), [me?.id, entities]);
-  const canUsers = !!(me?.canManageUsers || me?.isSuperuser);
-  const canAudit = !!(me?.canViewAudit || me?.isSuperuser);
+  // H5 CA1: Ctrl+K (⌘K en Mac) desde cualquier página, también con el foco en un campo.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setPaletteOpen(true);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   return (
     <div className="shell">
@@ -269,85 +359,7 @@ export function Layout() {
               <LayoutDashboard size={17} aria-hidden /><span>Inicio</span>
             </NavLink>
           </div>
-          {(ungrouped.length > 0 || groups.length === 0) && (
-            <div className="nav-section">
-              <div className="nav-section-title">Catálogos</div>
-              {ungrouped.map((e) => <EntityLink key={e.name} e={e} />)}
-              {!entitiesLoading && entities.length === 0 && <div className="nav-empty">Aún no hay catálogos</div>}
-            </div>
-          )}
-          {groups.map(([group, list]) => (
-            <NavGroup key={group} name={group} entities={list} sidebarCollapsed={collapsed} />
-          ))}
-          {(canModel || canUsers || canAudit) && (
-            <div className="nav-section">
-              <div className="nav-section-title">Configuración</div>
-              {canModel && (
-                <NavLink to="/admin/model" className="nav-link" title="Modelador">
-                  <Workflow size={17} aria-hidden /><span>Modelador</span>
-                </NavLink>
-              )}
-              {canUsers && (
-                <NavLink to="/admin/security" className="nav-link" title="Usuarios y roles">
-                  <ShieldCheck size={17} aria-hidden /><span>Usuarios y roles</span>
-                </NavLink>
-              )}
-              {me?.isSuperuser && (
-                <NavLink to="/admin/modules" className="nav-link" title="Módulos">
-                  <Blocks size={17} aria-hidden /><span>Módulos</span>
-                </NavLink>
-              )}
-              {canAudit && (
-                <NavLink to="/admin/audit" className="nav-link" title="Auditoría">
-                  <History size={17} aria-hidden /><span>Auditoría</span>
-                </NavLink>
-              )}
-              {/* Spec 008: después de «Auditoría» para no empujarla fuera de la pantalla (regresión 003). */}
-              {me?.isSuperuser && (
-                <NavLink to="/admin/integrations" className="nav-link" title="Integraciones">
-                  <Webhook size={17} aria-hidden /><span>Integraciones</span>
-                </NavLink>
-              )}
-              {me?.isSuperuser && (
-                <NavLink to="/admin/environments" className="nav-link" title="Entornos">
-                  <GitCompareArrows size={17} aria-hidden /><span>Entornos</span>
-                </NavLink>
-              )}
-              {me?.isSuperuser && (
-                <NavLink to="/admin/companies" className="nav-link" title="Empresas">
-                  <Building2 size={17} aria-hidden /><span>Empresas</span>
-                </NavLink>
-              )}
-              {/* Spec 011: al final de «Configuración», para no mover lo que capturan las referencias visuales. */}
-              {canModel && (
-                <NavLink to="/admin/assistant" className="nav-link" title="Asistente IA">
-                  <Sparkles size={17} aria-hidden /><span>Asistente IA</span>
-                </NavLink>
-              )}
-              {/* Spec 016: también al final, por la misma razón. */}
-              {me?.isSuperuser && (
-                <NavLink to="/admin/automations" className="nav-link" title="Automatizaciones">
-                  <CalendarClock size={17} aria-hidden /><span>Automatizaciones</span>
-                </NavLink>
-              )}
-            </div>
-          )}
-          {/* Al final: no empuja «Configuración» fuera de la pantalla (regresión de la revisión exploratoria 003). */}
-          {(!!boards?.length || !!reports?.length || canModel) && (
-            <div className="nav-section">
-              <div className="nav-section-title">Análisis</div>
-              {(!!boards?.length || canModel) && (
-                <NavLink to="/dashboards" className="nav-link" title="Tableros">
-                  <Gauge size={17} aria-hidden /><span>Tableros</span>
-                </NavLink>
-              )}
-              {!!reports?.length && (
-                <NavLink to="/reports" className="nav-link" title="Reportes">
-                  <BarChart3 size={17} aria-hidden /><span>Reportes</span>
-                </NavLink>
-              )}
-            </div>
-          )}
+          {adminArea ? <AdminNav back={current} /> : <AppNav app={current} />}
         </nav>
         <div className="sidebar-footer">
           <button className="nav-link" style={{ width: '100%', border: 0, background: 'none', cursor: 'pointer' }} onClick={() => setCollapsed((c) => !c)} aria-label={collapsed ? 'Expandir menú' : 'Contraer menú'} aria-expanded={!collapsed}>
@@ -363,7 +375,7 @@ export function Layout() {
           <Button variant="ghost" size="sm" iconOnly icon={collapsed ? PanelLeftOpen : PanelLeftClose} aria-label={collapsed ? 'Expandir menú' : 'Contraer menú'} onClick={() => setCollapsed((c) => !c)} />
           <nav className="breadcrumb" aria-label="Ruta de navegación">
             {crumbs.map((c, i) => (
-              <span key={i} className="row" style={{ gap: 6, minWidth: 0 }}>
+              <span key={i} className="row crumb" style={{ gap: 6, minWidth: 0 }}>
                 {i > 0 && <ChevronRight size={14} aria-hidden />}
                 {i === crumbs.length - 1 || !c.to
                   ? <span className={i === crumbs.length - 1 ? 'current' : undefined} aria-current={i === crumbs.length - 1 ? 'page' : undefined}>{c.label}</span>
@@ -372,7 +384,18 @@ export function Layout() {
             ))}
           </nav>
           <div className="spacer" />
+          <button type="button" className="search-btn" onClick={() => setPaletteOpen(true)} aria-haspopup="dialog"
+            aria-keyshortcuts={isMac() ? 'Meta+K' : 'Control+K'} aria-label="Búsqueda global" title={`Búsqueda global (${isMac() ? '⌘K' : 'Ctrl+K'})`}>
+            <Search size={15} aria-hidden />
+            <span className="search-btn-text">Búsqueda</span>
+            <kbd className="search-btn-kbd" aria-hidden>{isMac() ? '⌘K' : 'Ctrl K'}</kbd>
+          </button>
+          <Button variant="ghost" size="sm" iconOnly icon={LayoutGrid} aria-label="Cambiar de módulo" title="Módulos" onClick={() => navigate('/')} />
           <CompanySwitcher />
+          {showAdmin && (
+            <Button variant="ghost" size="sm" iconOnly icon={Settings} aria-label="Configuración" title="Configuración"
+              aria-current={adminArea ? 'page' : undefined} onClick={() => navigate('/admin')} />
+          )}
           <Button variant="ghost" size="sm" iconOnly icon={theme === 'dark' ? Sun : Moon} aria-label={theme === 'dark' ? 'Usar tema claro' : 'Usar tema oscuro'} onClick={toggle} />
           <UserMenu />
         </header>
@@ -381,6 +404,7 @@ export function Layout() {
           <Outlet key={me?.company?.id ?? 0} />
         </main>
       </div>
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
     </div>
   );
 }

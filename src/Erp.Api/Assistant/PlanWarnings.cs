@@ -40,6 +40,9 @@ public static class PlanWarnings
                 case ArchiveDashboardOp a:
                     list.Add($"Archiva el tablero «{a.Name}».");
                     break;
+                case ArchiveAppOp a:
+                    list.Add($"Archiva el módulo «{a.Name}»: sus catálogos siguen en el menú bajo un módulo con su nombre, sin ícono ni descripción.");
+                    break;
                 case SetSecurityOp s:
                     list.Add(s.Security is null
                         ? $"Quita la seguridad por campo y por registro de «{Label(s.Entity)}»."

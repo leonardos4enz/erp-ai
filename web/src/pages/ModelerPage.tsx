@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Archive, ArchiveRestore, Boxes, History, Pencil, Plus, Workflow } from 'lucide-react';
+import { Archive, ArchiveRestore, Boxes, History, LayoutGrid, Pencil, Plus, Workflow } from 'lucide-react';
 import { ApiError } from '../api/client';
 import { modelApi } from '../api/endpoints';
 import type { ChangePlan, ChangeSetSummary, EntityDef } from '../api/types';
@@ -12,8 +12,9 @@ import { formatDateTime } from '../lib/format';
 import { useAsync } from '../lib/hooks';
 import { EntityEditor, editorTab } from './modeler/EntityEditor';
 import { PlanReviewDialog } from './modeler/PlanReviewDialog';
+import { AppsTab } from './modeler/AppsTab';
 
-type Tab = 'entities' | 'history';
+type Tab = 'entities' | 'apps' | 'history';
 
 function HistoryTab() {
   const { data, loading, error } = useAsync<ChangeSetSummary[]>(() => modelApi.changes(), []);
@@ -46,7 +47,9 @@ export function ModelerPage() {
   const toast = useToast();
   const { reloadEntities } = useAuth();
   const [params, setParams] = useSearchParams();
-  const [tab, setTab] = useState<Tab>('entities');
+  // Spec 024: `?section=apps` abre la pestaña de módulos (enlace desde el área de configuración).
+  const [tab, setTab] = useState<Tab>(() => (params.get('section') === 'apps' ? 'apps' : 'entities'));
+  const [appsVersion, setAppsVersion] = useState(0);
   const { data: entities, loading, error, reload } = useAsync<EntityDef[]>(() => modelApi.entities(true, true), []);
   const [plan, setPlan] = useState<ChangePlan | null>(null);
 
@@ -57,7 +60,7 @@ export function ModelerPage() {
 
   function closeEditor() {
     const p = new URLSearchParams(params);
-    p.delete('new'); p.delete('edit'); p.delete('tab');
+    p.delete('new'); p.delete('edit'); p.delete('tab'); p.delete('app');
     setParams(p, { replace: true });
   }
 
@@ -66,6 +69,7 @@ export function ModelerPage() {
     toast.success('Cambios aplicados', `Conjunto de cambios #${id}`);
     closeEditor();
     reload();
+    setAppsVersion((v) => v + 1);
     await reloadEntities();
   }
 
@@ -104,9 +108,9 @@ export function ModelerPage() {
         label="Secciones del modelador"
         value={tab}
         onChange={setTab}
-        items={[{ id: 'entities', label: 'Catálogos', icon: Boxes }, { id: 'history', label: 'Historial', icon: History }]}
+        items={[{ id: 'entities', label: 'Catálogos', icon: Boxes }, { id: 'apps', label: 'Módulos', icon: LayoutGrid }, { id: 'history', label: 'Historial', icon: History }]}
       />
-      {tab === 'history' ? <HistoryTab /> : loading ? <LoadingBlock /> : error ? (
+      {tab === 'history' ? <HistoryTab /> : tab === 'apps' ? <AppsTab version={appsVersion} onReview={setPlan} /> : loading ? <LoadingBlock /> : error ? (
         <Alert tone="danger" title={error instanceof ApiError ? error.title : 'No se pudo cargar el modelo'} />
       ) : list.length === 0 ? (
         <div className="card">

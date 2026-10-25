@@ -1,7 +1,7 @@
 {
   "id": "compras",
   "name": "Compras",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "icon": "shopping-cart",
   "description": "Requisiciones, órdenes de compra con autorización por montos y recepción de mercancía con cantidades recibidas y pendientes. Incluye proveedores, productos y catálogos base.",
   "plan": {
@@ -538,6 +538,12 @@
             { "name": "IvaRango", "field": "IVA", "assert": "IVA >= 0 AND IVA <= 100", "message": "El IVA debe estar entre 0 y 100." },
             { "name": "MonedaCostoClave", "field": "MonedaCosto", "assert": "ISBLANK(MonedaCosto) OR LEN(MonedaCosto) = 3", "message": "La moneda del costo es una clave de 3 letras (p. ej. MXN, USD)." }
           ] }
+      ] } },
+    { "version": "1.9.0",
+      "description": "Navegación por módulos (spec 024): declara el módulo Compras con su ícono, descripción y orden para el selector de módulos.",
+      "plan": { "description": "Compras 1.9.0: módulo de navegación", "operations": [
+        { "op": "setApp", "app": { "name": "Compras", "label": "Compras", "icon": "shopping-cart", "order": 10,
+            "description": "Requisiciones, órdenes de compra con autorización y recepción de mercancía; proveedores y productos." } }
       ] } }
   ],
   "roles": [    { "name": "Solicitante", "description": "Crea y envía requisiciones de compra.", "canManageModel": false, "canManageUsers": false, "canViewAudit": false,

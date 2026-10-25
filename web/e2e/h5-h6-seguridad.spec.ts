@@ -61,7 +61,8 @@ test('H5: al dar permiso de lectura el usuario ve el catálogo, pero no puede cr
 
 test('H6: la auditoría muestra quién cambió qué', async ({ page }) => {
   await page.goto('/admin/audit');
-  await expect(page.getByText('Cliente').first()).toBeVisible();
+  // Spec 024: antes la primera coincidencia era el enlace «Clientes» del menú plano; ahora se busca en la tabla.
+  await expect(page.getByRole('cell', { name: 'Cliente', exact: true }).first()).toBeVisible();
   await expect(page.getByText(/model\.change|Cambio de modelo|modelo/i).first()).toBeVisible();
   await expectAccessible(page);
 });

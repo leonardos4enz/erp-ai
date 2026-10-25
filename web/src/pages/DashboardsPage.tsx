@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ArrowRight, Code2, Inbox, LayoutDashboard, Plus } from 'lucide-react';
 import { ApiError } from '../api/client';
 import { dashboardsApi } from '../api/endpoints';
@@ -11,6 +11,7 @@ import { formatReportValue, ReportChart } from '../components/ReportChart';
 import { ReportTable } from '../components/ReportTable';
 import { Alert, Button, EmptyState, LoadingBlock, PageHeader, Textarea } from '../components/ui';
 import { useAsync } from '../lib/hooks';
+import { useApps } from '../lib/apps';
 import { PlanReviewDialog } from './modeler/PlanReviewDialog';
 import { NotFoundPage } from './StatusPages';
 
@@ -25,20 +26,28 @@ export function DashboardsPage() {
   const canModel = !!(me?.canManageModel || me?.isSuperuser);
   const [tick, setTick] = useState(0);
   const { data, loading, error } = useAsync<DashboardSummary[]>((s) => dashboardsApi.list(s), [tick]);
+  // Spec 024 (H4): `?app=` acota los tableros a los que tienen tarjetas de ese módulo.
+  const [params] = useSearchParams();
+  const { find } = useApps();
+  const only = find(params.get('app'));
+  const list = (data ?? []).filter((d) => !only || d.apps?.some((a) => a.toLowerCase() === only.name.toLowerCase()));
   const [editing, setEditing] = useState(false);
   const navigate = useNavigate();
 
   return (
     <div className="page">
-      <PageHeader icon={LayoutDashboard} title="Tableros" subtitle="Indicadores y gráficas con los registros que puedes ver."
-        actions={canModel && <Button icon={Plus} onClick={() => setEditing(true)}>Nuevo tablero</Button>} />
+      <PageHeader icon={LayoutDashboard} title={only ? `Tableros de ${only.label}` : 'Tableros'} subtitle="Indicadores y gráficas con los registros que puedes ver."
+        actions={<>
+          {only && <Link className="btn btn-secondary" to="/dashboards">Ver todos los tableros</Link>}
+          {canModel && <Button icon={Plus} onClick={() => setEditing(true)}>Nuevo tablero</Button>}
+        </>} />
       {loading && !data ? <LoadingBlock />
         : error ? <Alert tone="danger" title={error instanceof ApiError ? error.title : 'No se pudieron cargar los tableros'} />
-        : !data?.length ? (
+        : !list.length ? (
           <div className="card"><EmptyState icon={Inbox} title="No hay tableros" description="Cuando haya tableros con indicadores que puedas ver, aparecerán aquí." /></div>
         ) : (
           <div className="grid-cards">
-            {data.map((d) => (
+            {list.map((d) => (
               <Link key={d.name} to={`/dashboards/${encodeURIComponent(d.name)}`} className="card entity-card">
                 <div className="entity-card-icon"><DynamicIcon name={d.icon} size={18} /></div>
                 <div>

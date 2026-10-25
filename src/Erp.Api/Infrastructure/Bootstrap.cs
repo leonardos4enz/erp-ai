@@ -305,6 +305,15 @@ public static class Bootstrap
             UpdatedAt datetime2(3) NOT NULL DEFAULT SYSUTCDATETIME()
         );
 
+        IF OBJECT_ID('meta.App') IS NULL
+        CREATE TABLE meta.App (
+            Name nvarchar(60) NOT NULL PRIMARY KEY,
+            Label nvarchar(100) NOT NULL,
+            DefinitionJson nvarchar(max) NOT NULL,
+            IsArchived bit NOT NULL DEFAULT 0,
+            UpdatedAt datetime2(3) NOT NULL DEFAULT SYSUTCDATETIME()
+        );
+
         IF OBJECT_ID('meta.SavedView') IS NULL
         CREATE TABLE meta.SavedView (
             Id int IDENTITY PRIMARY KEY,

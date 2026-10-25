@@ -8,7 +8,8 @@ namespace Erp.Api.Endpoints;
 /// <summary>Spec 007: vistas guardadas, reportes y tableros. Toda la seguridad se aplica en los servicios.</summary>
 public static class AnalyticsEndpoints
 {
-    public sealed record DashboardSummary(string Name, string Label, string Icon, string? Description);
+    /// <param name="Apps">Spec 024: módulos de los catálogos de sus tarjetas visibles para el usuario.</param>
+    public sealed record DashboardSummary(string Name, string Label, string Icon, string? Description, IReadOnlyList<string> Apps);
     public sealed record WidgetResult(string Type, string Label, bool Wide, string Entity, string Report, int? Measure, ReportResult Result);
     public sealed record DashboardResult(string Name, string Label, string Icon, string? Description, IReadOnlyList<WidgetResult> Widgets,
         DashboardDef? Definition);
@@ -51,7 +52,7 @@ public static class AnalyticsEndpoints
             return (await store.GetDashboardsAsync(ct)).Values
                 .Where(d => Visible(d, u, model))
                 .OrderBy(d => d.Label, StringComparer.CurrentCulture)
-                .Select(d => new DashboardSummary(d.Name, d.Label, d.Icon ?? "layout-dashboard", d.Description))
+                .Select(d => new DashboardSummary(d.Name, d.Label, d.Icon ?? "layout-dashboard", d.Description, AppsOf(d, u, model)))
                 .ToList();
         });
         boards.MapGet("/{name}", async (string name, HttpContext http, MetadataStore store, ReportService svc, CancellationToken ct) =>
@@ -70,6 +71,11 @@ public static class AnalyticsEndpoints
             return new DashboardResult(d.Name, d.Label, d.Icon ?? "layout-dashboard", d.Description, widgets, u.CanManageModel ? d : null);
         });
     }
+
+    private static IReadOnlyList<string> AppsOf(DashboardDef d, UserContext u, IReadOnlyDictionary<string, EntityDef> model) =>
+        d.Widgets.Select(w => Widget(w, u, model)).OfType<(EntityDef E, ReportDef R)>()
+            .Select(x => x.E.IsChild && model.TryGetValue(x.E.ParentEntity!, out var p) ? p : x.E)
+            .Select(Apps.Of).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
     /// <summary>Un tablero se ofrece si el usuario tiene uno de sus roles y puede ver al menos una de sus tarjetas.</summary>
     private static bool Visible(DashboardDef d, UserContext u, IReadOnlyDictionary<string, EntityDef> model) =>
