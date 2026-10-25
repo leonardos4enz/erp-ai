@@ -190,6 +190,7 @@ app.MapCompanies();
 app.MapAssistant();
 app.MapOAuthToken(); // spec 018
 app.MapOData();
+app.MapExplorer(); // spec 025
 app.MapGet("/api/health", () => Results.Ok(new { status = "ok" })).AllowAnonymous();
 app.MapFallback("/api/{**path}", () => Results.Problem(title: "Ruta no encontrada.", statusCode: 404));
 app.MapFallback("/oauth/{**path}", () => Results.Problem(title: "Ruta no encontrada.", statusCode: 404));

@@ -161,7 +161,7 @@ test('H3 CA1 · CA2: el engrane abre la configuración con su menú agrupado; si
   const groups = nav(page).getByRole('group');
   await expect(groups).toHaveCount(4);
   expect(await groups.evaluateAll((gs) => gs.map((g) => g.getAttribute('aria-label')))).toEqual(['Modelo', 'Seguridad', 'Automatización e integraciones', 'Auditoría']);
-  await expect(nav(page).getByRole('group', { name: 'Modelo' }).getByRole('link')).toHaveText(['Modelador', 'Módulos', 'Entornos']);
+  await expect(nav(page).getByRole('group', { name: 'Modelo' }).getByRole('link')).toHaveText(['Modelador', 'Explorador', 'Módulos', 'Entornos']); // spec 025: Explorador
   await expect(nav(page).getByRole('group', { name: 'Seguridad' }).getByRole('link')).toHaveText(['Usuarios y roles', 'Empresas']);
   await expect(nav(page).getByRole('group', { name: 'Automatización e integraciones' }).getByRole('link')).toHaveText(['Automatizaciones', 'Integraciones', 'Asistente IA']);
   // Regresión (revisión exploratoria 024, F-01): el título del grupo más largo se cortaba en el borde del menú.

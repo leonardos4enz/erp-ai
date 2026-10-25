@@ -30,8 +30,9 @@ en orden, no en paralelo: casi todas tocan el núcleo del motor (`PlanCompiler`,
 | 022 Costeo 2: políticas de valuación | Implementado ([spec](specs/022-costeo-2/spec.md)) |
 | 023 Capacidades del motor (merge, avisos, rutas) | Implementado ([spec](specs/023-capacidades-motor/spec.md)) |
 | 024 Navegación por módulos | Implementado ([spec](specs/024-navegacion-modulos/spec.md)) |
-| 025 Módulo de Ventas | Planeado |
-| 026 CFDI 4.0 con PAC | Planeado |
+| 025 Explorador del modelo y de la base de datos | Implementado ([spec](specs/025-explorador-modelo/spec.md)) |
+| 026 Módulo de Ventas | Planeado |
+| 027 CFDI 4.0 con PAC | Planeado |
 
 ## Diagnóstico
 | Brecha señalada | Situación actual | Spec |
@@ -270,7 +271,7 @@ reglas de negocio** (constitución I.1), configurables por metadatos con valores
   ventas) y revaluación, que siguen de la 020.
 
 ### 023 — Capacidades del motor: listas que se fusionan, reglas de aviso y rutas de tres niveles
-Origen: pendientes de la 022 que limitan a los módulos y que Ventas (024, ahora 025) necesitará; plan del dueño (2026-10-24).
+Origen: pendientes de la 022 que limitan a los módulos y que Ventas (024, luego 025, ahora 026) necesitará; plan del dueño (2026-10-24).
 - **Estado:** implementado en la [spec 023](specs/023-capacidades-motor/spec.md). `merge` en las seis listas del catálogo
   (reglas, automatizaciones, vistas, reportes, webhooks, tareas): agrega o reemplaza por nombre en su lugar; la vista previa
   ya no dice que quita lo que un `merge` conserva, y un paquete de Entornos que extiende un catálogo que no crea llega al
@@ -297,12 +298,28 @@ Origen: pedido del dueño (2026-10-24) antes de Ventas: el menú lateral ya no c
 - **Pendiente:** favoritos y recientes en el menú, búsqueda de texto completo en registros y preferencias del usuario en
   el servidor (el último módulo vive en el navegador).
 
-## Specs planeadas (después de la 024)
+### 025 — Explorador del modelo y de la base de datos
+Origen: pedido del dueño (2026-10-24): ver la estructura completa del sistema, en especial un diagrama ER físico literal.
+- **Estado:** implementado en la [spec 025](specs/025-explorador-modelo/spec.md). Área de solo lectura en *Configuración ›
+  Modelo › Explorador* (`/admin/explorer`, capacidad *administrar modelo*). **Base de datos:** diagrama ER leído del catálogo de
+  SQL Server (`sys.*`, esquema por lista blanca y parámetro; `meta` solo superusuario) con tipos SQL exactos, nulabilidad,
+  valores por defecto, llaves, índices filtrados, columnas de sistema y pata de gallo por nulabilidad y unicidad; **deriva**
+  (catálogos y campos archivados, columnas o tablas sin metadato, faltantes y tipos distintos de los que genera el motor);
+  exportar SVG, PNG y DDL de estructura. **Relaciones** con color por módulo y foco a 1–2 niveles; **ficha** del catálogo
+  (con el diagrama del proceso de la 019 en solo lectura, seguridad por rol con herencia y el paquete que lo instaló);
+  **¿dónde se usa?** calculado en el servidor con el analizador de expresiones (rutas de tres saltos, `SUM`, `UNITCOST`), en
+  caché por versión del modelo; **flujo de automatizaciones** síncronas, asíncronas y programadas con ciclos; **matriz de
+  seguridad** y **árbol de navegación**. Cada diagrama tiene su alternativa en tabla o lista con teclado. Distribución de
+  grafos propia (sin `elkjs`: tamaño y CSP), usable con 100+ tablas por filtro en el servidor, foco y zoom.
+- **Pendiente:** comparar la base de dos entornos, sugerir limpieza de columnas archivadas (con respaldo y aprobación),
+  exportar el diagrama lógico a DDL, y vistas, disparadores y procedimientos de SQL si algún día el motor los crea.
+
+## Specs planeadas (después de la 025)
 En este orden, por decisión del dueño (2026-10-24):
-1. **025 — Módulo de Ventas:** clientes, cotización, pedido, salida de almacén con costo de ventas (póliza de salidas),
+1. **026 — Módulo de Ventas:** clientes, cotización, pedido, salida de almacén con costo de ventas (póliza de salidas),
    factura y cobranza. Usa `merge` para extender Producto e Inventario, avisos (límite de crédito) y rutas de tres niveles;
    declara su módulo con `setApp` (orden 15, entre Compras e Inventario).
-2. **026 — CFDI 4.0 con PAC:** timbrado de la factura de Ventas con un proveedor autorizado, cancelación y complemento de
+2. **027 — CFDI 4.0 con PAC:** timbrado de la factura de Ventas con un proveedor autorizado, cancelación y complemento de
    pago; el secreto del PAC fuera del código (constitución II.7).
 3. **Pólizas en moneda extranjera** (pendiente de la 020).
 4. **Revaluación de existencias** (pendiente de la 020).

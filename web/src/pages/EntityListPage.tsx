@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { ArrowDown, ArrowUp, ArrowUpDown, BookmarkPlus, ChevronLeft, ChevronRight, Columns3, Download, Filter, Inbox, Plus, Search, SearchX, Trash2, Upload } from 'lucide-react';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { ArrowDown, ArrowUp, ArrowUpDown, BookmarkPlus, ChevronLeft, ChevronRight, Columns3, Download, Filter, Inbox, Network, Plus, Search, SearchX, Trash2, Upload } from 'lucide-react';
 import { ApiError, fieldError } from '../api/client';
 import { dataApi, viewsApi } from '../api/endpoints';
 import type { EntityDef, RowList, SavedView, StateCount, ViewFilter, ViewList } from '../api/types';
@@ -47,7 +47,7 @@ function viewParams(v: SavedView): Record<string, string | undefined> {
 export function EntityListPage() {
   const { entity = '' } = useParams();
   const navigate = useNavigate();
-  const { perms } = useAuth();
+  const { perms, me } = useAuth();
   const { def, loading: defLoading, error: defError } = useEntityDef(entity);
   const [params, setParams] = useSearchParams();
 
@@ -165,7 +165,15 @@ export function EntityListPage() {
 
   return (
     <div className="page">
-      <PageHeader icon={Icon} title={def.labelPlural} subtitle={def.description} actions={newBtn} />
+      <PageHeader icon={Icon} title={def.labelPlural} subtitle={def.description} actions={<>
+        {/* Spec 025: quien administra el modelo puede ver cómo está construido este catálogo. */}
+        {(me?.canManageModel || me?.isSuperuser) && (
+          <Link className="btn btn-ghost" to={`/admin/explorer?vista=ficha&catalogo=${encodeURIComponent(def.name)}`}>
+            <Network size={16} aria-hidden />Ver en el explorador
+          </Link>
+        )}
+        {newBtn}
+      </>} />
 
       {def.workflow && (
         <StateFilter

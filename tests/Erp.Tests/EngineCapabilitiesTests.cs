@@ -20,7 +20,7 @@ public class EngineCapabilitiesTests
         throw new DirectoryNotFoundException("modules");
     }
 
-    private static ModulePackage Package(string file) =>
+    internal static ModulePackage Package(string file) =>
         JsonSerializer.Deserialize<ModulePackage>(File.ReadAllText(Path.Combine(ModulesFolder(), file)), PackageJson.Read)!;
 
     private static string Errors(IEnumerable<PlanError> errors) => string.Join(" | ", errors.Select(e => $"#{e.Operation} {e.Message}"));

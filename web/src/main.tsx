@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import './styles/tokens.css';
 import './styles/app.css';
+import './styles/explorer.css';
 import { applyInitialTheme } from './lib/theme';
 import { AuthProvider } from './auth/AuthContext';
 import { ToastProvider } from './components/Toast';

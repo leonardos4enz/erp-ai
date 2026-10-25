@@ -1,5 +1,5 @@
 import {
-  Blocks, Building2, CalendarClock, GitCompareArrows, History, ShieldCheck, Sparkles, Webhook, Workflow, type LucideIcon,
+  Blocks, Building2, CalendarClock, GitCompareArrows, History, Network, ShieldCheck, Sparkles, Webhook, Workflow, type LucideIcon,
 } from 'lucide-react';
 import type { Me } from '../api/types';
 
@@ -17,6 +17,7 @@ export const ADMIN_GROUPS: AdminGroup[] = [
     label: 'Modelo',
     items: [
       { to: '/admin/model', label: 'Modelador', description: 'Catálogos, campos, procesos y módulos del menú.', icon: Workflow, allow: model },
+      { to: '/admin/explorer', label: 'Explorador', description: 'Base de datos, relaciones, usos, automatizaciones y seguridad (solo lectura).', icon: Network, allow: model },
       { to: '/admin/modules', label: 'Módulos', description: 'Instalar y actualizar paquetes de módulos.', icon: Blocks, allow: superuser },
       { to: '/admin/environments', label: 'Entornos', description: 'Exportar, revisar y aplicar paquetes entre entornos.', icon: GitCompareArrows, allow: superuser },
     ],

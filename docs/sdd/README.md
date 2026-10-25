@@ -68,3 +68,4 @@ y cada sesión queda como registro de una sola entrega. Al cerrar la spec:
 | 022 | [Costeo 2: políticas de valuación configurables](specs/022-costeo-2/spec.md) | Implementado |
 | 023 | [Capacidades del motor: listas que se fusionan, reglas de aviso y rutas de tres niveles](specs/023-capacidades-motor/spec.md) | Implementado |
 | 024 | [Navegación por módulos](specs/024-navegacion-modulos/spec.md) | Implementado |
+| 025 | [Explorador del modelo y de la base de datos](specs/025-explorador-modelo/spec.md) | Implementado |
