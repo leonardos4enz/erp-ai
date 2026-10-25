@@ -3,7 +3,7 @@
 // visual.spec.ts. Las capacidades genéricas se ejercen con un módulo de prueba propio (Ruta*: país → cliente → pedido →
 // partida); el caso 7 de la 022 («avisar») con la regla real de Costeo, que se restaura al terminar.
 import type { APIRequestContext } from '@playwright/test';
-import { ADMIN, apiAs, applyPlan, expect, expectAccessible, test } from './helpers';
+import { ADMIN, apiAs, applyPlan, expect, expectAccessible, openJson, test } from './helpers';
 
 test.describe.configure({ mode: process.env.E2E_INDEPENDENT ? 'default' : 'serial' });
 
@@ -239,8 +239,10 @@ test('H2 (modelador): el panel de la transición ofrece «Si hay avisos» y el J
   await page.getByRole('button', { name: /^Transición Confirmar: de Borrador a Confirmado$/ }).click();
   await expect(page.getByLabel('Si hay avisos')).toHaveValue('confirm');
   await expectAccessible(page);
-  await page.getByRole('tab', { name: 'Catálogo' }).click();
-  await expect(page.getByText('severity («warning»: avisa sin impedir guardar)')).toBeVisible();
+  // Spec 026: las reglas tienen su pestaña; la severidad es un control y el JSON avanzado la sigue explicando.
+  await page.getByRole('tab', { name: 'Reglas' }).click();
+  await openJson(page, 'Reglas (JSON)');
+  await expect(page.getByText(/severity \(«warning»\)/)).toBeVisible();
 });
 
 test('H2 CA6: caso 7 de la 022 — con PolizaConCuentas en aviso, confirmar pide confirmación y queda Póliza pendiente', async () => {

@@ -78,3 +78,14 @@ export const test = base.extend<{ guard: void }>({
 });
 
 export { expect };
+
+/**
+ * Spec 026: el JSON de cada sección del modelador es avanzado y está plegado («Ver como JSON»). Abre el de la etiqueta
+ * dada (p. ej. «Reglas (JSON)») y devuelve su área de texto.
+ */
+export async function openJson(page: Page, label: string) {
+  const box = page.getByLabel(label);
+  if (!(await box.isVisible())) await page.locator('details.json-advanced', { has: box }).locator('summary').click();
+  await expect(box).toBeVisible();
+  return box;
+}

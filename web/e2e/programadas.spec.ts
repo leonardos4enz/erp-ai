@@ -3,7 +3,7 @@
 // Para simular que «llegó la hora» de una tarea se adelanta su siguiente ocurrencia con SQL sobre la base desechable.
 import { execFileSync, spawn } from 'node:child_process';
 import type { APIRequestContext } from '@playwright/test';
-import { ADMIN, anonApi, apiAs, applyPlan, expect, expectAccessible, test, uiLogin } from './helpers';
+import { ADMIN, anonApi, apiAs, applyPlan, expect, expectAccessible, openJson, test, uiLogin } from './helpers';
 
 test.describe.configure({ mode: 'serial' });
 
@@ -275,9 +275,10 @@ test('H2 CA1 · CA2 · H5 CA1: la vista previa valida la tarea; llega en pausa y
   expect(s.nextRunAt ?? null).toBeNull();
   expect(await runs({ kind: 'schedule', entity: 'J16Pedido' })).toEqual([]);
 
-  await page.goto('/admin/model?edit=J16Pedido');
-  await expect(page.getByLabel('Tareas programadas (JSON)')).toHaveValue(/"VencerPedidos"/);
-  await expect(page.getByLabel('Automatizaciones (JSON)')).toHaveValue(/"mode": "async"/);
+  await page.goto('/admin/model?edit=J16Pedido&tab=integraciones');
+  await expect(await openJson(page, 'Tareas programadas (JSON)')).toHaveValue(/"VencerPedidos"/);
+  await page.getByRole('tab', { name: 'Automatizaciones' }).click();
+  await expect(await openJson(page, 'Automatizaciones (JSON)')).toHaveValue(/"mode": "async"/);
   await expect(page.getByRole('button', { name: 'Sin cambios' })).toBeDisabled();
 });
 

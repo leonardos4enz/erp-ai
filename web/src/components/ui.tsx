@@ -291,10 +291,11 @@ export function Tabs<T extends string>({ items, value, onChange, label }: { item
           onClick={() => onChange(t.id)}
           onKeyDown={(e) => {
             if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
-              const next = items[(i + (e.key === 'ArrowRight' ? 1 : items.length - 1)) % items.length];
-              onChange(next.id);
-              const parent = e.currentTarget.parentElement;
-              requestAnimationFrame(() => (parent?.querySelector('[aria-selected="true"]') as HTMLElement | null)?.focus());
+              const j = (i + (e.key === 'ArrowRight' ? 1 : items.length - 1)) % items.length;
+              onChange(items[j].id);
+              // Regresión (revisión exploratoria 026, F-01): con la pestaña en la URL el cambio llega después del cuadro
+              // siguiente, y buscar la seleccionada dejaba el foco en la anterior. Se enfoca por posición.
+              (e.currentTarget.parentElement?.children[j] as HTMLElement | undefined)?.focus();
             }
           }}
         >

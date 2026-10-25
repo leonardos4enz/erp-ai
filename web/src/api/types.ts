@@ -544,7 +544,7 @@ export interface ModuleInfo {
   missingRequirements?: string[];
 }
 
-export type ModulePreview = PlanPreview & { roles: string[]; seedRecords: number };
+export type ModulePreview = PlanPreview & { roles: string[]; seedRecords: number; conflicts?: UpgradeConflict[] };
 
 export interface LookupItem { id: number; label: string }
 
@@ -744,3 +744,13 @@ export interface SecurityChange {
 export interface PendingChange { securityChange: SecurityChange; secret?: string }
 
 export const isPending = (x: unknown): x is PendingChange => typeof x === 'object' && x !== null && 'securityChange' in x;
+
+/* ---------- Spec 026: origen de cada elemento y editor de expresiones ---------- */
+export type OriginKind = 'entity' | 'field' | 'rule' | 'automation' | 'view' | 'report' | 'webhook' | 'schedule' | 'workflow' | 'layout' | 'security' | 'ledger';
+export interface PackageStamp { id: string; name: string; version: string }
+/** `package` nulo = local; `step` = «base» o la versión de la actualización que lo dejó como está. */
+export interface ElementOrigin { kind: OriginKind; name: string; package: string | null; packageName: string | null; step: string | null; modified: boolean }
+export interface EntityOrigin { entity: string; installedBy: PackageStamp | null; packages: PackageStamp[]; elements: ElementOrigin[] }
+export interface ExprFunction { name: string; min: number; max: number }
+/** Spec 026 (H2 CA4): lo local o modificado que una actualización de módulo reemplaza o quita. */
+export interface UpgradeConflict { entity: string; entityLabel: string; kind: OriginKind; name: string; reason: 'local' | 'modified'; effect: 'replaced' | 'removed' }

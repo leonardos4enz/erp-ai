@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { ArrowUpCircle, Blocks, CheckCircle2, Database, Download, ShieldCheck } from 'lucide-react';
+import { ArrowUpCircle, Blocks, CheckCircle2, Database, Download, ShieldCheck, TriangleAlert } from 'lucide-react';
 import { ApiError } from '../api/client';
 import { adminApi } from '../api/endpoints';
-import type { ModuleInfo, ModulePreview } from '../api/types';
+import type { ModuleInfo, ModulePreview, UpgradeConflict } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { Dialog } from '../components/Dialog';
 import { DynamicIcon } from '../components/DynamicIcon';
@@ -167,6 +167,8 @@ function ModuleDialog({ module: m, mode, onClose, onDone }: { module: ModuleInfo
               </div>
             </div>
           )}
+          {/* Spec 026 (H2 CA4): lo local o modificado aquí que la actualización reemplaza o quita, antes de confirmar. */}
+          {upgrade && <UpgradeConflicts conflicts={preview.conflicts ?? []} />}
           <PlanPreviewView
             preview={preview}
             validText={upgrade
@@ -176,5 +178,29 @@ function ModuleDialog({ module: m, mode, onClose, onDone }: { module: ModuleInfo
         </div>
       )}
     </Dialog>
+  );
+}
+
+const KIND_LABELS: Record<UpgradeConflict['kind'], string> = {
+  entity: 'Datos generales', field: 'Campo', rule: 'Regla', automation: 'Automatización', view: 'Vista', report: 'Reporte', webhook: 'Webhook',
+  schedule: 'Tarea programada', workflow: 'Proceso', layout: 'Formulario', security: 'Seguridad', ledger: 'Libro contable',
+};
+
+function UpgradeConflicts({ conflicts }: { conflicts: UpgradeConflict[] }) {
+  if (!conflicts.length) {
+    return <Alert tone="info" icon={CheckCircle2} title="Sin choques con cambios locales">La actualización no toca nada que se haya creado o modificado en este entorno.</Alert>;
+  }
+  return (
+    <Alert tone="warning" icon={TriangleAlert} title={`La actualización reemplaza ${conflicts.length} ${conflicts.length === 1 ? 'cambio local' : 'cambios locales'}`}>
+      <p>Lo que se cambió o creó en este entorno y la actualización vuelve a definir o quita. Si continúas, gana la actualización.</p>
+      <ul className="conflict-list">
+        {conflicts.map((c) => (
+          <li key={`${c.entity}-${c.kind}-${c.name}`}>
+            <strong>{c.entityLabel}</strong> › {KIND_LABELS[c.kind]}{c.name ? <> <span className="mono">{c.name}</span></> : null}:{' '}
+            {c.reason === 'local' ? 'creado aquí' : 'modificado aquí'}; {c.effect === 'removed' ? 'la actualización lo quita.' : 'la actualización lo reemplaza.'}
+          </li>
+        ))}
+      </ul>
+    </Alert>
   );
 }

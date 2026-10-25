@@ -8,10 +8,10 @@ import { Dialog } from './Dialog';
 import { ReferenceSelect } from './ReferenceSelect';
 import { Button, Input, Select } from './ui';
 
-type Kind = 'text' | 'longtext' | 'number' | 'date' | 'boolean' | 'id' | 'choice';
+export type Kind = 'text' | 'longtext' | 'number' | 'date' | 'boolean' | 'id' | 'choice';
 
 /** Igual que el servidor (FilterSql): qué operadores admite cada clase de campo. */
-function kindOf(f: FieldDef): Kind {
+export function kindOf(f: FieldDef): Kind {
   const t = f.type === 'formula' ? f.resultType ?? 'decimal' : f.type;
   if (t === 'choice' || t === 'state') return 'choice';
   if (t === 'longtext') return 'longtext';
@@ -22,7 +22,7 @@ function kindOf(f: FieldDef): Kind {
   return 'text';
 }
 
-const OPS: Record<Kind, FilterOp[]> = {
+export const OPS: Record<Kind, FilterOp[]> = {
   text: ['contains', 'eq', 'ne', 'blank', 'notBlank'],
   longtext: ['contains', 'blank', 'notBlank'],
   choice: ['eq', 'ne', 'in', 'blank', 'notBlank'],

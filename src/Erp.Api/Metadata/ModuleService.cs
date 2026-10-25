@@ -169,8 +169,14 @@ public sealed partial class ModuleService(Db db, MetadataStore store, PlanServic
         var preview = await plans.PreviewChainAsync(pending.Select(u => ($"v{u.Version}", u.Plan)).ToList(), newRoles, ct);
         await using var cn = await db.OpenAsync(ct);
         var existing = await PlanService.LoadRolesAsync(cn, null);
+        // Spec 026 (H2 CA4): lo local o modificado localmente que la actualización reemplazaría o quitaría.
+        var installed = (await cn.QueryAsync<(string Id, string Version)>("SELECT Id, Version FROM meta.Module"))
+            .ToDictionary(x => x.Id, x => x.Version, StringComparer.OrdinalIgnoreCase);
+        var model = await store.GetAsync(ct);
+        var rep = Provenance.ReproduceCached(model, Packages(), installed, existing);
+        var conflicts = Provenance.Conflicts(model, rep, pending.Select(u => u.Plan), existing.Union(newRoles).ToHashSet(StringComparer.OrdinalIgnoreCase));
         return new { preview.Valid, preview.Errors, preview.Steps, roles = newRoles.Where(n => !existing.Contains(n)).ToList(), seedRecords = 0,
-            versions = pending.Select(u => new { u.Version, u.Description }) };
+            versions = pending.Select(u => new { u.Version, u.Description }), conflicts };
     }
 
     /// <summary>Aplica en una transacción solo las versiones posteriores a la instalada; los datos se conservan.</summary>

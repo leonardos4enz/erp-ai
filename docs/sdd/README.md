@@ -69,3 +69,4 @@ y cada sesión queda como registro de una sola entrega. Al cerrar la spec:
 | 023 | [Capacidades del motor: listas que se fusionan, reglas de aviso y rutas de tres niveles](specs/023-capacidades-motor/spec.md) | Implementado |
 | 024 | [Navegación por módulos](specs/024-navegacion-modulos/spec.md) | Implementado |
 | 025 | [Explorador del modelo y de la base de datos](specs/025-explorador-modelo/spec.md) | Implementado |
+| 026 | [Modelador por módulos y sin JSON](specs/026-modelador-visual/spec.md) | Implementado |

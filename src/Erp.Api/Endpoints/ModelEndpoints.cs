@@ -1,5 +1,6 @@
 using Dapper;
 using Erp.Api.Environments;
+using Erp.Api.Expressions;
 using Erp.Api.Infrastructure;
 using Erp.Api.Metadata;
 using Erp.Api.Security;
@@ -71,7 +72,52 @@ public static class ModelEndpoints
                   FROM meta.ChangeSet c JOIN meta.[User] u ON u.Id = c.AppliedBy ORDER BY c.Id DESC
                 """);
         });
+
+        // Spec 026 (H2): de qué paquete viene cada parte del modelo (se reproduce de los paquetes del servidor instalados).
+        g.MapGet("/provenance", async (HttpContext http, Db db, MetadataStore store, ModuleService modules, CancellationToken ct) =>
+        {
+            RequireModeler(http);
+            var model = await store.GetAsync(ct);
+            await using var cn = await db.OpenAsync(ct);
+            var installed = (await cn.QueryAsync<(string Id, string Version)>("SELECT Id, Version FROM meta.Module"))
+                .ToDictionary(x => x.Id, x => x.Version, StringComparer.OrdinalIgnoreCase);
+            var roles = await PlanService.LoadRolesAsync(cn, null);
+            var rep = Provenance.ReproduceCached(model, modules.Packages(), installed, roles);
+            return new { entities = Provenance.Compute(model, rep) };
+        });
+
+        // Spec 026 (H3 CA3): valida una expresión con el mismo analizador que el compilador, en el ámbito de un catálogo.
+        // `fields` son los del borrador (campos nuevos aún sin aplicar); nada se guarda.
+        g.MapPost("/expressions/check", async (ExpressionCheck req, HttpContext http, Db db, MetadataStore store, CancellationToken ct) =>
+        {
+            RequireModeler(http);
+            if (!Identifiers.IsValid(req.Entity, out _)) throw new AppException(400, "Indica un catálogo válido.");
+            if ((req.Expression?.Length ?? 0) > MaxExpression) throw new AppException(400, $"La expresión excede {MaxExpression} caracteres.");
+            if ((req.Fields?.Count ?? 0) > PlanCompiler.MaxFieldsPerEntity) throw new AppException(400, "Demasiados campos.");
+            if (string.IsNullOrWhiteSpace(req.Expression)) return new { errors = Array.Empty<string>() };
+            var model = await store.GetAsync(ct);
+            var scope = model.GetValueOrDefault(req.Entity!) ?? new EntityDef { Name = req.Entity!, Label = req.Entity!, LabelPlural = req.Entity! };
+            if (req.Fields is { } draft)
+                scope = scope with
+                {
+                    Fields = draft.Where(f => Identifiers.IsValid(f.Name, out _) && (FieldTypes.All.Contains(f.Type) || f.Type == FieldTypes.State))
+                        .DistinctBy(f => f.Name, StringComparer.OrdinalIgnoreCase).ToList(),
+                };
+            var working = new Dictionary<string, EntityDef>(model, StringComparer.OrdinalIgnoreCase) { [scope.Name] = scope };
+            await using var cn = await db.OpenAsync(ct);
+            var roles = await PlanService.LoadRolesAsync(cn, null);
+            return new { errors = ExprAnalyzer.Analyze(req.Expression, scope, working, roles).Errors.ToArray() };
+        });
+
+        g.MapGet("/expressions/functions", (HttpContext http) =>
+        {
+            RequireModeler(http);
+            return ExprAnalyzer.FunctionList;
+        });
     }
+
+    private const int MaxExpression = 2000;
+    private sealed record ExpressionCheck(string? Entity, string? Expression, IReadOnlyList<FieldDef>? Fields);
 
     private sealed record ChangeRow(int Id, string Description, DateTime AppliedAt, string AppliedBy, int OperationCount, string? Sql);
 

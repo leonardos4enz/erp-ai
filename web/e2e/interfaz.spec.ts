@@ -2,7 +2,7 @@
 // (Compras 1.4.0 instalado con sus usuarios). El motor se prueba con un catálogo propio (Pedidos) declarado por plan,
 // con la seguridad de la 006; lo que ve una persona, por la UI.
 import type { APIRequestContext, Browser, Page } from '@playwright/test';
-import { ADMIN, apiAs, applyPlan, expect, expectAccessible, test, uiLogin } from './helpers';
+import { ADMIN, apiAs, applyPlan, expect, expectAccessible, openJson, test, uiLogin } from './helpers';
 
 test.describe.configure({ mode: 'serial' });
 
@@ -445,17 +445,17 @@ test('H4 CA1 · CA2 · CA3: tableros con indicadores y gráficas, filtrados por 
 });
 
 test('H5: el modelador edita layout, vistas, reportes y tableros como JSON validado', async ({ page }) => {
-  await page.goto('/admin/model?edit=Pedido');
-  await expect(page.getByLabel('Vistas compartidas (JSON)')).toHaveValue(/"Urgentes"/);
-  await expect(page.getByLabel('Reportes (JSON)')).toHaveValue(/"PorZona"/);
+  await page.goto('/admin/model?edit=Pedido&tab=vistas');
+  await expect(await openJson(page, 'Vistas compartidas (JSON)')).toHaveValue(/"Urgentes"/);
+  await expect(await openJson(page, 'Reportes (JSON)')).toHaveValue(/"PorZona"/);
   // Spec 019: el layout está en la pestaña Formulario (diseñador o JSON, sobre el mismo borrador).
   await page.getByRole('tab', { name: 'Formulario' }).click();
   await page.getByRole('button', { name: 'JSON' }).click();
   await expect(page.getByLabel('Layout del formulario (JSON)')).toHaveValue(/"Revision"/);
   await expect(page.getByLabel('Layout del formulario (JSON)')).not.toHaveValue(/null/);
-  await page.getByRole('tab', { name: 'Catálogo' }).click();
+  await page.getByRole('tab', { name: 'Vistas y reportes' }).click();
   await expect(page.getByRole('button', { name: 'Sin cambios' })).toBeDisabled();
-  const box = page.getByLabel('Reportes (JSON)');
+  const box = await openJson(page, 'Reportes (JSON)');
   await box.fill((await box.inputValue()).replace('"Pedidos por zona"', '"Pedidos por zona (editado)"'));
   await page.getByRole('button', { name: 'Revisar cambios' }).click();
   const dialog = page.getByRole('dialog');

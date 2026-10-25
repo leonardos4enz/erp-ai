@@ -22,6 +22,12 @@ public static class ExprAnalyzer
         ["UNITCOST"] = (3, 7),
     };
 
+    public sealed record FunctionInfo(string Name, int Min, int Max);
+
+    /// <summary>Spec 026 (H3): las funciones y su aridad, para el autocompletado del editor de expresiones.</summary>
+    public static readonly IReadOnlyList<FunctionInfo> FunctionList =
+        Functions.OrderBy(f => f.Key, StringComparer.Ordinal).Select(f => new FunctionInfo(f.Key, f.Value.Min, f.Value.Max)).ToList();
+
     /// <summary>Spec 010: funciones cuyo valor depende de la empresa del contexto.</summary>
     public static readonly IReadOnlySet<string> CompanyFunctions = new HashSet<string> { "BASECURRENCY", "CURRENTCOMPANY" };
 

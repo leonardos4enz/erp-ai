@@ -1,6 +1,6 @@
 import { api } from './client';
 import type {
-  AppSummary, SearchHit, AuditEntry, AutomationRun, AutomationRunDetail, ScheduleSummary, ChangePlan, Company, ExchangeRate, ChangeSetSummary, DashboardResult, DashboardSummary, EntityDef, HistoryEntry, LayoutState, LookupItem, Me,
+  AppSummary, SearchHit, AuditEntry, AutomationRun, AutomationRunDetail, ScheduleSummary, ChangePlan, Company, EntityOrigin, ExprFunction, FieldDef, ExchangeRate, ChangeSetSummary, DashboardResult, DashboardSummary, EntityDef, HistoryEntry, LayoutState, LookupItem, Me,
   ApiKey, AssistantStatus, OAuthClient, OAuthScope, BusinessUnit, PendingChange, SecurityChange, Team, Conversation, ConversationSummary, Proposal, EnvironmentInfo, ExportableCatalogs, ExportPreview, ExportRequest, ImportResult, ModuleInfo, PackageImport, ModulePreview, WebhookDelivery, WebhookSummary, Paged, PlanPreview, ReportResult, ReportSummary, Role, Row, RowList, SavedView, User, ViewFilter, ViewList,
 } from './types';
 
@@ -21,11 +21,17 @@ export const modelApi = {
       query: { includeArchived: includeArchived || undefined, includeChildren: includeChildren || undefined },
     }),
   entity: (name: string) => api<EntityDef>(`/model/entities/${enc(name)}`),
-  preview: (plan: ChangePlan) => api<PlanPreview>('/model/plan/preview', { method: 'POST', body: plan }),
+  preview: (plan: ChangePlan, signal?: AbortSignal) => api<PlanPreview>('/model/plan/preview', { method: 'POST', body: plan, signal }),
   apply: (plan: ChangePlan) => api<{ changeSetId: number }>('/model/plan/apply', { method: 'POST', body: plan }),
   changes: () => api<ChangeSetSummary[]>('/model/changes'),
   /** Spec 024: módulos del usuario; `all` (modeladores): también declarados sin catálogos o archivados. */
   apps: (all = false, signal?: AbortSignal) => api<AppSummary[]>('/model/apps', { query: { all: all || undefined }, signal }),
+  /** Spec 026: de qué paquete viene cada parte del modelo. */
+  provenance: (signal?: AbortSignal) => api<{ entities: EntityOrigin[] }>('/model/provenance', { signal }),
+  /** Spec 026: valida una expresión con el analizador del compilador; `fields` = campos del borrador. */
+  checkExpression: (entity: string, expression: string, fields?: FieldDef[], signal?: AbortSignal) =>
+    api<{ errors: string[] }>('/model/expressions/check', { method: 'POST', body: { entity, expression, fields }, signal }),
+  functions: () => api<ExprFunction[]>('/model/expressions/functions'),
 };
 
 export interface ListQuery {

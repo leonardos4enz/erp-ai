@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { APIRequestContext, Browser, Page } from '@playwright/test';
-import { ADMIN, anonApi, apiAs, applyPlan, expect, expectAccessible, roleId, test, uiLogin } from './helpers';
+import { ADMIN, anonApi, apiAs, applyPlan, expect, expectAccessible, openJson, roleId, test, uiLogin } from './helpers';
 
 test.describe.configure({ mode: 'serial' });
 
@@ -128,8 +128,8 @@ test('H1 CA1: la vista previa valida los webhooks (estado, rol y campos que el r
   expect(await msgs({ name: 'A', label: 'A', role: 'Integracion8', events: [{ on: 'create' }], fields: ['Nombre', 'Credito'] })).toMatch(/no puede ver 'Crédito'/);
   expect((await preview(WEBHOOKS)).valid).toBe(true);
 
-  await page.goto('/admin/model?edit=Contacto');
-  await expect(page.getByLabel('Webhooks (JSON)')).toHaveValue(/"ContactoValidado"/);
+  await page.goto('/admin/model?edit=Contacto&tab=integraciones');
+  await expect(await openJson(page, 'Webhooks (JSON)')).toHaveValue(/"ContactoValidado"/);
   await expect(page.getByLabel('Webhooks (JSON)')).not.toHaveValue(/https?:/); // el destino no es metadato
   await expect(page.getByRole('button', { name: 'Sin cambios' })).toBeDisabled();
 });

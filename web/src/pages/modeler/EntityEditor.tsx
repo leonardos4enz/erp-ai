@@ -1,21 +1,33 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
-  Archive, ArchiveRestore, ArrowDown, ArrowUp, ChevronDown, ChevronUp, Eye, LayoutTemplate, Plus, Table2, Trash2, Workflow as WorkflowIcon,
+  AlertCircle, Archive, ArchiveRestore, ArrowDown, ArrowUp, BookOpen, CheckCircle2, ChevronDown, ChevronUp, Eye, KeyRound, LayoutTemplate, ListFilter, Loader2, Package, Plus,
+  ShieldCheck, Table2, Trash2, Webhook, Workflow as WorkflowIcon, Zap,
 } from 'lucide-react';
 import { ApiError } from '../../api/client';
 import { adminApi, modelApi } from '../../api/endpoints';
 import { GENERAL_APP } from '../../lib/apps';
-import type { Automation, ChangePlan, EntityDef, FieldDef, FieldType, FormulaResultType, LedgerDef, Layout, Operation, ReportDef, Rule, ScheduleDef, SecurityPolicy, ViewDef, WebhookDef, Workflow } from '../../api/types';
+import type {
+  Automation, ChangePlan, ElementOrigin, EntityDef, EntityOrigin, FieldDef, FieldType, FormulaResultType, LedgerDef, Layout, Operation, OriginKind, PlanPreview, ReportDef, Rule,
+  ScheduleDef, SecurityPolicy, ViewDef, WebhookDef, Workflow,
+} from '../../api/types';
 import { ConfirmDialog } from '../../components/Dialog';
 import { IconPicker } from '../../components/IconPicker';
 import { TagInput } from '../../components/TagInput';
-import { Alert, Button, Field, Input, Select, Switch, Tabs, Textarea } from '../../components/ui';
+import { ExprInput, type ExprScope } from '../../components/ExprInput';
+import { Alert, Button, Field, Input, Select, Switch, Tabs, Textarea, type TabItem } from '../../components/ui';
 import { FIELD_TYPE_LABELS, MODELER_FIELD_TYPES, supportsDefault } from '../../lib/entity';
 import { IDENTIFIER_RE, pluralize, toIdentifier } from '../../lib/format';
 import { DesignOrJson, type JsonResult } from './DesignOrJson';
 import { LayoutDesigner } from './LayoutDesigner';
 import { WorkflowDesigner } from './WorkflowDesigner';
+import { AutomationsEditor } from './sections/AutomationsEditor';
+import { CompilerErrors, InvalidJson, JsonAdvanced, OriginBadge, PackageNotice, SectionShell, selfScope, type SectionCtx } from './sections/common';
+import { SchedulesEditor, WebhooksEditor } from './sections/IntegrationsEditor';
+import { LedgerEditor } from './sections/LedgerEditor';
+import { RulesEditor } from './sections/RulesEditor';
+import { SecurityEditor } from './sections/SecurityEditor';
+import { ReportsEditor, ViewsEditor } from './sections/ViewsReportsEditor';
 
 const RESULT_TYPE_LABELS: Record<FormulaResultType, string> = {
   decimal: 'Número decimal', integer: 'Número entero', text: 'Texto', boolean: 'Sí / No', date: 'Fecha',
@@ -48,11 +60,6 @@ const sortedKeys = (_k: string, v: unknown) => (v === null ? undefined : v && ty
   : v);
 export const canonical = (v: unknown) => JSON.stringify(v ?? null, sortedKeys);
 const pretty = (v: unknown) => JSON.stringify(v, withoutNulls, 2);
-
-function parseJsonError(text: string, kind: 'array' | 'object'): string | undefined {
-  const r = parseJson<unknown>(text, kind);
-  return r.ok ? undefined : r.error;
-}
 
 interface DraftField extends FieldDef {
   _key: string;
@@ -318,13 +325,25 @@ interface FieldRowProps {
   count: number;
   errors: Record<string, string>;
   entities: EntityDef[];
+  allEntities: EntityDef[];
   roleNames: string[] | null;
+  origin?: ElementOrigin;
+  scope: ExprScope;
   onChange: (patch: Partial<DraftField>) => void;
   onMove: (dir: -1 | 1) => void;
   onRemove: () => void;
 }
 
-function FieldRow({ f, index, count, errors, entities, roleNames, onChange, onMove, onRemove }: FieldRowProps) {
+/** Spec 026 (H2 CA3): el borrador cambió un campo guardado (lo que `buildOperations` mandaría como updateField o archivo). */
+function fieldChanged(f: DraftField): boolean {
+  const o = f._original;
+  if (!o) return false;
+  return f.label.trim() !== o.label || !!f.required !== !!o.required || !!f.showInList !== !!o.showInList || (f.editable !== false) !== (o.editable !== false)
+    || !!f.isArchived !== !!o.isArchived || !sameList(f.options, o.options) || !sameList(f.requiredForRoles, o.requiredForRoles)
+    || (f.defaultValue ?? '').trim() !== (o.defaultValue ?? '') || (f.formula ?? '').trim() !== (o.formula ?? '');
+}
+
+function FieldRow({ f, index, count, errors, entities, allEntities, roleNames, origin, scope, onChange, onMove, onRemove }: FieldRowProps) {
   const [expanded, setExpanded] = useState(f._isNew);
   const locked = !f._isNew;
   const computed = COMPUTED_TYPES.includes(f.type);
@@ -339,7 +358,7 @@ function FieldRow({ f, index, count, errors, entities, roleNames, onChange, onMo
         <Input
           inputSize="sm"
           aria-label="Etiqueta del campo"
-          placeholder="Etiqueta (p. ej. Nombre)"
+          placeholder="Etiqueta del campo"
           value={f.label}
           error={err('label')}
           disabled={f.isArchived}
@@ -370,9 +389,10 @@ function FieldRow({ f, index, count, errors, entities, roleNames, onChange, onMo
         >
           {(f.type === 'state' ? [...MODELER_FIELD_TYPES, 'state' as FieldType] : MODELER_FIELD_TYPES).map((t) => <option key={t} value={t}>{FIELD_TYPE_LABELS[t]}</option>)}
         </Select>
+        <div className="hide-sm field-row-origin">{f._isNew ? <span className="origin-chip origin-local">Nuevo</span> : <OriginBadge origin={origin} />}</div>
         <div className="field-row-tools">
           {!f.isArchived && (
-            <Button variant="ghost" size="sm" iconOnly icon={expanded ? ChevronUp : ChevronDown} aria-label={expanded ? 'Ocultar opciones' : 'Mostrar opciones'} aria-expanded={expanded} onClick={() => setExpanded((x) => !x)} />
+            <Button variant="ghost" size="sm" iconOnly icon={expanded ? ChevronUp : ChevronDown} aria-label={expanded ? `Ocultar opciones de ${f.label || 'campo'}` : `Mostrar opciones de ${f.label || 'campo'}`} aria-expanded={expanded} onClick={() => setExpanded((x) => !x)} />
           )}
           {f._isNew ? (
             <Button variant="ghost" size="sm" iconOnly icon={Trash2} aria-label="Quitar campo" onClick={onRemove} />
@@ -388,8 +408,10 @@ function FieldRow({ f, index, count, errors, entities, roleNames, onChange, onMo
           )}
         </div>
       </div>
+      {fieldChanged(f) && origin?.package && <div className="field-row-notice"><PackageNotice origin={origin} /></div>}
       {expanded && !f.isArchived && (
         <div className="field-row-body">
+          {!f._isNew && <div className="span-all field-row-origin-sm"><OriginBadge origin={origin} /></div>}
           {!computed && <Switch checked={!!f.required} onChange={(v) => onChange({ required: v })} label="Obligatorio" />}
           {!computed && f.type !== 'parent' && (
             <Switch checked={f.editable !== false} onChange={(v) => onChange({ editable: v })} label="Editable por el usuario" />
@@ -400,23 +422,23 @@ function FieldRow({ f, index, count, errors, entities, roleNames, onChange, onMo
           )}
           {f.type === 'autonumber' && (
             <>
-              <Input inputSize="sm" label="Prefijo" className="mono" placeholder="OC-" maxLength={10} disabled={locked} value={f.prefix ?? ''} onChange={(e) => onChange({ prefix: e.target.value })} />
+              <Input inputSize="sm" label="Prefijo" className="mono" maxLength={10} disabled={locked} value={f.prefix ?? ''} onChange={(e) => onChange({ prefix: e.target.value })} />
               <Input inputSize="sm" type="number" min={1} max={12} label="Dígitos" disabled={locked} value={f.padding ?? 6} onChange={(e) => onChange({ padding: Number(e.target.value) || undefined })} hint={`Ejemplo: ${(f.prefix ?? '')}${'1'.padStart(f.padding ?? 6, '0')}`} />
             </>
           )}
           {f.type === 'formula' && (
             <>
-              <Textarea
-                wrapClassName="span-all"
-                className="mono"
+              <ExprInput
+                className="span-all"
                 label="Fórmula"
-                rows={2}
-                maxLength={1000}
-                placeholder="Cantidad * PrecioUnitario"
-                hint="Usa nombres de campos y funciones como ROUND, IF, SUM(Partidas.Importe)."
-                error={err('formula')}
+                multiline
+                required
                 value={f.formula ?? ''}
-                onChange={(e) => onChange({ formula: e.target.value })}
+                error={err('formula')}
+                scope={scope}
+                entities={allEntities}
+                hint="Usa nombres de campos y funciones como ROUND, IF, SUM(Partidas.Importe)."
+                onChange={(v) => onChange({ formula: v })}
               />
               <Select selectSize="sm" label="Tipo de resultado" disabled={locked} value={f.resultType ?? 'decimal'} onChange={(e) => onChange({ resultType: e.target.value as FormulaResultType })}>
                 {(Object.keys(RESULT_TYPE_LABELS) as FormulaResultType[]).map((t) => <option key={t} value={t}>{RESULT_TYPE_LABELS[t]}</option>)}
@@ -437,16 +459,14 @@ function FieldRow({ f, index, count, errors, entities, roleNames, onChange, onMo
             </Select>
           )}
           {supportsDefault(f.type) && (
-            <Input
-              inputSize="sm"
-              wrapClassName="span-all"
-              className="mono"
+            <ExprInput
+              className="span-all"
               label="Valor por defecto"
-              placeholder="Sin valor por defecto"
-              maxLength={1000}
-              hint="Expresión, p. ej. TODAY() o Producto.CostoUltimo"
               value={f.defaultValue ?? ''}
-              onChange={(e) => onChange({ defaultValue: e.target.value })}
+              scope={scope}
+              entities={allEntities}
+              hint="Expresión, p. ej. TODAY() o Producto.CostoUltimo. Vacío: sin valor por defecto."
+              onChange={(v) => onChange({ defaultValue: v })}
             />
           )}
           {f.type === 'text' && (
@@ -463,6 +483,13 @@ function FieldRow({ f, index, count, errors, entities, roleNames, onChange, onMo
               <option value="">Selecciona…</option>
               {entities.filter((x) => !x.isArchived).map((x) => <option key={x.name} value={x.name}>{x.labelPlural}</option>)}
             </Select>
+          )}
+          {/* Spec 026 (fuera del editor visual): el filtro de búsqueda de la 005 se ve, pero se cambia por plan o paquete. */}
+          {f.lookupFilter && (
+            <p className="field-hint span-all">
+              El buscador solo ofrece registros con <span className="mono">{f.lookupFilter.field} = {f.lookupFilter.source}</span>.
+              Este filtro se cambia con un paquete o con el asistente; aquí no tiene control.
+            </p>
           )}
           {f.type === 'choice' && (
             <Field label="Opciones" error={err('options')} className="span-all">
@@ -482,8 +509,73 @@ function FieldRow({ f, index, count, errors, entities, roleNames, onChange, onMo
 
 /* ------------------------------------------------------------------------- */
 
-export type EditorTab = 'catalogo' | 'formulario' | 'proceso';
-export const editorTab = (v: string | null): EditorTab => (v === 'formulario' || v === 'proceso' ? v : 'catalogo');
+export type EditorTab = 'catalogo' | 'formulario' | 'proceso' | 'reglas' | 'automatizaciones' | 'seguridad' | 'vistas' | 'integraciones' | 'contabilidad';
+const TABS: EditorTab[] = ['catalogo', 'formulario', 'proceso', 'reglas', 'automatizaciones', 'seguridad', 'vistas', 'integraciones', 'contabilidad'];
+export const editorTab = (v: string | null): EditorTab => (TABS.includes(v as EditorTab) ? (v as EditorTab) : 'catalogo');
+/** Spec 019: el diseñador del formulario y el diagrama del proceso usan el ancho completo. */
+export const wideTab = (t: EditorTab) => t === 'formulario' || t === 'proceso';
+
+/** Sección de cada error de validación del cliente (clave de `validate`). */
+const JSON_TAB: Record<string, EditorTab> = {
+  layoutJson: 'formulario', workflowJson: 'proceso', rulesJson: 'reglas', automationsJson: 'automatizaciones', securityJson: 'seguridad',
+  viewsJson: 'vistas', reportsJson: 'vistas', webhooksJson: 'integraciones', schedulesJson: 'integraciones', ledgerJson: 'contabilidad',
+};
+const tabOfKey = (k: string): EditorTab => JSON_TAB[k] ?? 'catalogo';
+
+type Section = 'catalog' | 'layout' | 'workflow' | 'rules' | 'automations' | 'security' | 'views' | 'reports' | 'webhooks' | 'schedules' | 'ledger';
+const SECTION_TAB: Record<Section, EditorTab> = {
+  catalog: 'catalogo', layout: 'formulario', workflow: 'proceso', rules: 'reglas', automations: 'automatizaciones', security: 'seguridad',
+  views: 'vistas', reports: 'vistas', webhooks: 'integraciones', schedules: 'integraciones', ledger: 'contabilidad',
+};
+const OP_SECTION: Partial<Record<Operation['op'], Section>> = {
+  setRules: 'rules', setAutomations: 'automations', setSecurity: 'security', setViews: 'views', setReports: 'reports',
+  setWebhooks: 'webhooks', setSchedules: 'schedules', setLedger: 'ledger', setLayout: 'layout', setWorkflow: 'workflow',
+};
+
+/**
+ * Spec 026 (H4 CA11): a qué sección pertenece un error del compilador. Primero por el texto (la pasada final del compilador
+ * atribuye sus errores a la última operación del catálogo, no a la que los causó) y, si no, por la operación.
+ */
+export function sectionOfError(message: string, op?: Operation['op']): Section {
+  const m = message.toLowerCase();
+  if (m.includes('› tarea ') || m.includes(' tarea \'')) return 'schedules';
+  if (m.includes('webhook')) return 'webhooks';
+  if (m.includes('› seguridad') || m.includes('seguridad del catálogo')) return 'security';
+  if (m.includes('› libro')) return 'ledger';
+  if (m.includes('› layout')) return 'layout';
+  if (m.includes('reporte \'')) return 'reports';
+  if (m.includes('vista \'')) return 'views';
+  if (/\bregla\b/.test(m)) return 'rules';
+  if (m.includes('automatizaci')) return 'automations';
+  if (op && OP_SECTION[op]) return OP_SECTION[op]!;
+  if (m.includes('transición') || m.includes('proceso') || m.includes('estado')) return 'workflow';
+  return 'catalog';
+}
+
+interface JsonBackedProps<T> {
+  kind: 'array' | 'object';
+  text: string;
+  onText: (t: string) => void;
+  title: string;
+  description: ReactNode;
+  jsonLabel: string;
+  hint: string;
+  errors: string[];
+  clientError?: string;
+  children: (value: T | null, write: (v: T | null) => void) => ReactNode;
+}
+
+/** Spec 026 (H4 CA10): editor visual y JSON avanzado sobre el mismo texto del borrador (patrón de `DesignOrJson`). */
+function JsonBacked<T>({ kind, text, onText, title, description, jsonLabel, hint, errors, clientError, children }: JsonBackedProps<T>) {
+  const parsed = parseJson<T>(text, kind);
+  const write = (v: T | null) => onText(v === null || (Array.isArray(v) && v.length === 0) ? '' : pretty(v));
+  return (
+    <SectionShell title={title} description={description} errors={errors}
+      json={<JsonAdvanced label={jsonLabel} text={text} onText={onText} hint={hint} error={clientError ?? (parsed.ok ? undefined : parsed.error)} />}>
+      {parsed.ok ? children(parsed.value, write) : <InvalidJson error={parsed.error} />}
+    </SectionShell>
+  );
+}
 
 export interface EntityEditorProps {
   original?: EntityDef;
@@ -506,7 +598,8 @@ export function EntityEditor({ original, entities, onCancel, onReview }: EntityE
   const [pluralTouched, setPluralTouched] = useState(!isNew);
   const [showErrors, setShowErrors] = useState(false);
   const [roleNames, setRoleNames] = useState<string[] | null>(null);
-  // Spec 019: pestañas del editor en la URL; el borrador es uno solo para las tres.
+  const [provenance, setProvenance] = useState<EntityOrigin | null>(null);
+  // Spec 019: pestañas del editor en la URL; el borrador es uno solo para todas.
   const tab = editorTab(params.get('tab'));
   const setTab = (t: EditorTab) => {
     const p = new URLSearchParams(params);
@@ -521,6 +614,14 @@ export function EntityEditor({ original, entities, onCancel, onReview }: EntityE
   useEffect(() => {
     adminApi.roles().then((r) => setRoleNames(r.map((x) => x.name))).catch((e) => { if (e instanceof ApiError) setRoleNames(null); });
   }, []);
+
+  // Spec 026 (H2): origen de cada elemento del catálogo guardado.
+  useEffect(() => {
+    if (!original) return;
+    const ctl = new AbortController();
+    modelApi.provenance(ctl.signal).then((p) => setProvenance(p.entities.find((e) => e.entity === original.name) ?? null)).catch(() => setProvenance(null));
+    return () => ctl.abort();
+  }, [original]);
 
   const errors = useMemo(() => validate(d, isNew, entities.map((e) => e.name)), [d, isNew, entities]);
   const visibleErrors = showErrors ? errors : {};
@@ -537,6 +638,33 @@ export function EntityEditor({ original, entities, onCancel, onReview }: EntityE
     return () => window.removeEventListener('beforeunload', warn);
   }, [dirty]);
   const textFields = d.fields.filter((f) => !f.isArchived && (f.type === 'text') && IDENTIFIER_RE.test(f.name));
+
+  // Spec 026 (H4 CA11): vista previa en vivo con el mismo compilador; sus errores se ven junto a cada sección.
+  const baseVersions = original?.version ? { [original.name]: original.version } : undefined;
+  const clientOk = Object.keys(errors).length === 0;
+  const opsKey = JSON.stringify(ops);
+  const [live, setLive] = useState<{ state: 'idle' | 'checking' | 'done' | 'failed'; errors: PlanPreview['errors'] }>({ state: 'idle', errors: [] });
+  useEffect(() => {
+    if (!ops.length || !clientOk) { setLive({ state: 'idle', errors: [] }); return; }
+    const ctl = new AbortController();
+    const t = window.setTimeout(() => {
+      setLive((s) => ({ ...s, state: 'checking' }));
+      modelApi.preview({ description: 'Vista previa en vivo del modelador', operations: ops, baseVersions }, ctl.signal)
+        .then((p) => setLive({ state: 'done', errors: p.errors }))
+        .catch(() => { if (!ctl.signal.aborted) setLive({ state: 'failed', errors: [] }); });
+    }, 800);
+    return () => { window.clearTimeout(t); ctl.abort(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [opsKey, clientOk]);
+  const liveBySection = useMemo(() => {
+    const m: Partial<Record<Section, string[]>> = {};
+    for (const e of live.errors) {
+      const s = sectionOfError(e.message, ops[e.operation]?.op);
+      (m[s] ??= []).push(e.message);
+    }
+    return m;
+  }, [live.errors, ops]);
+  const sectionErrors = (s: Section) => liveBySection[s] ?? [];
 
   function patchField(key: string, patch: Partial<DraftField>) {
     setD((s) => ({ ...s, fields: s.fields.map((f) => (f._key === key ? { ...f, ...patch } : f)) }));
@@ -556,13 +684,14 @@ export function EntityEditor({ original, entities, onCancel, onReview }: EntityE
     const keys = Object.keys(errors);
     if (keys.length) {
       // El error puede estar en otra pestaña: se abre la primera que tenga uno.
-      const target: EditorTab = keys.some((k) => k !== 'layoutJson' && k !== 'workflowJson') ? 'catalogo' : keys.includes('layoutJson') ? 'formulario' : 'proceso';
+      const tabs = keys.map(tabOfKey);
+      const target = TABS.find((t) => tabs.includes(t))!;
       if (target !== tab) setTab(target);
       return;
     }
     const description = isNew ? `Crear catálogo ${d.labelPlural.trim()}` : `Modificar catálogo ${original!.labelPlural}`;
     // Spec 021 (H2 CA1): la versión con la que se abrió; si otra persona aplicó un cambio después, la vista previa lo dice.
-    onReview({ description, operations: ops, baseVersions: original?.version ? { [original.name]: original.version } : undefined });
+    onReview({ description, operations: ops, baseVersions });
   }
 
   const parsedLayout = parseJson<Layout>(d.layoutJson, 'object');
@@ -571,26 +700,64 @@ export function EntityEditor({ original, entities, onCancel, onReview }: EntityE
   const designFields: FieldDef[] = d.fields.filter((f) => !f.isArchived && IDENTIFIER_RE.test(f.name));
   const isChild = d.fields.some((f) => !f.isArchived && f.type === 'parent');
   const isDocument = d.fields.some((f) => !f.isArchived && f.type === 'lines');
-  const tabErrors = (t: EditorTab) => showErrors && Object.keys(errors).some((k) => (t === 'formulario' ? k === 'layoutJson' : t === 'proceso' ? k === 'workflowJson' : k !== 'layoutJson' && k !== 'workflowJson'));
+  const tabHasErrors = (t: EditorTab) =>
+    (showErrors && Object.keys(errors).some((k) => tabOfKey(k) === t))
+    || (Object.keys(liveBySection) as Section[]).some((s) => SECTION_TAB[s] === t && (liveBySection[s]?.length ?? 0) > 0);
   const childNotice = (
     <Alert tone="info" title="Es un catálogo de partidas">
       Sus registros se capturan como tabla dentro de su documento: el formulario y el proceso se definen en el documento.
     </Alert>
   );
 
+  const workflow = parsedWorkflow.ok ? parsedWorkflow.value : original?.workflow ?? null;
+  const originMap = useMemo(() => new Map((provenance?.elements ?? []).map((e) => [`${e.kind}:${e.name.toLowerCase()}`, e])), [provenance]);
+  const savedList = (kind: OriginKind): { name: string }[] | null | undefined => ({
+    rule: original?.rules, automation: original?.automations, view: original?.views, report: original?.reports, webhook: original?.webhooks, schedule: original?.schedules,
+  } as Partial<Record<OriginKind, { name: string }[] | null | undefined>>)[kind];
+  const ctx: SectionCtx = {
+    // Un catálogo nuevo sin identificador todavía se valida como «Borrador» (no existe: se arma con los campos del borrador).
+    entity: IDENTIFIER_RE.test(d.name) ? d.name : 'Borrador',
+    fields: designFields,
+    entities,
+    roleNames,
+    states: (workflow?.states ?? []).map((s) => ({ name: s.name, label: s.label || s.name })),
+    transitions: (workflow?.transitions ?? []).map((t) => ({ name: t.name, label: t.label || t.name })),
+    origin: (kind, name) => originMap.get(`${kind}:${(name ?? '').toLowerCase()}`),
+    saved: (kind, name) => {
+      if (kind === 'security') return original?.security ?? undefined;
+      if (kind === 'ledger') return original?.ledger ?? undefined;
+      return savedList(kind)?.find((x) => x.name.toLowerCase() === (name ?? '').toLowerCase());
+    },
+    errors: [],
+  };
+  const sectionCtx = (s: Section): SectionCtx => ({ ...ctx, errors: sectionErrors(s) });
+  const scope = selfScope(ctx);
+  const entityOrigin = ctx.origin('entity', '');
+  const tabItems: TabItem<EditorTab>[] = [
+    { id: 'catalogo', label: 'Catálogo', icon: Table2 },
+    { id: 'formulario', label: 'Formulario', icon: LayoutTemplate },
+    { id: 'proceso', label: 'Proceso', icon: WorkflowIcon },
+    { id: 'reglas', label: 'Reglas', icon: ShieldCheck },
+    { id: 'automatizaciones', label: 'Automatizaciones', icon: Zap },
+    { id: 'seguridad', label: 'Seguridad', icon: KeyRound },
+    { id: 'vistas', label: 'Vistas y reportes', icon: ListFilter },
+    { id: 'integraciones', label: 'Integraciones', icon: Webhook },
+    { id: 'contabilidad', label: 'Contabilidad', icon: BookOpen },
+  ].map((t) => ({ ...t, label: tabHasErrors(t.id as EditorTab) ? `${t.label} (con errores)` : t.label })) as TabItem<EditorTab>[];
+
   return (
     <div className="stack" style={{ gap: 'var(--space-6)' }}>
+      {provenance && (
+        <p className="origin-line subtle">
+          <Package size={14} aria-hidden />
+          {provenance.installedBy ? <>Instalado por <strong>{provenance.installedBy.name} {provenance.installedBy.version}</strong></> : <>Creado en este entorno</>}
+          {provenance.packages.filter((p) => p.id !== provenance.installedBy?.id).length > 0 && (
+            <> · También lo extiende: {provenance.packages.filter((p) => p.id !== provenance.installedBy?.id).map((p) => `${p.name} ${p.version}`).join(', ')}</>
+          )}
+        </p>
+      )}
       <div className="editor-tabs">
-      <Tabs<EditorTab>
-        label="Partes del catálogo"
-        value={tab}
-        onChange={setTab}
-        items={[
-          { id: 'catalogo', label: tabErrors('catalogo') ? 'Catálogo (con errores)' : 'Catálogo', icon: Table2 },
-          { id: 'formulario', label: tabErrors('formulario') ? 'Formulario (con errores)' : 'Formulario', icon: LayoutTemplate },
-          { id: 'proceso', label: tabErrors('proceso') ? 'Proceso (con errores)' : 'Proceso', icon: WorkflowIcon },
-        ]}
-      />
+        <Tabs<EditorTab> label="Partes del catálogo" value={tab} onChange={setTab} items={tabItems} />
       </div>
       {tab === 'formulario' && (
         <div role="tabpanel" aria-label="Formulario">
@@ -601,12 +768,15 @@ export function EntityEditor({ original, entities, onCancel, onReview }: EntityE
               text={d.layoutJson}
               parsed={parsedLayout}
               onText={(layoutJson) => setD((s) => ({ ...s, layoutJson }))}
-              placeholder={'{\n  "sections": [\n    { "name": "General", "label": "Datos generales", "tab": "General", "fields": ["Nombre", "Fecha"] },\n    { "name": "Pago", "label": "Pago", "tab": "General", "fields": ["Moneda", { "field": "TipoCambio", "visibleWhen": "Moneda.Clave <> \'MXN\'" }] }\n  ]\n}'}
+              placeholder=""
               hint="Secciones con name, label, fields y opcionalmente tab, columns (1 o 2), description y visibleWhen (también por campo). Los campos no mencionados van en «Otros datos». Vacío: sin layout."
               error={visibleErrors.layoutJson}
               designer={(layout) => (
-                <LayoutDesigner layout={layout} isDocument={isDocument} fields={designFields}
-                  onChange={(next) => setD((s) => ({ ...s, layoutJson: next ? pretty(next) : '' }))} />
+                <>
+                  <CompilerErrors errors={sectionErrors('layout')} />
+                  <LayoutDesigner layout={layout} isDocument={isDocument} fields={designFields}
+                    onChange={(next) => setD((s) => ({ ...s, layoutJson: next ? pretty(next) : '' }))} />
+                </>
               )}
             />
           )}
@@ -621,27 +791,105 @@ export function EntityEditor({ original, entities, onCancel, onReview }: EntityE
               text={d.workflowJson}
               parsed={parsedWorkflow}
               onText={(workflowJson) => setD((s) => ({ ...s, workflowJson }))}
-              placeholder={'{\n  "initial": "Borrador",\n  "states": [{ "name": "Borrador", "label": "Borrador", "editable": true }],\n  "transitions": []\n}'}
+              placeholder=""
               hint="Estados y transiciones del documento. Déjalo vacío si el catálogo no tiene proceso (un proceso guardado no se quita)."
               error={visibleErrors.workflowJson}
-              designer={(workflow) => (
-                <WorkflowDesigner workflow={workflow} fields={designFields} roleNames={roleNames}
-                  savedStates={new Set(original?.workflow?.states.map((x) => x.name) ?? [])}
-                  savedTransitions={new Set(original?.workflow?.transitions.map((x) => x.name) ?? [])}
-                  onChange={(next) => setD((s) => ({ ...s, workflowJson: pretty(next) }))} />
+              designer={(wf) => (
+                <>
+                  <CompilerErrors errors={sectionErrors('workflow')} />
+                  <WorkflowDesigner workflow={wf} fields={designFields} roleNames={roleNames}
+                    savedStates={new Set(original?.workflow?.states.map((x) => x.name) ?? [])}
+                    savedTransitions={new Set(original?.workflow?.transitions.map((x) => x.name) ?? [])}
+                    onChange={(next) => setD((s) => ({ ...s, workflowJson: pretty(next) }))} />
+                </>
               )}
             />
           )}
         </div>
       )}
+      {tab === 'reglas' && (
+        <div role="tabpanel" aria-label="Reglas" className="stack">
+          <JsonBacked<Rule[]> kind="array" text={d.rulesJson} onText={(rulesJson) => setD((s) => ({ ...s, rulesJson }))}
+            title="Reglas" description="Validaciones de negocio: impiden guardar (error) o avisan sin impedirlo (aviso)."
+            jsonLabel="Reglas (JSON)" errors={sectionErrors('rules')} clientError={visibleErrors.rulesJson}
+            hint="Lista de reglas: name, assert, message y opcionalmente when, field y severity («warning»). Se validan en la vista previa.">
+            {(v, write) => <RulesEditor rules={v ?? []} onChange={write} ctx={sectionCtx('rules')} />}
+          </JsonBacked>
+        </div>
+      )}
+      {tab === 'automatizaciones' && (
+        <div role="tabpanel" aria-label="Automatizaciones" className="stack">
+          <JsonBacked<Automation[]> kind="array" text={d.automationsJson} onText={(automationsJson) => setD((s) => ({ ...s, automationsJson }))}
+            title="Automatizaciones" description="Cuando pasa algo en este catálogo, hacer algo en este u otros registros, en la misma transacción o después."
+            jsonLabel="Automatizaciones (JSON)" errors={sectionErrors('automations')} clientError={visibleErrors.automationsJson}
+            hint="on (create, update, enterState, transition), when, mode (sync o async) y acciones update, transition, create (createLines, capture), rollup o cost.">
+            {(v, write) => <AutomationsEditor automations={v ?? []} onChange={write} ctx={sectionCtx('automations')} />}
+          </JsonBacked>
+        </div>
+      )}
+      {tab === 'seguridad' && (
+        <div role="tabpanel" aria-label="Seguridad" className="stack">
+          <JsonBacked<SecurityPolicy> kind="object" text={d.securityJson} onText={(securityJson) => setD((s) => ({ ...s, securityJson }))}
+            title="Seguridad" description="Quién ve o modifica qué registros y campos. Se aplica en el servidor, también en listados, reportes y API."
+            jsonLabel="Seguridad (JSON)" errors={sectionErrors('security')} clientError={visibleErrors.securityJson}
+            hint="fields (field, read, edit, editableIn), owner, teamOwners, systemManaged y records (roles, scope all/unitTree/unit/own, where, access read/write).">
+            {(v, write) => <SecurityEditor policy={v} onChange={write} ctx={sectionCtx('security')} />}
+          </JsonBacked>
+        </div>
+      )}
+      {tab === 'vistas' && (
+        <div role="tabpanel" aria-label="Vistas y reportes" className="stack" style={{ gap: 'var(--space-6)' }}>
+          <JsonBacked<ViewDef[]> kind="array" text={d.viewsJson} onText={(viewsJson) => setD((s) => ({ ...s, viewsJson }))}
+            title="Vistas compartidas" description="Columnas, filtros y orden guardados del listado, por rol."
+            jsonLabel="Vistas compartidas (JSON)" errors={sectionErrors('views')} clientError={visibleErrors.viewsJson}
+            hint="name, label y opcionalmente roles, columns, filters (field, op, value; $me y $today), sort, dir, state y default.">
+            {(v, write) => <ViewsEditor views={v ?? []} onChange={write} ctx={sectionCtx('views')} />}
+          </JsonBacked>
+          <JsonBacked<ReportDef[]> kind="array" text={d.reportsJson} onText={(reportsJson) => setD((s) => ({ ...s, reportsJson }))}
+            title="Reportes" description="Agrupaciones y totales que se consultan en Análisis y se exportan."
+            jsonLabel="Reportes (JSON)" errors={sectionErrors('reports')} clientError={visibleErrors.reportsJson}
+            hint="groupBy (hasta 2; period en fechas), measures (count, sum, avg, min, max), filter, orderBy, dir, limit, chart y roles.">
+            {(v, write) => <ReportsEditor reports={v ?? []} onChange={write} ctx={sectionCtx('reports')} />}
+          </JsonBacked>
+        </div>
+      )}
+      {tab === 'integraciones' && (
+        <div role="tabpanel" aria-label="Integraciones" className="stack" style={{ gap: 'var(--space-6)' }}>
+          <JsonBacked<WebhookDef[]> kind="array" text={d.webhooksJson} onText={(webhooksJson) => setD((s) => ({ ...s, webhooksJson }))}
+            title="Webhooks" description="Avisos a otros sistemas. El destino y el secreto se configuran en Configuración › Integraciones."
+            jsonLabel="Webhooks (JSON)" errors={sectionErrors('webhooks')} clientError={visibleErrors.webhooksJson}
+            hint="events (on: create, update, enterState con state, transition con transition), role (rol de servicio), fields y when.">
+            {(v, write) => <WebhooksEditor webhooks={v ?? []} onChange={write} ctx={sectionCtx('webhooks')} />}
+          </JsonBacked>
+          <JsonBacked<ScheduleDef[]> kind="array" text={d.schedulesJson} onText={(schedulesJson) => setD((s) => ({ ...s, schedulesJson }))}
+            title="Tareas programadas" description="Revisan registros con un calendario y les aplican acciones. Llegan en pausa: se activan en Configuración › Automatizaciones."
+            jsonLabel="Tareas programadas (JSON)" errors={sectionErrors('schedules')} clientError={visibleErrors.schedulesJson}
+            hint="every (minutes con interval, hour con minute, day, week con weekdays, month con day) y at; where; role; acciones; batchSize (máx. 1000).">
+            {(v, write) => <SchedulesEditor schedules={v ?? []} onChange={write} ctx={sectionCtx('schedules')} />}
+          </JsonBacked>
+        </div>
+      )}
+      {tab === 'contabilidad' && (
+        <div role="tabpanel" aria-label="Contabilidad" className="stack">
+          <JsonBacked<LedgerDef> kind="object" text={d.ledgerJson} onText={(ledgerJson) => setD((s) => ({ ...s, ledgerJson }))}
+            title="Libro de partida doble" description="Cargos y abonos de las partidas cuadran en los estados contabilizados, y la fecha cae en un periodo abierto."
+            jsonLabel="Libro de partida doble (JSON)" errors={sectionErrors('ledger')} clientError={visibleErrors.ledgerJson}
+            hint="lines, debit, credit, date, states y period (entity, start, end, open). Vacío: no es un libro.">
+            {(v, write) => <LedgerEditor ledger={v} onChange={write} ctx={sectionCtx('ledger')} />}
+          </JsonBacked>
+        </div>
+      )}
       {tab === 'catalogo' && <div role="tabpanel" aria-label="Catálogo" className="stack" style={{ gap: 'var(--space-6)' }}>
+      <CompilerErrors errors={sectionErrors('catalog')} />
       <section className="card card-pad stack">
-        <h2 style={{ fontSize: 'var(--text-md)', fontWeight: 600 }}>General</h2>
+        <div className="row" style={{ flexWrap: 'wrap', gap: 'var(--space-2)' }}>
+          <h2 style={{ fontSize: 'var(--text-md)', fontWeight: 600 }} className="grow">General</h2>
+          <OriginBadge origin={entityOrigin} />
+        </div>
         <div className="form-grid">
           <Input
             label="Nombre (singular)"
             required
-            placeholder="Empaque"
             value={d.label}
             error={visibleErrors.label}
             onChange={(e) => {
@@ -654,12 +902,11 @@ export function EntityEditor({ original, entities, onCancel, onReview }: EntityE
               }));
             }}
           />
-          <Input label="Nombre (plural)" required placeholder="Empaques" value={d.labelPlural} error={visibleErrors.labelPlural} onChange={(e) => { setPluralTouched(true); setD((s) => ({ ...s, labelPlural: e.target.value })); }} />
+          <Input label="Nombre (plural)" required value={d.labelPlural} error={visibleErrors.labelPlural} onChange={(e) => { setPluralTouched(true); setD((s) => ({ ...s, labelPlural: e.target.value })); }} />
           <Input
             label="Identificador"
             required
             className="mono"
-            placeholder="Empaque"
             value={d.name}
             disabled={!isNew}
             error={visibleErrors.name}
@@ -667,13 +914,30 @@ export function EntityEditor({ original, entities, onCancel, onReview }: EntityE
             onChange={(e) => { setNameTouched(true); setD((s) => ({ ...s, name: e.target.value.replace(/[^A-Za-z0-9_]/g, '') })); }}
           />
           <IconPicker value={d.icon} onChange={(icon) => setD((s) => ({ ...s, icon: icon ?? 'package' }))} />
-          <Textarea wrapClassName="span-2" label="Descripción" placeholder="Para qué sirve este catálogo" rows={2} style={{ minHeight: 64 }} value={d.description} onChange={(e) => setD((s) => ({ ...s, description: e.target.value }))} maxLength={500} />
+          <Textarea wrapClassName="span-2" label="Descripción" hint="Para qué sirve este catálogo." rows={2} style={{ minHeight: 64 }} value={d.description} onChange={(e) => setD((s) => ({ ...s, description: e.target.value }))} maxLength={500} />
           <Input label="Módulo" list="modeler-apps" autoComplete="off" hint="Módulo del menú, p. ej. Compras. Vacío: General." maxLength={60} value={d.group} onChange={(e) => setD((s) => ({ ...s, group: e.target.value }))} />
           <datalist id="modeler-apps">{appNames.map((n) => <option key={n} value={n} />)}</datalist>
           <Select label="Campo para mostrar en referencias" hint="Se usa cuando otro catálogo apunta a este" value={d.displayField} onChange={(e) => setD((s) => ({ ...s, displayField: e.target.value }))}>
             <option value="">Automático</option>
             {textFields.map((f) => <option key={f._key} value={f.name}>{f.label || f.name}</option>)}
           </Select>
+          {/* Spec 010: catálogo compartido o por empresa. Pasar a por empresa no se puede deshacer. */}
+          <Field
+            label="Empresas"
+            className="span-2"
+            hint={d.fields.some((f) => f.type === 'parent')
+              ? 'Las partidas siguen la empresa de su documento.'
+              : original?.perCompany
+                ? 'Cada empresa ve y captura solo sus registros. Un catálogo por empresa no vuelve a ser compartido.'
+                : 'Compartido: todas las empresas ven los mismos registros. Por empresa: cada una ve y captura solo los suyos (los existentes quedan en la empresa predeterminada). No se puede deshacer.'}
+          >
+            <Switch
+              checked={d.perCompany}
+              disabled={!!original?.perCompany || d.fields.some((f) => f.type === 'parent')}
+              onChange={(v) => setD((s) => ({ ...s, perCompany: v }))}
+              label="Un registro por empresa"
+            />
+          </Field>
         </div>
       </section>
 
@@ -692,7 +956,10 @@ export function EntityEditor({ original, entities, onCancel, onReview }: EntityE
               count={d.fields.length}
               errors={visibleErrors}
               entities={entities.filter((x) => x.name !== original?.name)}
+              allEntities={entities}
               roleNames={roleNames}
+              origin={f._original ? ctx.origin('field', f._original.name) : undefined}
+              scope={scope}
               onChange={(p) => patchField(f._key, p)}
               onMove={(dir) => move(i, dir)}
               onRemove={() => setD((s) => ({ ...s, fields: s.fields.filter((x) => x._key !== f._key) }))}
@@ -700,123 +967,16 @@ export function EntityEditor({ original, entities, onCancel, onReview }: EntityE
           ))}
         </div>
       </section>
-
-      <details className="card card-pad advanced-section" open={!!(original?.perCompany || original?.rules?.length || original?.automations?.length || original?.security || original?.views?.length || original?.reports?.length || original?.webhooks?.length || original?.schedules?.length || original?.ledger) || undefined}>
-        <summary className="advanced-summary">
-          <span className="section-title">Reglas, automatizaciones, seguridad, vistas e integraciones</span>
-          <span className="subtle">Avanzado · validaciones de negocio, efectos en otros registros, quién ve o edita qué, vistas, reportes, webhooks y tareas</span>
-        </summary>
-        <div className="stack" style={{ marginTop: 'var(--space-4)' }}>
-          {/* Spec 010: catálogo compartido o por empresa. Pasar a por empresa no se puede deshacer. */}
-          <Field
-            label="Empresas"
-            hint={d.fields.some((f) => f.type === 'parent')
-              ? 'Las partidas siguen la empresa de su documento.'
-              : original?.perCompany
-                ? 'Cada empresa ve y captura solo sus registros. Un catálogo por empresa no vuelve a ser compartido.'
-                : 'Compartido: todas las empresas ven los mismos registros. Por empresa: cada una ve y captura solo los suyos (los existentes quedan en la empresa predeterminada). No se puede deshacer.'}
-          >
-            <Switch
-              checked={d.perCompany}
-              disabled={!!original?.perCompany || d.fields.some((f) => f.type === 'parent')}
-              onChange={(v) => setD((s) => ({ ...s, perCompany: v }))}
-              label="Un registro por empresa"
-            />
-          </Field>
-          <Textarea
-            className="mono json-editor"
-            label="Reglas (JSON)"
-            rows={8}
-            spellCheck={false}
-            placeholder={'[\n  { "name": "FechaValida", "assert": "FechaEntrega >= Fecha", "message": "La entrega no puede ser antes de la fecha", "field": "FechaEntrega" }\n]'}
-            hint="Lista de reglas: name, assert, message y opcionalmente when, field y severity («warning»: avisa sin impedir guardar). Se validan en la vista previa."
-            error={visibleErrors.rulesJson ?? (d.rulesJson ? parseJsonError(d.rulesJson, 'array') : undefined)}
-            value={d.rulesJson}
-            onChange={(e) => setD((s) => ({ ...s, rulesJson: e.target.value }))}
-          />
-          <Textarea
-            className="mono json-editor"
-            label="Automatizaciones (JSON)"
-            rows={12}
-            spellCheck={false}
-            placeholder={'[\n  { "name": "AlConfirmar", "label": "Al confirmar", "on": "enterState", "state": "Confirmada",\n    "actions": [{ "type": "transition", "target": "OrdenCompra", "transition": "recibir" }] }\n]'}
-            hint="Efectos en otros registros: on (create, update, enterState, transition) y acciones update, transition, create (con createLines y capture), rollup o cost (políticas: uncostedEntry average/fallback/require, methodChange merge/keep). Corren en la misma transacción, o después con mode: async; se validan en la vista previa."
-            error={visibleErrors.automationsJson ?? (d.automationsJson ? parseJsonError(d.automationsJson, 'array') : undefined)}
-            value={d.automationsJson}
-            onChange={(e) => setD((s) => ({ ...s, automationsJson: e.target.value }))}
-          />
-          <Textarea
-            className="mono json-editor"
-            label="Seguridad (JSON)"
-            rows={12}
-            spellCheck={false}
-            placeholder={'{\n  "fields": [{ "field": "Costo", "read": ["Gerente"] }, { "field": "Motivo", "editableIn": [] }],\n  "owner": "Solicitante",\n  "records": [{ "roles": ["Solicitante"], "scope": "own" }, { "roles": ["Gerente"], "scope": "all" }]\n}'}
-            hint="Por campo: read y edit (roles que lo ven o capturan) y editableIn (estados en que se captura). Por registro: owner y records con roles, scope (all, unit, own), where y access (read o write). systemManaged: solo el sistema lo escribe. Se aplica en el servidor."
-            error={visibleErrors.securityJson ?? (d.securityJson ? parseJsonError(d.securityJson, 'object') : undefined)}
-            value={d.securityJson}
-            onChange={(e) => setD((s) => ({ ...s, securityJson: e.target.value }))}
-          />
-          <Textarea
-            className="mono json-editor"
-            label="Vistas compartidas (JSON)"
-            rows={10}
-            spellCheck={false}
-            placeholder={'[\n  { "name": "Mias", "label": "Mis registros", "filters": [{ "field": "Responsable", "op": "eq", "value": "$me" }], "default": true }\n]'}
-            hint="Vistas del listado: name, label y opcionalmente roles, columns, filters (field, op, value; $me y $today), sort, dir, state y default."
-            error={visibleErrors.viewsJson ?? (d.viewsJson ? parseJsonError(d.viewsJson, 'array') : undefined)}
-            value={d.viewsJson}
-            onChange={(e) => setD((s) => ({ ...s, viewsJson: e.target.value }))}
-          />
-          <Textarea
-            className="mono json-editor"
-            label="Reportes (JSON)"
-            rows={12}
-            spellCheck={false}
-            placeholder={'[\n  { "name": "PorMes", "label": "Por mes", "groupBy": [{ "field": "Fecha", "period": "month" }],\n    "measures": [{ "fn": "count" }, { "fn": "sum", "field": "Total" }], "chart": "line" }\n]'}
-            hint="groupBy (hasta 2: Campo o Relacion.Campo; period day, month o year en fechas), measures (count, sum, avg, min, max), filter, orderBy, dir, limit, chart (bar, line, pie) y roles."
-            error={visibleErrors.reportsJson ?? (d.reportsJson ? parseJsonError(d.reportsJson, 'array') : undefined)}
-            value={d.reportsJson}
-            onChange={(e) => setD((s) => ({ ...s, reportsJson: e.target.value }))}
-          />
-          <Textarea
-            className="mono json-editor"
-            label="Webhooks (JSON)"
-            rows={10}
-            spellCheck={false}
-            placeholder={'[\n  { "name": "Alta", "label": "Registro nuevo", "events": [{ "on": "create" }],\n    "role": "Integración", "fields": ["Folio", "Nombre"] }\n]'}
-            hint="events (on: create, update, enterState con state, transition con transition), role (rol de servicio: se envía lo que ese rol ve), fields, when. El destino y el secreto se configuran en Integraciones."
-            error={visibleErrors.webhooksJson ?? (d.webhooksJson ? parseJsonError(d.webhooksJson, 'array') : undefined)}
-            value={d.webhooksJson}
-            onChange={(e) => setD((s) => ({ ...s, webhooksJson: e.target.value }))}
-          />
-          <Textarea
-            className="mono json-editor"
-            label="Tareas programadas (JSON)"
-            rows={10}
-            spellCheck={false}
-            placeholder={'[\n  { "name": "Vencer", "label": "Vencer pedidos", "every": "day", "at": "07:00",\n    "where": "Estado = \'Abierto\' AND Vence < TODAY()", "role": "Cobranza",\n    "actions": [{ "type": "transition", "transition": "vencer" }] }\n]'}
-            hint="every (minutes con interval, hour con minute, day, week con weekdays 1–7, month con day) y at 'HH:mm'; where (qué registros, traducible a SQL); role (rol de servicio); acciones como las automatizaciones (sin target, el propio registro); batchSize (máx. 1000). Llegan en pausa: se activan en Configuración › Automatizaciones."
-            error={visibleErrors.schedulesJson ?? (d.schedulesJson ? parseJsonError(d.schedulesJson, 'array') : undefined)}
-            value={d.schedulesJson}
-            onChange={(e) => setD((s) => ({ ...s, schedulesJson: e.target.value }))}
-          />
-          <Textarea
-            className="mono json-editor"
-            label="Libro de partida doble (JSON)"
-            rows={8}
-            spellCheck={false}
-            placeholder={'{\n  "lines": "Partidas", "debit": "Cargo", "credit": "Abono", "date": "Fecha", "states": ["Aplicada"],\n  "period": { "entity": "PeriodoContable", "start": "Inicio", "end": "Fin", "open": "Estado = \'Abierto\'" }\n}'}
-            hint="lines (partidas), debit y credit (campos numéricos de la partida), date, states (estados contabilizados: ahí cargos = abonos) y period (catálogo de periodos con inicio, fin y la condición de abierto). Vacío: no es un libro."
-            error={visibleErrors.ledgerJson ?? (d.ledgerJson ? parseJsonError(d.ledgerJson, 'object') : undefined)}
-            value={d.ledgerJson}
-            onChange={(e) => setD((s) => ({ ...s, ledgerJson: e.target.value }))}
-          />
-        </div>
-      </details>
       </div>}
 
-      <div className="row" style={{ justifyContent: 'flex-end' }}>
-        {showErrors && Object.keys(errors).length > 0 && <span className="field-error" style={{ marginRight: 'auto' }}>Corrige los campos marcados antes de continuar.</span>}
+      <div className="row editor-footer">
+        <span className="live-status grow" aria-live="polite">
+          {showErrors && !clientOk ? <span className="field-error">Corrige los campos marcados antes de continuar.</span>
+            : live.state === 'checking' ? <span className="subtle"><Loader2 size={13} className="spin" aria-hidden /> Validando con el compilador…</span>
+            : live.state === 'done' && live.errors.length ? <span className="field-error"><AlertCircle size={13} aria-hidden /> El compilador encontró {live.errors.length} {live.errors.length === 1 ? 'error' : 'errores'}: revisa las pestañas marcadas.</span>
+            : live.state === 'done' ? <span className="subtle"><CheckCircle2 size={13} aria-hidden /> El compilador no encontró errores.</span>
+            : null}
+        </span>
         <Button onClick={() => (dirty ? setConfirmDiscard(true) : onCancel())}>Cancelar</Button>
         <Button variant="primary" icon={Eye} disabled={!isNew && ops.length === 0} onClick={review}>
           {!isNew && ops.length === 0 ? 'Sin cambios' : 'Revisar cambios'}

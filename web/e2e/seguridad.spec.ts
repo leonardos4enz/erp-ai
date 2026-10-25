@@ -2,7 +2,7 @@
 // (Compras 1.3.0 e Inventario 1.1.0 ya instalados, con sus usuarios). El motor se prueba con un catálogo
 // propio (Oportunidades) declarado por plan; lo que ve una persona, por la UI.
 import type { APIRequestContext, Browser, Page } from '@playwright/test';
-import { ADMIN, apiAs, applyPlan, expect, expectAccessible, roleId, test, uiLogin } from './helpers';
+import { ADMIN, apiAs, applyPlan, expect, expectAccessible, openJson, roleId, test, uiLogin } from './helpers';
 
 test.describe.configure({ mode: 'serial' });
 
@@ -386,8 +386,8 @@ test('Spec 013 · H1: un registro que solo se puede ver se muestra en solo lectu
 });
 
 test('H5: el modelador ve y edita la seguridad como JSON validado', async ({ page }) => {
-  await page.goto('/admin/model?edit=Oportunidad');
-  const box = page.getByLabel('Seguridad (JSON)');
+  await page.goto('/admin/model?edit=Oportunidad&tab=seguridad');
+  const box = await openJson(page, 'Seguridad (JSON)');
   await expect(box).toHaveValue(/"owner": "Responsable"/);
   await expect(box).not.toHaveValue(/null/);
   await box.fill(JSON.stringify({ ...security, fields: [...security.fields, { field: 'NoExiste', read: ['Vendedor'] }] }, null, 2));

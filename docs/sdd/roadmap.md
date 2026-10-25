@@ -31,8 +31,9 @@ en orden, no en paralelo: casi todas tocan el núcleo del motor (`PlanCompiler`,
 | 023 Capacidades del motor (merge, avisos, rutas) | Implementado ([spec](specs/023-capacidades-motor/spec.md)) |
 | 024 Navegación por módulos | Implementado ([spec](specs/024-navegacion-modulos/spec.md)) |
 | 025 Explorador del modelo y de la base de datos | Implementado ([spec](specs/025-explorador-modelo/spec.md)) |
-| 026 Módulo de Ventas | Planeado |
-| 027 CFDI 4.0 con PAC | Planeado |
+| 026 Modelador por módulos y sin JSON | Implementado ([spec](specs/026-modelador-visual/spec.md)) |
+| 027 Módulo de Ventas | Planeado |
+| 028 CFDI 4.0 con PAC | Planeado |
 
 ## Diagnóstico
 | Brecha señalada | Situación actual | Spec |
@@ -271,7 +272,7 @@ reglas de negocio** (constitución I.1), configurables por metadatos con valores
   ventas) y revaluación, que siguen de la 020.
 
 ### 023 — Capacidades del motor: listas que se fusionan, reglas de aviso y rutas de tres niveles
-Origen: pendientes de la 022 que limitan a los módulos y que Ventas (024, luego 025, ahora 026) necesitará; plan del dueño (2026-10-24).
+Origen: pendientes de la 022 que limitan a los módulos y que Ventas (024, luego 025, 026, ahora 027) necesitará; plan del dueño (2026-10-24).
 - **Estado:** implementado en la [spec 023](specs/023-capacidades-motor/spec.md). `merge` en las seis listas del catálogo
   (reglas, automatizaciones, vistas, reportes, webhooks, tareas): agrega o reemplaza por nombre en su lugar; la vista previa
   ya no dice que quita lo que un `merge` conserva, y un paquete de Entornos que extiende un catálogo que no crea llega al
@@ -314,12 +315,31 @@ Origen: pedido del dueño (2026-10-24): ver la estructura completa del sistema, 
 - **Pendiente:** comparar la base de dos entornos, sugerir limpieza de columnas archivadas (con respaldo y aprobación),
   exportar el diagrama lógico a DDL, y vistas, disparadores y procedimientos de SQL si algún día el motor los crea.
 
-## Specs planeadas (después de la 025)
+### 026 — Modelador por módulos y sin JSON
+Origen: revisión del modelador por el dueño (2026-10-24): lista plana, sin origen de cada elemento, textos de ejemplo que
+parecían contenido (bug) y ocho secciones en JSON manual. Ventas pasa a la 027 y CFDI 4.0 a la 028.
+- **Estado:** implementado en la [spec 026](specs/026-modelador-visual/spec.md). Sin capacidades del motor: los editores
+  escriben el mismo borrador que el JSON y el mismo Plan de Cambios. **Catálogos por módulo** (`group` de la 024, filtro y
+  búsqueda en la URL) con quién instaló cada uno. **Origen** reproducido en memoria con el compilador puro a partir de las
+  cadenas de los paquetes del servidor instalados (`GET /api/model/provenance`; no es metadato, así que no se falsea desde
+  un plan): cada campo, regla, automatización, vista, reporte, webhook, tarea, proceso, formulario, seguridad y libro dice
+  su paquete y versión, o «Local», y «Modificado localmente»; cambiar algo de un paquete avisa junto al elemento, y la vista
+  previa de actualizar un módulo lista los choques (lo local o modificado que la actualización reemplaza o quita; gana la
+  actualización). **Editor de expresiones** con autocompletado (campos, rutas de tres saltos, funciones, opciones) como
+  *combobox* accesible y validación en vivo con `ExprAnalyzer` (`POST /api/model/expressions/check`, con los campos del
+  borrador), y **constructor de condiciones** por renglones (campo · operador · valor, Y/O) que arma el mismo texto (pedido del
+  dueño a mitad de la spec). **Editores visuales** de reglas, automatizaciones (con todas las acciones y políticas de costeo), seguridad,
+  vistas, reportes, webhooks, tareas y libro, cada uno con su pestaña, estado vacío y «Ver como JSON» plegado; vista previa
+  en vivo que muestra los errores del compilador junto a la sección y al elemento.
+- **Pendiente:** origen de lo que llegó por paquetes de Entornos (hoy «Local»), fusión de tres vías al actualizar un
+  módulo, rutas de más de un salto en el selector de agrupación de reportes y deshacer/rehacer en los editores.
+
+## Specs planeadas (después de la 026)
 En este orden, por decisión del dueño (2026-10-24):
-1. **026 — Módulo de Ventas:** clientes, cotización, pedido, salida de almacén con costo de ventas (póliza de salidas),
+1. **027 — Módulo de Ventas:** clientes, cotización, pedido, salida de almacén con costo de ventas (póliza de salidas),
    factura y cobranza. Usa `merge` para extender Producto e Inventario, avisos (límite de crédito) y rutas de tres niveles;
    declara su módulo con `setApp` (orden 15, entre Compras e Inventario).
-2. **027 — CFDI 4.0 con PAC:** timbrado de la factura de Ventas con un proveedor autorizado, cancelación y complemento de
+2. **028 — CFDI 4.0 con PAC:** timbrado de la factura de Ventas con un proveedor autorizado, cancelación y complemento de
    pago; el secreto del PAC fuera del código (constitución II.7).
 3. **Pólizas en moneda extranjera** (pendiente de la 020).
 4. **Revaluación de existencias** (pendiente de la 020).

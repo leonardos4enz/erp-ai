@@ -1,7 +1,7 @@
 // Spec 005 · H1: automatizaciones declarativas del motor, probadas con un modelo propio (sin depender de
 // Compras). El modelo se prepara por API; las automatizaciones se declaran desde el modelador (CA7).
 import type { APIRequestContext } from '@playwright/test';
-import { ADMIN, apiAs, applyPlan, expect, expectAccessible, test } from './helpers';
+import { ADMIN, apiAs, applyPlan, expect, expectAccessible, openJson, test } from './helpers';
 
 test.describe.configure({ mode: 'serial' });
 
@@ -77,15 +77,15 @@ test('preparar el modelo de prueba', async () => {
 });
 
 test('H1 CA4 · CA7: el modelador declara automatizaciones como JSON validado en la vista previa', async ({ page }) => {
-  await page.goto('/admin/model?edit=ParteHoras');
-  // Spec 019: el proceso tiene su pestaña, así que la sección avanzada ya no se abre sola por él.
-  await page.getByText('Reglas, automatizaciones, seguridad, vistas e integraciones').click();
-  const box = page.getByLabel('Automatizaciones (JSON)');
-  await expect(box).toBeVisible();
+  // Spec 026: las automatizaciones tienen su pestaña y el JSON es la opción avanzada plegada de la sección.
+  await page.goto('/admin/model?edit=ParteHoras&tab=automatizaciones');
+  const box = await openJson(page, 'Automatizaciones (JSON)');
 
   // JSON mal formado: lo detecta el cliente.
   await box.fill('[ { "name": ');
-  await expect(page.getByText(/JSON inválido/)).toBeVisible();
+  // Spec 026: el error se ve en el JSON y en el editor visual (que no lo pisa).
+  await expect(page.getByText(/JSON inválido/).first()).toBeVisible();
+  await expect(page.getByText('El JSON de esta sección no es válido')).toBeVisible();
 
   // JSON bien formado pero con un campo que no existe: lo rechaza la vista previa del servidor.
   const broken = [{ ...automations[0], actions: [{ ...automations[0].actions[0], field: 'NoExiste' }] }];
@@ -108,8 +108,8 @@ test('H1 CA4 · CA7: el modelador declara automatizaciones como JSON validado en
   expect(def.automations.map((a: { name: string }) => a.name)).toEqual(automations.map((a) => a.name));
 
   // Regresión (F-02, revisión exploratoria 005): el editor mostraba propiedades "null" que nadie escribió.
-  await page.goto('/admin/model?edit=ParteHoras');
-  await expect(page.getByLabel('Automatizaciones (JSON)')).toHaveValue(/"AvisarEdicion"/);
+  await page.goto('/admin/model?edit=ParteHoras&tab=automatizaciones');
+  await expect(await openJson(page, 'Automatizaciones (JSON)')).toHaveValue(/"AvisarEdicion"/);
   await expect(page.getByLabel('Automatizaciones (JSON)')).not.toHaveValue(/null/);
   await expect(page.getByRole('button', { name: 'Sin cambios' })).toBeVisible();
 });
