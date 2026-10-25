@@ -3,9 +3,9 @@
 // Para simular que «llegó la hora» de una tarea se adelanta su siguiente ocurrencia con SQL sobre la base desechable.
 import { execFileSync, spawn } from 'node:child_process';
 import type { APIRequestContext } from '@playwright/test';
-import { ADMIN, anonApi, apiAs, applyPlan, expect, expectAccessible, openJson, test, uiLogin } from './helpers';
+import { ADMIN, DB, anonApi, apiAs, applyPlan, expect, expectAccessible, openJson, test, uiLogin } from './helpers';
 
-test.describe.configure({ mode: 'serial' });
+test.describe.configure({ mode: process.env.E2E_INDEPENDENT ? 'default' : 'serial' });
 
 const GROUP = 'Pruebas 016'; // grupo propio del menú: no altera las capturas de referencia
 const PWD = 'frase larga de tareas programadas 2026';
@@ -25,7 +25,7 @@ const day = (n: number) => { const d = new Date(); d.setDate(d.getDate() + n); r
 
 /** SQL directo sobre la base desechable de la suite (nunca la de desarrollo). */
 function sql(query: string) {
-  const db = process.env.E2E_DB ?? 'ErpAi_E2E';
+  const db = DB;
   if (!db.endsWith('_E2E')) throw new Error('Solo sobre la base desechable.');
   return execFileSync('sqlcmd', ['-S', process.env.E2E_SQL_SERVER ?? '(localdb)\\MSSQLLocalDB', '-d', db, '-E', '-b', '-I', '-h', '-1', '-W', '-Q',
     `SET NOCOUNT ON; ${query}`]).toString().trim();
@@ -33,7 +33,7 @@ function sql(query: string) {
 
 /** Mantiene bloqueado un pedido unos segundos desde otra conexión (como una persona guardándolo). */
 function holdLock(id: number, seconds: number) {
-  const db = process.env.E2E_DB ?? 'ErpAi_E2E';
+  const db = DB;
   const p = spawn('sqlcmd', ['-S', process.env.E2E_SQL_SERVER ?? '(localdb)\\MSSQLLocalDB', '-d', db, '-E', '-b', '-I', '-Q',
     `SET NOCOUNT ON; BEGIN TRAN; SELECT [Id] FROM app.J16Pedido WITH (UPDLOCK, HOLDLOCK) WHERE [Id] = ${Number(id)}; WAITFOR DELAY '00:00:0${seconds}'; ROLLBACK;`]);
   return new Promise<void>((resolve) => p.on('exit', () => resolve()));

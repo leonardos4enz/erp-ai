@@ -4,7 +4,7 @@
 // ya están instalados.
 import { execFileSync } from 'node:child_process';
 import type { APIRequestContext, Locator, Page } from '@playwright/test';
-import { ADMIN, apiAs, applyPlan, expect, expectAccessible, openJson, test } from './helpers';
+import { ADMIN, DB, apiAs, applyPlan, expect, expectAccessible, openJson, test } from './helpers';
 
 const PWD = 'frase larga del modelador 2026';
 // Sufijo por corrida: la prueba se puede repetir sobre la misma base sin chocar con lo que creó antes.
@@ -27,7 +27,7 @@ const provenance = async () => ((await (await admin.get('/api/model/provenance')
 /** SQL directo contra la base desechable de la suite (solo para simular un módulo instalado en una versión anterior). */
 function sql(query: string) {
   const server = process.env.E2E_SQL_SERVER ?? '(localdb)\\MSSQLLocalDB';
-  const db = process.env.E2E_DB ?? 'ErpAi_E2E';
+  const db = DB;
   if (!db.endsWith('_E2E')) throw new Error('Solo contra la base desechable.');
   execFileSync('sqlcmd', ['-S', server, '-E', '-b', '-I', '-d', db, '-Q', query], { stdio: 'pipe' });
 }

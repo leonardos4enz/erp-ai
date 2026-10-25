@@ -1,13 +1,13 @@
 // Spec 018 · OAuth2 (client credentials) y API OData. Catálogos propios en su grupo del menú; el cliente se da de alta por
 // la UI y se usa como lo haría un servicio: sin cookie ni cabecera anti-CSRF. La suite corre con páginas OData de 3 filas
 // (OData__MaxPageSize) para probar @odata.nextLink. El límite del servidor de tokens se prueba en endurecimiento.spec.ts
-// (instancia :5092 con el límite por defecto) y la aprobación de clientes en jerarquia.spec.ts (:5093).
+// (instancia de producción con el límite por defecto) y la aprobación de clientes en jerarquia.spec.ts.
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import type { APIRequestContext, APIResponse, Page } from '@playwright/test';
-import { ADMIN, BASE_URL, anonApi, apiAs, applyPlan, expect, expectAccessible, test } from './helpers';
+import { ADMIN, DB, BASE_URL, anonApi, apiAs, applyPlan, expect, expectAccessible, test } from './helpers';
 
-test.describe.configure({ mode: 'serial' });
+test.describe.configure({ mode: process.env.E2E_INDEPENDENT ? 'default' : 'serial' });
 
 const GROUP = 'Pruebas OData';
 type Row = Record<string, unknown> & { Id: number };
@@ -32,7 +32,7 @@ const odata = async (t: string, path: string, params?: Record<string, string>) =
 const folios = (p: Page18) => p.value.map((r) => r.Folio).sort();
 
 function sql(statement: string) {
-  const db = process.env.E2E_DB ?? 'ErpAi_E2E';
+  const db = DB;
   if (!db.endsWith('_E2E')) throw new Error('Solo sobre la base desechable.');
   execFileSync('sqlcmd', ['-S', process.env.E2E_SQL_SERVER ?? '(localdb)\\MSSQLLocalDB', '-d', db, '-E', '-b', '-I', '-Q', statement]);
 }

@@ -4,9 +4,9 @@
 // estado «v1», se exporta, y el modelo se regresa a mano al estado «antes» (lo nuevo queda archivado) antes de subirlo.
 import { execFileSync } from 'node:child_process';
 import type { APIRequestContext, Browser, Page } from '@playwright/test';
-import { ADMIN, apiAs, applyPlan, expect, expectAccessible, test, uiLogin, roleId } from './helpers';
+import { ADMIN, DB, apiAs, applyPlan, expect, expectAccessible, test, uiLogin, roleId } from './helpers';
 
-test.describe.configure({ mode: 'serial' });
+test.describe.configure({ mode: process.env.E2E_INDEPENDENT ? 'default' : 'serial' });
 
 const PWD = 'frase larga de reversiones 2026';
 const GROUP = 'Rollback E2E';
@@ -18,7 +18,7 @@ const as = async (who: 'admin' | 'aprobador') =>
 
 /** SQL directo sobre la base desechable de la suite (nunca la de desarrollo). */
 function sql(query: string) {
-  const db = process.env.E2E_DB ?? 'ErpAi_E2E';
+  const db = DB;
   if (!db.endsWith('_E2E')) throw new Error('Solo sobre la base desechable.');
   return execFileSync('sqlcmd', ['-S', process.env.E2E_SQL_SERVER ?? '(localdb)\\MSSQLLocalDB', '-d', db, '-E', '-b', '-I', '-h', '-1', '-W', '-Q',
     `SET NOCOUNT ON; ${query}`]).toString().trim();

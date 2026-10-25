@@ -4,7 +4,7 @@
 import type { APIRequestContext, Locator, Page } from '@playwright/test';
 import { ADMIN, apiAs, applyPlan, expect, expectAccessible, roleId, test, uiLogin } from './helpers';
 
-test.describe.configure({ mode: 'serial' });
+test.describe.configure({ mode: process.env.E2E_INDEPENDENT ? 'default' : 'serial' });
 
 const GROUP = 'Spec 019';
 const PWD = 'frase larga de editores 2026';

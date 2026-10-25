@@ -3,9 +3,9 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import path from 'node:path';
 import { request, type APIRequestContext, type Browser, type Page } from '@playwright/test';
-import { ADMIN, apiAs, applyPlan, expect, expectAccessible, roleId, test, uiLogin } from './helpers';
+import { ADMIN, DB, PORTS, apiAs, applyPlan, expect, expectAccessible, roleId, test, uiLogin } from './helpers';
 
-test.describe.configure({ mode: 'serial' });
+test.describe.configure({ mode: process.env.E2E_INDEPENDENT ? 'default' : 'serial' });
 
 const GROUP = 'Pruebas 015';
 const PWD = 'frase larga de jerarquia 2026';
@@ -331,7 +331,7 @@ test('H2 CA2 (UI): el campo dueño busca personas y equipos', async ({ browser }
 });
 
 // ---------------- H4: instancia con aprobación de cambios de seguridad ----------------
-const SEC = 'http://localhost:5093';
+const SEC = `http://localhost:${PORTS.seguridad015}`;
 let sec: ChildProcess | undefined;
 const secApi: Partial<Record<'admin' | 'admin2', APIRequestContext>> = {};
 
@@ -356,7 +356,7 @@ test.describe('H4 · aprobación de cambios de seguridad', () => {
       env: {
         ...process.env,
         ASPNETCORE_ENVIRONMENT: 'Development',
-        ConnectionStrings__Erp: `Server=${server};Database=${process.env.E2E_DB ?? 'ErpAi_E2E'};Integrated Security=true;Encrypt=true;TrustServerCertificate=true`,
+        ConnectionStrings__Erp: `Server=${server};Database=${DB};Integrated Security=true;Encrypt=true;TrustServerCertificate=true`,
         Database__AutoCreate: 'false',
         Security__LoginAttemptsPerMinute: '1000',
         Security__RequestsPerMinute: '5000',
@@ -374,7 +374,7 @@ test.describe('H4 · aprobación de cambios de seguridad', () => {
       try { if ((await fetch(`${SEC}/api/health`)).ok) return; } catch { /* aún no arranca */ }
       await new Promise((r) => setTimeout(r, 500));
     }
-    throw new Error('La instancia con aprobación de seguridad no arrancó en :5093');
+    throw new Error(`La instancia con aprobación de seguridad no arrancó en ${SEC}`);
   });
   test.afterAll(() => { sec?.kill(); });
 

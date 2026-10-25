@@ -14,21 +14,28 @@ constitution.md  (principios fijos, se lee siempre)
  2. CLARIFY   sección "Preguntas abiertas" del spec, resueltas por el humano.
       │
  3. PLAN      specs/NNN-nombre/plan.md    CÓMO. Arquitectura, contratos de API, modelo
-      │                                    de datos, análisis de amenazas (STRIDE).
+      │                                    de datos y STRIDE con las 8 filas obligatorias;
+      │                                    cada mitigación cita su prueba.
  4. TASKS     specs/NNN-nombre/tasks.md   Tareas pequeñas, ordenadas, cada una verificable.
       │
  5. IMPLEMENT la IA ejecuta tarea por tarea, marcando [x].
       │
  6. VERIFY    specs/NNN-nombre/verify.md   Ver verificacion.md:
-                 a) unitarias  b) E2E Playwright (API, criterios, a11y, visual)
-                 c) revisión exploratoria con agente → cada hallazgo se vuelve prueba
+                 a) unitarias (e integración con SQL real, desde la 030)
+                 b) E2E Playwright (API, criterios, a11y, visual)
+                 c) revisión adversarial de código con un agente independiente
+                 d) revisión exploratoria con agente → cada hallazgo se vuelve prueba
 ```
+
+Cada documento parte de su [plantilla](plantillas/) (desde la 028): [spec](plantillas/spec.md),
+[plan](plantillas/plan.md) (con la tabla STRIDE) y [verify](plantillas/verify.md) (con el bloque de métricas que lee
+`node docs/sdd/metricas.mjs`).
 
 ## Una spec por sesión
 Cada spec se trabaja en **su propia sesión de IA, nueva**, de principio a fin
 (SPECIFY → VERIFY → commit). Así se evita que una sesión arrastre contexto de otras specs,
 y cada sesión queda como registro de una sola entrega. Al cerrar la spec:
-1. `verify.md` completo y suites en verde.
+1. `verify.md` completo (según la plantilla), suites en verde y riesgos registrados en [riesgos.md](riesgos.md).
 2. Revisión de secretos y artefactos, commit y **push a `origin/main` (obligatorio: la siguiente spec no se abre con commits sin subir)**.
 3. Actualizar el estado en el índice de abajo y en [roadmap.md](roadmap.md).
 4. La siguiente spec se abre en una sesión nueva, que arranca leyendo [CLAUDE.md](../../CLAUDE.md).
@@ -39,7 +46,21 @@ y cada sesión queda como registro de una sola entrega. Al cerrar la spec:
 - Si el spec es ambiguo, preguntar (fase CLARIFY) en vez de suponer.
 - Cada tarea termina con build verde y pruebas pasando.
 - Cada criterio de aceptación del spec tiene al menos un escenario E2E (`H1 CA3: …`).
-- Antes de cerrar, la revisión exploratoria se hace usando la app en el navegador, no leyendo código.
+- Antes de cerrar, la revisión exploratoria se hace usando la app en el navegador, no leyendo código; la revisión
+  adversarial, en cambio, la hace otro agente **leyendo el código** (ver [verificacion.md](verificacion.md#4-revisión-adversarial-de-código)).
+- Antes de implementar, completar el STRIDE de `plan.md` con las 8 filas obligatorias. Una amenaza sin prueba es un riesgo
+  registrado en [riesgos.md](riesgos.md), no una mitigación.
+- Si la spec cumple dos criterios de división (más de 6 historias, más de ~2 500 líneas de producto, seguridad o
+  concurrencia junto con UI nueva, más de una pantalla principal), proponer dividirla en CLARIFY.
+- En VERIFY el alcance queda congelado: un pedido nuevo entra solo si bloquea el uso; si no, va al roadmap.
+- (Desde la 029) cada ruta nueva declara su capacidad como metadato del endpoint; el inventario de rutas falla si falta.
+
+## Auditorías y retrospectivas
+- **Auditoría externa de solo lectura:** cada 5 specs o tras una spec que agregue un punto de entrada, un trabajo asíncrono
+  o delegación de privilegios. Sesión aparte, contexto fresco, código completo. Empieza por [riesgos.md](riesgos.md) y sus
+  hallazgos se vuelven una spec de endurecimiento. El [roadmap](roadmap.md#auditorías) dice cuándo toca la siguiente.
+- **Retrospectiva del proceso** cada 10–15 specs en `retrospectivas/`. La [001](retrospectivas/001-specs-001-026.md)
+  cubre 001–026 y sus propuestas se aplican en la 028–030.
 
 ## Índice de specs
 | # | Spec | Estado |
@@ -71,3 +92,4 @@ y cada sesión queda como registro de una sola entrega. Al cerrar la spec:
 | 025 | [Explorador del modelo y de la base de datos](specs/025-explorador-modelo/spec.md) | Implementado |
 | 026 | [Modelador por módulos y sin JSON](specs/026-modelador-visual/spec.md) | Implementado |
 | 027 | [Documentos PDF con plantillas visuales](specs/027-documentos-pdf/spec.md) | Implementado |
+| 028 | [Mejoras del proceso (retrospectiva 001)](specs/028-mejoras-proceso/spec.md) | Implementado |

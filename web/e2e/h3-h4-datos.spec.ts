@@ -1,7 +1,7 @@
 // Spec 001 · H3 (reglas por rol) y H4 (captura: buscar, editar, conflicto, eliminar).
 import { ADMIN, apiAs, applyPlan, expect, expectAccessible, test } from './helpers';
 
-test.describe.configure({ mode: 'serial' });
+test.describe.configure({ mode: process.env.E2E_INDEPENDENT ? 'default' : 'serial' });
 
 test.beforeAll(async () => {
   const api = await apiAs(ADMIN.username, ADMIN.password);

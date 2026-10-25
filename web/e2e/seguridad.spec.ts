@@ -4,7 +4,7 @@
 import type { APIRequestContext, Browser, Page } from '@playwright/test';
 import { ADMIN, apiAs, applyPlan, expect, expectAccessible, openJson, roleId, test, uiLogin } from './helpers';
 
-test.describe.configure({ mode: 'serial' });
+test.describe.configure({ mode: process.env.E2E_INDEPENDENT ? 'default' : 'serial' });
 
 const PWD = 'frase larga de seguridad 2026';
 const COMPRAS_PWD = 'frase larga de compras 2026'; // usuarios creados por compras.spec.ts

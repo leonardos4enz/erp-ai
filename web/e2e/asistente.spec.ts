@@ -1,12 +1,12 @@
-// Spec 011 · Asistente IA. Un proveedor simulado (127.0.0.1:5091, Assistant__BaseUrl de la suite) responde como la API de
+// Spec 011 · Asistente IA. Un proveedor simulado (127.0.0.1, puerto PORTS.asistente: Assistant__BaseUrl de la suite) responde como la API de
 // mensajes de Anthropic con respuestas programadas por cada prueba, y guarda lo que el ERP le envía para verificar que no
 // salen datos ni secretos. La clave la guarda el administrador desde la app y es ficticia: la suite nunca usa una real.
 import { execFileSync } from 'node:child_process';
 import { createServer, type Server } from 'node:http';
 import type { APIRequestContext, Browser, Page } from '@playwright/test';
-import { ADMIN, apiAs, applyPlan, expect, expectAccessible, roleId, test, uiLogin } from './helpers';
+import { ADMIN, DB, PORTS, apiAs, applyPlan, expect, expectAccessible, roleId, test, uiLogin } from './helpers';
 
-test.describe.configure({ mode: 'serial' });
+test.describe.configure({ mode: process.env.E2E_INDEPENDENT ? 'default' : 'serial' });
 
 const GROUP = 'Pruebas IA'; // grupo propio del menú: no altera las capturas de referencia
 const PWD = 'frase larga del asistente 2026';
@@ -71,7 +71,7 @@ test.beforeAll(async () => {
       setTimeout(() => res.end(reply), next.delayMs ?? 0);
     });
   });
-  await new Promise<void>((r) => server.listen(5091, '127.0.0.1', r));
+  await new Promise<void>((r) => server.listen(PORTS.asistente, '127.0.0.1', r));
 });
 test.afterAll(async () => { await new Promise((r) => server.close(r)); });
 
@@ -172,7 +172,7 @@ test('H3 CA4: sin clave el asistente lo explica; solo el administrador la guarda
   expect((await modelador.get('/api/assistant').then((r) => r.json())).configured).toBe(true);
 
   // Guardada cifrada (Data Protection), nunca en claro; la auditoría registra el cambio sin la clave.
-  const stored = execFileSync('sqlcmd', ['-S', process.env.E2E_SQL_SERVER ?? '(localdb)\\MSSQLLocalDB', '-E', '-d', 'ErpAi_E2E', '-h', '-1', '-W', '-Q',
+  const stored = execFileSync('sqlcmd', ['-S', process.env.E2E_SQL_SERVER ?? '(localdb)\\MSSQLLocalDB', '-E', '-d', DB, '-h', '-1', '-W', '-Q',
     "SET NOCOUNT ON; SELECT CASE WHEN KeyProtected LIKE '%clave-ficticia%' THEN 'en-claro' ELSE 'cifrada' END + ':' + CAST(LEN(KeyProtected) AS varchar(10)) FROM meta.AssistantKey"],
     { encoding: 'utf8' }).trim();
   expect(stored).toMatch(/^cifrada:\d{2,}$/);

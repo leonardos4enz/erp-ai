@@ -16,7 +16,7 @@ const plan = {
   }],
 };
 
-test.describe.configure({ mode: 'serial' });
+test.describe.configure({ mode: process.env.E2E_INDEPENDENT ? 'default' : 'serial' });
 
 test.describe('Autenticación y sesión', () => {
   test('rechaza peticiones que modifican estado sin la cabecera anti-CSRF', async () => {

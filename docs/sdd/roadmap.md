@@ -33,8 +33,11 @@ en orden, no en paralelo: casi todas tocan el núcleo del motor (`PlanCompiler`,
 | 025 Explorador del modelo y de la base de datos | Implementado ([spec](specs/025-explorador-modelo/spec.md)) |
 | 026 Modelador por módulos y sin JSON | Implementado ([spec](specs/026-modelador-visual/spec.md)) |
 | 027 Documentos PDF con plantillas visuales | Implementado ([spec](specs/027-documentos-pdf/spec.md)) |
-| 028 Módulo de Ventas | Planeado |
-| 029 CFDI 4.0 con PAC | Planeado |
+| 028 Mejoras del proceso (retrospectiva 001) | Implementado ([spec](specs/028-mejoras-proceso/spec.md)) |
+| 029 Endurecimiento 3: capacidades declaradas y canario de fugas | Planeado |
+| 030 Integración y CI | Planeado |
+| 031 Módulo de Ventas | Planeado |
+| 032 CFDI 4.0 con PAC | Planeado |
 
 ## Diagnóstico
 | Brecha señalada | Situación actual | Spec |
@@ -273,7 +276,7 @@ reglas de negocio** (constitución I.1), configurables por metadatos con valores
   ventas) y revaluación, que siguen de la 020.
 
 ### 023 — Capacidades del motor: listas que se fusionan, reglas de aviso y rutas de tres niveles
-Origen: pendientes de la 022 que limitan a los módulos y que Ventas (024, luego 025, 026, 027, ahora 028) necesitará; plan del dueño (2026-10-24).
+Origen: pendientes de la 022 que limitan a los módulos y que Ventas (024, luego 025, 026, 027, 028, ahora 031) necesitará; plan del dueño (2026-10-24).
 - **Estado:** implementado en la [spec 023](specs/023-capacidades-motor/spec.md). `merge` en las seis listas del catálogo
   (reglas, automatizaciones, vistas, reportes, webhooks, tareas): agrega o reemplaza por nombre en su lugar; la vista previa
   ya no dice que quita lo que un `merge` conserva, y un paquete de Entornos que extiende un catálogo que no crea llega al
@@ -354,20 +357,79 @@ la representación impresa del CFDI). Ventas pasa a la 028 y CFDI 4.0 a la 029.
   servidor SMTP/proveedor, plantillas de mensaje y bitácora); adjuntarlo automáticamente al ejecutar una transición
   (requiere el tipo de campo archivo); firma electrónica (e.firma/FIEL: certificados y custodia de llaves, otra spec);
   **tipo de campo `image`/`file` en catálogos** (DDL, captura, importación, OData, miniaturas y límites por registro: la
-  base `meta.[File]` ya existe); SVG sanitizado y WebP; códigos QR y de barras (los pedirá el CFDI, 029); diseño libre por
+  base `meta.[File]` ya existe); SVG sanitizado y WebP; códigos QR y de barras (los pedirá el CFDI, ahora 032); diseño libre por
   coordenadas.
 
-## Specs planeadas (después de la 027)
+### 028 — Mejoras del proceso (retrospectiva 001)
+Origen: la [retrospectiva 001](retrospectivas/001-specs-001-026.md) de las specs 001–026 y el pedido del dueño
+(2026-10-25) de aplicarla. Ventas pasa a la 031 y CFDI 4.0 a la 032.
+- **Estado:** implementado en la [spec 028](specs/028-mejoras-proceso/spec.md). Reglas (P3, P4, P7, P12): STRIDE con 8
+  filas obligatorias y prueba enlazada, revisión adversarial con un subagente independiente en cada VERIFY, auditoría
+  externa cada 5 specs (ver [Auditorías](#auditorías)), una corrida completa + lo nuevo tres veces (`--veces=3`), criterios
+  para dividir specs y alcance congelado en VERIFY. [Plantillas](plantillas/) de spec, plan y verify y
+  `docs/sdd/metricas.mjs` (P13). [Registro de riesgos](riesgos.md) con los residuales de 001–027 (P10). Base y puertos de
+  E2E por worktree, `E2E_INDEPENDENT` en todos los archivos seriales, `npm run e2e:regresion` y `npm run revision`
+  (P6, P11).
+- **Pendiente (diferido con razón):** fragmentar la suite (`--shard`): 13 archivos dependen de otros y las capturas del
+  menú dependen de lo que dejan los demás → 030. Guardias de la suite (P9) → 030.
+
+## Auditorías
+Regla (028): auditoría externa de solo lectura cada **5 specs**, o antes tras una spec que agregue un punto de entrada, un
+trabajo asíncrono o delegación de privilegios. Empieza por [riesgos.md](riesgos.md) (29 riesgos medios o altos sin prueba
+ya marcados) y sus hallazgos se vuelven una spec de endurecimiento.
+
+| Auditoría | Cubrió | Resultado |
+|---|---|---|
+| 2026-10-23 (origen de la 012) | 001–011 | 6 defectos |
+| 2026-10-23 (origen de la 014) | 012–013 | 7 defectos |
+| 2026-10-24 (origen de la 021) | 014–020 | 8 defectos |
+| **Próxima: al cerrar la 030** (antes, si la 029 o la 030 agregan un punto de entrada o un trabajo asíncrono) | 021–030 | — |
+
+La 021–027 ya van 7 specs sin auditoría: la 029 (endurecimiento con inventario y canario) cubre parte de lo que buscaría y
+deja la herramienta que la auditoría usará; por eso la siguiente va al cerrar la 030 y no antes.
+
+## Specs planeadas (después de la 028)
 En este orden, por decisión del dueño (2026-10-25):
-1. **028 — Módulo de Ventas:** clientes, cotización, pedido, salida de almacén con costo de ventas (póliza de salidas),
+1. **029 — Endurecimiento 3: capacidades declaradas y canario de fugas** (retrospectiva P1 y P2).
+   - *Problema:* la constitución II.2 pide que cada endpoint declare su permiso, pero los grupos solo piden autenticación y
+     la capacidad se revisa dentro de cada handler (`RequireSuperuser(http)`, `RequireModeler`…): nadie puede listar qué
+     pide cada una de las ~117 rutas, y así se escapó que asignar roles solo pedía *administrar usuarios* (021-1, desde la
+     001). Las fugas por otro camino al mismo dato (bitácora, `__label`, reportes, OData) las encontraron auditorías, no VERIFY.
+   - *Alcance:* capacidad como **metadato de cada ruta** (`.RequireCapability(...)` como filtro, `.MutatesModel()`), sin
+     comprobaciones imperativas; **inventario** que recorre `EndpointDataSource` y falla si una ruta no tiene autorización
+     fuera de la lista blanca anónima, no declara capacidad o cambia el modelo sin la compuerta de aprobación; **snapshot**
+     ruta → capacidad versionado (toda ruta nueva aparece en el diff); **canario**: un campo oculto y un registro fuera de
+     alcance con `CANARIO-<guid>`, y todas las rutas GET del inventario (más una lista de POST que devuelven datos)
+     recorridas como ese usuario sin que el canario aparezca.
+   - *Verificación:* quitar la capacidad de una ruta hace fallar el inventario; el canario falla con el código de la 011
+     (antes de la 012) en `/api/audit` y en `__label`; el snapshot está en el diff.
+2. **030 — Integración y CI** (retrospectiva P5, P8, P14 y P9).
+   - *Problema:* las unitarias no usan base, así que toda prueba de concurrencia o falla parcial vive en Playwright, se
+     escribe a mano y solo después de una auditoría; no hay CI (`.github/workflows` no existe) y la segunda corrida
+     completa la hace cada sesión; la lógica de la SPA solo se prueba por E2E (026 F-06 fue intermitente); las lecciones
+     repetidas (absoluto que escapa ×3, error fuera de la vista ×3, foco en `body` ×3) siguen siendo texto.
+   - *Alcance:* `tests/Erp.IntegrationTests` con `WebApplicationFactory` y base propia por clase (`ErpAi_IT_<guid>`),
+     `Concurrently(n, fn)`, aserciones de invariante e inyección de fallas entre dos pasos; mover ahí las pruebas sin UI de
+     `api-security`, `endurecimiento` y `pendientes`. GitHub Actions: `dotnet test` y `build` en cada push; en `main`, la
+     suite completa con SQL Server (contenedor con autenticación SQL, o runner Windows con LocalDB si lo trae) e
+     integración; `npm audit` y `NuGetAudit`. Vitest (`npm --prefix web test`) para `layoutEdit.ts`, `workflowEdit.ts`, el
+     constructor de condiciones, el autocompletado y la comparación canónica de la 026. **Guardias de la suite** (P9,
+     movidas de la 028 porque cada una debe demostrarse contra el código anterior a su hallazgo): documento sin desbordes
+     por absolutos (003 F-16, 025 F-01, 026 F-02), error 4xx dentro de la vista con `role="alert"` (018 F-01, 021 F-01,
+     022 F-03; y R-018-6), foco que no cae en `body` (022 F-03, 025 F-07, 026 F-01), aviso de pantallas sin captura de
+     referencia (011 F-05, 024 F-04). Fragmentación de la suite (R-028-2), si CI la necesita.
+   - *Verificación:* las regresiones de 012-3 y 021-3 corren en integración y fallan con `cd81760` y `f6c5445`; CI en
+     verde en `main` y un push con una prueba rota falla; `npm --prefix web test` cubre 026 F-03 y F-06; cada guardia falla
+     con el CSS o componente anterior a su hallazgo. En CLARIFY, revisar si se divide (P12): son cuatro frentes.
+3. **031 — Módulo de Ventas:** clientes, cotización, pedido, salida de almacén con costo de ventas (póliza de salidas),
    factura y cobranza. Usa `merge` para extender Producto e Inventario, avisos (límite de crédito) y rutas de tres niveles;
    declara su módulo con `setApp` (orden 15, entre Compras e Inventario).
-2. **029 — CFDI 4.0 con PAC:** timbrado de la factura de Ventas con un proveedor autorizado, cancelación y complemento de
+4. **032 — CFDI 4.0 con PAC:** timbrado de la factura de Ventas con un proveedor autorizado, cancelación y complemento de
    pago; el secreto del PAC fuera del código (constitución II.7). Su representación impresa usa las plantillas de la 027
    (con un bloque de código QR nuevo).
-3. **Pólizas en moneda extranjera** (pendiente de la 020).
-4. **Revaluación de existencias** (pendiente de la 020).
-5. **Reversa de pólizas con otra póliza** (pendiente de la 020).
+5. **Pólizas en moneda extranjera** (pendiente de la 020).
+6. **Revaluación de existencias** (pendiente de la 020).
+7. **Reversa de pólizas con otra póliza** (pendiente de la 020).
 
 ## Decisión: ¿extensión con código?
 La auditoría tiene razón en el costo: cada necesidad nueva exige una capacidad del motor. Se mantiene

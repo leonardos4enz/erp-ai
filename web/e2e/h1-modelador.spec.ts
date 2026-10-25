@@ -1,7 +1,7 @@
 // Spec 001 · H1 (crear catálogo) y H2 (agregar campos), recorridos como lo haría una persona.
 import { expect, expectAccessible, test } from './helpers';
 
-test.describe.configure({ mode: 'serial' });
+test.describe.configure({ mode: process.env.E2E_INDEPENDENT ? 'default' : 'serial' });
 
 test('H1: crear un catálogo desde el modelador y capturar datos sin programar', async ({ page }) => {
   await page.goto('/admin/model');

@@ -3,7 +3,7 @@
 import type { APIRequestContext, Browser, Page } from '@playwright/test';
 import { ADMIN, apiAs, expect, expectAccessible, roleId, test, uiLogin } from './helpers';
 
-test.describe.configure({ mode: 'serial' });
+test.describe.configure({ mode: process.env.E2E_INDEPENDENT ? 'default' : 'serial' });
 
 const PWD = 'frase larga de compras 2026';
 const USERS = {

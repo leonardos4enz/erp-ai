@@ -1,7 +1,17 @@
 import { test as base, expect, request, type APIRequestContext, type Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 
-export const BASE_URL = 'http://localhost:5090';
+// Spec 028: base y puertos por carpeta (los fija run.mjs; ver instancia.mjs). Ninguna prueba fija un puerto ni la base.
+const PORT_BASE = Number(process.env.E2E_PORT_BASE ?? 5090);
+export const PORTS = {
+  api: PORT_BASE,
+  asistente: PORT_BASE + 1, // proveedor simulado de Anthropic (asistente.spec.ts)
+  produccion: PORT_BASE + 2, // instancia sin AllowDirectChanges (endurecimiento.spec.ts)
+  seguridad015: PORT_BASE + 3, // instancia con aprobación de seguridad (jerarquia.spec.ts)
+  seguridad021: PORT_BASE + 4, // instancia con aprobación de seguridad (endurecimiento-2.spec.ts)
+};
+export const DB = process.env.E2E_DB ?? 'ErpAi_E2E';
+export const BASE_URL = `http://localhost:${PORTS.api}`;
 export const ADMIN = { username: 'admin', password: process.env.E2E_ADMIN_PASSWORD! };
 
 /**

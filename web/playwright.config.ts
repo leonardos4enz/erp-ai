@@ -1,11 +1,15 @@
 import { defineConfig, devices } from '@playwright/test';
 import path from 'node:path';
 
-const PORT = 5090;
+// Spec 028: el puerto y la base salen de la carpeta (run.mjs, instancia.mjs); 5090 y ErpAi_E2E en la carpeta principal.
+const PORT = Number(process.env.E2E_PORT_BASE ?? 5090);
 const root = path.resolve(import.meta.dirname, '..');
 const db = process.env.E2E_DB ?? 'ErpAi_E2E';
 const server = process.env.E2E_SQL_SERVER ?? '(localdb)\\MSSQLLocalDB';
 
+// Revisión adversarial 028 (F-07): también al correr Playwright directo, nunca contra una base que no sea desechable (la
+// del dueño es ErpAi). Mismo criterio que instancia.mjs.
+if (!/^[A-Za-z0-9_]{1,100}$/.test(db) || !db.endsWith('_E2E')) throw new Error(`E2E_DB debe terminar en _E2E (recibido: ${db}).`);
 if (!process.env.E2E_ADMIN_PASSWORD || !process.env.E2E_SIGNING_KEY) {
   throw new Error('Ejecuta la suite con "npm run e2e" (prepara la base y la contraseña de prueba).');
 }
@@ -14,7 +18,7 @@ export default defineConfig({
   testDir: './e2e',
   outputDir: './e2e/.results',
   snapshotPathTemplate: '{testDir}/__screenshots__/{testFilePath}/{arg}{ext}',
-  fullyParallel: false, // comparten una sola base: orden determinista
+  fullyParallel: false, // comparten una sola base y unos archivos dependen de otros (spec 028): orden determinista
   workers: 1,
   retries: 0,
   reporter: [['list'], ['html', { outputFolder: 'e2e/.report', open: 'never' }]],
@@ -69,11 +73,11 @@ export default defineConfig({
       Environments__RequireApproval: 'true',
       Environments__SigningKey: process.env.E2E_SIGNING_KEY ?? '',
       // Spec 012: con aprobación, el modelo solo cambia por paquetes; la suite prepara sus datos con planes, así que lo
-      // permite de forma explícita. endurecimiento.spec.ts levanta otra instancia sin esta opción (:5092) y prueba el bloqueo.
+      // permite de forma explícita. endurecimiento.spec.ts levanta otra instancia sin esta opción (puerto +2) y prueba el bloqueo.
       Environments__AllowDirectChanges: 'true',
       // Spec 011: el asistente habla con un proveedor simulado (asistente.spec.ts) en loopback. La clave se guarda desde la
       // app en la prueba y es ficticia: la suite nunca usa una clave real de Anthropic.
-      Assistant__BaseUrl: 'http://127.0.0.1:5091',
+      Assistant__BaseUrl: `http://127.0.0.1:${PORT + 1}`,
       Assistant__RequestsPerHour: '30',
       Spa__Path: path.join(root, 'web', 'dist'),
     },

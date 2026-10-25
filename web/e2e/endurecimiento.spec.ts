@@ -4,9 +4,9 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import path from 'node:path';
 import { request, type APIRequestContext } from '@playwright/test';
-import { ADMIN, apiAs, applyPlan, expect, roleId, test } from './helpers';
+import { ADMIN, DB, PORTS, apiAs, applyPlan, expect, roleId, test } from './helpers';
 
-test.describe.configure({ mode: 'serial' });
+test.describe.configure({ mode: process.env.E2E_INDEPENDENT ? 'default' : 'serial' });
 
 const GROUP = 'Pruebas 012';
 const PWD = 'frase larga de endurecimiento 2026';
@@ -324,7 +324,7 @@ test('H3 CA2 + H7 CA1: Compras 1.7.0 protege lo recibido y guarda la moneda del 
 });
 
 // ---------------- H4: segunda instancia «producción» sin AllowDirectChanges ----------------
-const PROD = 'http://localhost:5092';
+const PROD = `http://localhost:${PORTS.produccion}`;
 let prod: ChildProcess | undefined;
 
 test.describe('H4 · producción', () => {
@@ -335,13 +335,13 @@ test.describe('H4 · producción', () => {
       env: {
         ...process.env,
         ASPNETCORE_ENVIRONMENT: 'Development',
-        ConnectionStrings__Erp: `Server=${server};Database=${process.env.E2E_DB ?? 'ErpAi_E2E'};Integrated Security=true;Encrypt=true;TrustServerCertificate=true`,
+        ConnectionStrings__Erp: `Server=${server};Database=${DB};Integrated Security=true;Encrypt=true;TrustServerCertificate=true`,
         Database__AutoCreate: 'false',
         Security__LoginAttemptsPerMinute: '1000',
         Environments__Name: 'Producción E2E (sin atajos)',
         Environments__RequireApproval: 'true',
         Environments__SigningKey: process.env.E2E_SIGNING_KEY ?? '',
-        Assistant__BaseUrl: 'http://127.0.0.1:5091',
+        Assistant__BaseUrl: `http://127.0.0.1:${PORTS.asistente}`,
       },
       stdio: 'ignore',
     });
@@ -349,7 +349,7 @@ test.describe('H4 · producción', () => {
       try { if ((await fetch(`${PROD}/api/health`)).ok) return; } catch { /* aún no arranca */ }
       await new Promise((r) => setTimeout(r, 500));
     }
-    throw new Error('La instancia de producción no arrancó en :5092');
+    throw new Error(`La instancia de producción no arrancó en ${PROD}`);
   });
   test.afterAll(() => { prod?.kill(); });
 

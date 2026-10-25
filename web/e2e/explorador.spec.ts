@@ -4,7 +4,7 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import type { APIRequestContext, Browser, Locator, Page } from '@playwright/test';
-import { ADMIN, apiAs, applyPlan, expect, expectAccessible, test, uiLogin } from './helpers';
+import { ADMIN, DB, apiAs, applyPlan, expect, expectAccessible, test, uiLogin } from './helpers';
 
 const PWD = 'frase larga del explorador 2026';
 const users = { modelador: 'e2e-exp-modelador', lector: 'e2e-exp-lector' } as const;
@@ -26,7 +26,7 @@ async function pageAs(browser: Browser, w: keyof typeof users, width = 1280): Pr
 /** SQL directo contra la base desechable de la suite (solo para provocar deriva, como lo haría un DBA). */
 function sql(query: string) {
   const server = process.env.E2E_SQL_SERVER ?? '(localdb)\\MSSQLLocalDB';
-  const db = process.env.E2E_DB ?? 'ErpAi_E2E';
+  const db = DB;
   if (!db.endsWith('_E2E')) throw new Error('Solo contra la base desechable.');
   execFileSync('sqlcmd', ['-S', server, '-E', '-b', '-I', '-d', db, '-Q', query], { stdio: 'pipe' });
 }

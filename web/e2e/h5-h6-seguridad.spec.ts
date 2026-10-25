@@ -1,7 +1,7 @@
 // Spec 001 · H5 (usuarios, roles, permisos) y H6 (auditoría).
 import { ADMIN, apiAs, applyPlan, expect, expectAccessible, roleId, test, uiLogin } from './helpers';
 
-test.describe.configure({ mode: 'serial' });
+test.describe.configure({ mode: process.env.E2E_INDEPENDENT ? 'default' : 'serial' });
 
 const capturista = { username: 'ui-capturista', password: 'frase larga para la interfaz 2026' };
 

@@ -3,7 +3,7 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import path from 'node:path';
 import { request, type APIRequestContext } from '@playwright/test';
-import { ADMIN, apiAs, applyPlan, expect, expectAccessible, roleId, test, uiLogin } from './helpers';
+import { ADMIN, DB, PORTS, apiAs, applyPlan, expect, expectAccessible, roleId, test, uiLogin } from './helpers';
 
 // Al verificar contra el código anterior (E2E_INDEPENDENT=1) una falla no salta las pruebas siguientes: cada una recupera
 // los ids por nombre (el proceso de Playwright se reinicia tras una falla y pierde el estado del módulo).
@@ -23,7 +23,7 @@ const ids: Record<string, number> = {};
 
 /** SQL directo sobre la base desechable de la suite (nunca la de desarrollo). */
 function sql(query: string) {
-  const db = process.env.E2E_DB ?? 'ErpAi_E2E';
+  const db = DB;
   if (!db.endsWith('_E2E')) throw new Error('Solo sobre la base desechable.');
   return execFileSync('sqlcmd', ['-S', process.env.E2E_SQL_SERVER ?? '(localdb)\\MSSQLLocalDB', '-d', db, '-E', '-b', '-I', '-h', '-1', '-W', '-Q',
     `SET NOCOUNT ON; ${query}`]).toString().trim();
@@ -148,7 +148,7 @@ test('H1 CA1 (UI): el administrador de usuarios ve por qué no puede dar superus
 });
 
 // ---------------- H1 CA4–CA5 y H8 CA1: instancia con aprobación de seguridad ----------------
-const SEC = 'http://localhost:5094';
+const SEC = `http://localhost:${PORTS.seguridad021}`;
 let sec: ChildProcess | undefined;
 const secApi: Partial<Record<Who, APIRequestContext>> = {};
 async function loginAt(base: string, username: string, password: string) {
@@ -171,7 +171,7 @@ test.describe('H1 CA4 · CA5 · H8 CA1: aprobación de seguridad', () => {
       env: {
         ...process.env,
         ASPNETCORE_ENVIRONMENT: 'Development',
-        ConnectionStrings__Erp: `Server=${server};Database=${process.env.E2E_DB ?? 'ErpAi_E2E'};Integrated Security=true;Encrypt=true;TrustServerCertificate=true`,
+        ConnectionStrings__Erp: `Server=${server};Database=${DB};Integrated Security=true;Encrypt=true;TrustServerCertificate=true`,
         Database__AutoCreate: 'false',
         Security__LoginAttemptsPerMinute: '1000',
         Security__RequestsPerMinute: '5000',
@@ -189,7 +189,7 @@ test.describe('H1 CA4 · CA5 · H8 CA1: aprobación de seguridad', () => {
       try { if ((await fetch(`${SEC}/api/health`)).ok) return; } catch { /* aún no arranca */ }
       await new Promise((r) => setTimeout(r, 500));
     }
-    throw new Error('La instancia con aprobación de seguridad no arrancó en :5094');
+    throw new Error(`La instancia con aprobación de seguridad no arrancó en ${SEC}`);
   });
   test.afterAll(() => { sec?.kill(); });
 

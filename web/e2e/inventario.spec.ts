@@ -3,7 +3,7 @@
 import type { APIRequestContext, Browser, Page } from '@playwright/test';
 import { ADMIN, apiAs, expect, expectAccessible, roleId, test, uiLogin } from './helpers';
 
-test.describe.configure({ mode: 'serial' });
+test.describe.configure({ mode: process.env.E2E_INDEPENDENT ? 'default' : 'serial' });
 
 const PWD = 'frase larga de compras 2026'; // usuarios creados por compras.spec.ts
 const users = { comprador: 'e2e-comprador', gerente: 'e2e-gerente', almacen: 'e2e-almacen', supervisor: 'e2e-supervisor' } as const;

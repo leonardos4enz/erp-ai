@@ -9,7 +9,9 @@
     "preview": "vite preview",
     "e2e": "node e2e/run.mjs",
     "e2e:ui": "node e2e/run.mjs --ui",
-    "e2e:report": "playwright show-report e2e/.report"
+    "e2e:report": "playwright show-report e2e/.report",
+    "e2e:regresion": "node e2e/regresion.mjs",
+    "revision": "node e2e/revision.mjs"
   },
   "dependencies": {
     "lucide-react": "^0.460.0",

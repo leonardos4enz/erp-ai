@@ -3,9 +3,9 @@
 // importación es del grupo «Pruebas 014» y se archiva al terminar (no altera el menú ni las capturas de referencia).
 import { execFileSync, spawn } from 'node:child_process';
 import type { APIRequestContext } from '@playwright/test';
-import { ADMIN, apiAs, applyPlan, expect, test } from './helpers';
+import { ADMIN, DB, apiAs, applyPlan, expect, test } from './helpers';
 
-test.describe.configure({ mode: 'serial' });
+test.describe.configure({ mode: process.env.E2E_INDEPENDENT ? 'default' : 'serial' });
 
 const GROUP = 'Pruebas 014';
 type Row = { id: number; _rowVersion: string; [k: string]: unknown };
@@ -17,7 +17,7 @@ const today = new Date().toLocaleDateString('en-CA'); // aaaa-mm-dd, hora local 
 
 /** SQL directo sobre la base desechable de la suite (nunca la de desarrollo). */
 function sql(query: string) {
-  const db = process.env.E2E_DB ?? 'ErpAi_E2E';
+  const db = DB;
   if (!db.endsWith('_E2E')) throw new Error('Solo sobre la base desechable.');
   return execFileSync('sqlcmd', ['-S', process.env.E2E_SQL_SERVER ?? '(localdb)\\MSSQLLocalDB', '-d', db, '-E', '-b', '-I', '-h', '-1', '-W', '-Q',
     `SET NOCOUNT ON; ${query}`]).toString().trim();
@@ -175,7 +175,7 @@ const folioNumber = (r: Row) => Number(String(r.Folio).replace('T14-', ''));
  * tomar su primer folio, que es donde el código anterior retenía la secuencia. Así la prueba no depende de tiempos.
  */
 function holdName(nombre: string, seconds: number) {
-  const db = process.env.E2E_DB ?? 'ErpAi_E2E';
+  const db = DB;
   if (!db.endsWith('_E2E')) throw new Error('Solo sobre la base desechable.');
   const p = spawn('sqlcmd', ['-S', process.env.E2E_SQL_SERVER ?? '(localdb)\\MSSQLLocalDB', '-d', db, '-E', '-b', '-I', '-Q',
     `SET NOCOUNT ON; BEGIN TRAN; INSERT app.P14Ticket (Folio, Nombre, Grupo, CreatedBy) VALUES (N'EXT-014', N'${nombre}', N'Externo', 1);

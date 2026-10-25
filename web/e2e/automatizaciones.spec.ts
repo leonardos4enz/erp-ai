@@ -3,7 +3,7 @@
 import type { APIRequestContext } from '@playwright/test';
 import { ADMIN, apiAs, applyPlan, expect, expectAccessible, openJson, test } from './helpers';
 
-test.describe.configure({ mode: 'serial' });
+test.describe.configure({ mode: process.env.E2E_INDEPENDENT ? 'default' : 'serial' });
 
 const G = 'Pruebas 005';
 let admin: APIRequestContext;

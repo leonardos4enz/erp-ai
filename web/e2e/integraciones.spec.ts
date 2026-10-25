@@ -7,9 +7,9 @@ import { readFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { APIRequestContext, Browser, Page } from '@playwright/test';
-import { ADMIN, anonApi, apiAs, applyPlan, expect, expectAccessible, openJson, roleId, test, uiLogin } from './helpers';
+import { ADMIN, DB, BASE_URL, anonApi, apiAs, applyPlan, expect, expectAccessible, openJson, roleId, test, uiLogin } from './helpers';
 
-test.describe.configure({ mode: 'serial' });
+test.describe.configure({ mode: process.env.E2E_INDEPENDENT ? 'default' : 'serial' });
 
 const PWD = 'frase larga de integraciones 2026';
 const COMPRAS_PWD = 'frase larga de compras 2026'; // usuarios creados por compras.spec.ts
@@ -148,7 +148,7 @@ test('H1 CA2: el administrador configura el destino; URLs internas rechazadas; e
   for (const [bad, message] of [
     ['http://169.254.169.254/latest/meta-data', /interna/], // metadatos de la nube (SSRF)
     ['http://10.0.0.5/hook', /interna/],
-    ['http://localhost:5090/api/admin/users', /interna/],
+    [`${BASE_URL}/api/admin/users`, /interna/],
     ['https://usuario:clave@ejemplo.com/hook', /usuario ni contraseña/],
     ['ftp://ejemplo.com/hook', /https/],
   ] as const) {
@@ -550,7 +550,7 @@ test('Integraciones: solo el superusuario ve la opción y la ruta', async ({ bro
 
 /** SQL directo sobre la base desechable de la suite (nunca la de desarrollo). */
 function sql(query: string) {
-  const db = process.env.E2E_DB ?? 'ErpAi_E2E';
+  const db = DB;
   if (!db.endsWith('_E2E')) throw new Error('Solo sobre la base desechable.');
   execFileSync('sqlcmd', ['-S', process.env.E2E_SQL_SERVER ?? '(localdb)\\MSSQLLocalDB', '-d', db, '-E', '-b', '-Q', query]);
 }

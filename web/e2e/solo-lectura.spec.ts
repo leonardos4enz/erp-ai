@@ -5,7 +5,7 @@
 import type { APIRequestContext } from '@playwright/test';
 import { ADMIN, apiAs, applyPlan, expect, roleId, test, uiLogin } from './helpers';
 
-test.describe.configure({ mode: 'serial' });
+test.describe.configure({ mode: process.env.E2E_INDEPENDENT ? 'default' : 'serial' });
 
 const GROUP = 'Pruebas 013';
 const PWD = 'frase larga de solo lectura 2026';
