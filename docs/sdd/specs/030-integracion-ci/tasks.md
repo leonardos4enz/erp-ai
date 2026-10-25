@@ -20,8 +20,8 @@
 
 ## 3. H3 — CI (P8)
 - [x] `.github/workflows/ci.yml`: rápido en `ubuntu-latest`; integración y E2E en `windows-2025` en `main` o a mano.
-- [ ] Trabajo rápido en Linux: no se pudo probar localmente (Docker Desktop detenido y sin distribución de WSL); sus pasos sí corrieron en Windows. Lo prueba el push.
-- [ ] Primera corrida en GitHub tras el push (registrada en `verify.md`).
+- [x] Trabajo rápido en Linux: no se pudo probar localmente (Docker Desktop detenido y sin distribución de WSL); en verde en GitHub.
+- [x] Corridas en GitHub registradas en `verify.md`: la primera falló en E2E (intermitente, R-030-5; se agregaron anotaciones), la segunda en verde.
 - [x] `verificacion.md` y `CLAUDE.md`: CI es la segunda corrida completa; si falla, la spec se reabre.
 
 ## 4. H4 — Vitest (P14)

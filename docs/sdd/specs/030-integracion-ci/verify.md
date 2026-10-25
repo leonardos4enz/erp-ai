@@ -11,7 +11,7 @@
 - hallazgos: 0/5/2
 - categorías: accesibilidad=3, UI/UX=1, visual=1, concurrencia=1, pruebas=1
 - revisión adversarial: 12 hallazgos (0 altos, 5 medios, 7 bajos)
-- riesgos: R-030-1, R-030-2, R-030-3, R-030-4
+- riesgos: R-030-1, R-030-2, R-030-3, R-030-4, R-030-5
 
 ## 1. Pruebas unitarias
 `dotnet test`: **687 correctas**: 628 de `tests/Erp.Tests` (sin cambios) y **59 nuevas** en `tests/Erp.IntegrationTests`
@@ -148,8 +148,9 @@ espera, foco al cerrar diálogos, aviso de conflicto) se recorrieron en las prue
 | Corrida | Commit | Resultado |
 |---|---|---|
 | [40235967108](https://github.com/leonardos4enz/erp-ai/actions/runs/40235967108) | `257c438` | Rápido (Ubuntu) **en verde** en 1 min 03 s: unitarias, build, Vitest y `npm audit`. Completo (`windows-2025`): LocalDB y `sqlcmd` presentes, integración **en verde** (1 min 13 s), **E2E falló** a los 11 min sin dejar reporte de Playwright. Los registros de un repositorio público solo se ven con sesión iniciada y la sesión no inicia sesiones: la spec se reabre y el workflow publica el motivo como anotaciones (`web/e2e/anotar-ci.mjs`, legibles por la API sin credenciales) |
+| [40237335138](https://github.com/leonardos4enz/erp-ai/actions/runs/40237335138) | `a8cfa7e` | **En verde**: rápido 49 s; completo 10 min 25 s (E2E completa 8 min 13 s, misma suite y mismo código de producto que la corrida anterior). La primera falla fue intermitente y su prueba no se conoce: queda como **R-030-5**; desde esta corrida una falla deja su motivo en las anotaciones |
 
 ## 5. Riesgos residuales
 Registrados en [riesgos.md](../../riesgos.md#030): R-030-1 (caché del modelo por instancia), R-030-2 (workflow sin prueba fuera
-de GitHub), R-030-3 (16 pantallas sin captura), R-030-4 (lo que las guardias no cubren). Actualizados: R-028-2, R-028-3 y
+de GitHub), R-030-3 (16 pantallas sin captura), R-030-4 (lo que las guardias no cubren), R-030-5 (falla intermitente desconocida en la primera corrida de CI). Actualizados: R-028-2, R-028-3 y
 R-029-12.
