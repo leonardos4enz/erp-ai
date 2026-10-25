@@ -90,6 +90,12 @@ public sealed class CapabilityHandler : AuthorizationHandler<CapabilityRequireme
     }
 }
 
+/// <summary>
+/// Spec 031 (H6): requisito de la política por omisión (<c>FallbackPolicy</c>). Ningún manejador lo cumple: una ruta que no
+/// declara su capacidad no responde a nadie, ni al superusuario (401 sin sesión, 403 con ella).
+/// </summary>
+public sealed class UndeclaredRouteRequirement : IAuthorizationRequirement;
+
 /// <summary>Sin la capacidad: el mismo ProblemDetails que <see cref="Forbidden"/> (constitución II.6), no un 403 vacío.</summary>
 public sealed class CapabilityResultHandler : IAuthorizationMiddlewareResultHandler
 {
@@ -97,7 +103,7 @@ public sealed class CapabilityResultHandler : IAuthorizationMiddlewareResultHand
 
     public async Task HandleAsync(RequestDelegate next, HttpContext http, AuthorizationPolicy policy, PolicyAuthorizationResult result)
     {
-        if (result.Forbidden && result.AuthorizationFailure?.FailedRequirements.OfType<CapabilityRequirement>().Any() == true)
+        if (result.Forbidden && result.AuthorizationFailure?.FailedRequirements.Any(r => r is CapabilityRequirement or UndeclaredRouteRequirement) == true)
         {
             http.Response.StatusCode = StatusCodes.Status403Forbidden;
             await http.RequestServices.GetRequiredService<IProblemDetailsService>().WriteAsync(new ProblemDetailsContext

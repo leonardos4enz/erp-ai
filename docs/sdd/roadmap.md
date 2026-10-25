@@ -36,8 +36,9 @@ en orden, no en paralelo: casi todas tocan el núcleo del motor (`PlanCompiler`,
 | 028 Mejoras del proceso (retrospectiva 001) | Implementado ([spec](specs/028-mejoras-proceso/spec.md)) |
 | 029 Endurecimiento 3: capacidades declaradas y canario de fugas | Implementado ([spec](specs/029-endurecimiento-3/spec.md)) |
 | 030 Integración y CI | Implementado ([spec](specs/030-integracion-ci/spec.md)) |
-| 031 Módulo de Ventas | Planeado |
-| 032 CFDI 4.0 con PAC | Planeado |
+| 031 Endurecimiento 4 (auditoría 5) | Implementado ([spec](specs/031-endurecimiento-4/spec.md)) |
+| 032 Módulo de Ventas | Planeado |
+| 033 CFDI 4.0 con PAC | Planeado |
 
 ## Diagnóstico
 | Brecha señalada | Situación actual | Spec |
@@ -276,7 +277,7 @@ reglas de negocio** (constitución I.1), configurables por metadatos con valores
   ventas) y revaluación, que siguen de la 020.
 
 ### 023 — Capacidades del motor: listas que se fusionan, reglas de aviso y rutas de tres niveles
-Origen: pendientes de la 022 que limitan a los módulos y que Ventas (024, luego 025, 026, 027, 028, ahora 031) necesitará; plan del dueño (2026-10-24).
+Origen: pendientes de la 022 que limitan a los módulos y que Ventas (024, luego 025, 026, 027, 028, 031, ahora 032) necesitará; plan del dueño (2026-10-24).
 - **Estado:** implementado en la [spec 023](specs/023-capacidades-motor/spec.md). `merge` en las seis listas del catálogo
   (reglas, automatizaciones, vistas, reportes, webhooks, tareas): agrega o reemplaza por nombre en su lugar; la vista previa
   ya no dice que quita lo que un `merge` conserva, y un paquete de Entornos que extiende un catálogo que no crea llega al
@@ -357,12 +358,12 @@ la representación impresa del CFDI). Ventas pasa a la 028 y CFDI 4.0 a la 029.
   servidor SMTP/proveedor, plantillas de mensaje y bitácora); adjuntarlo automáticamente al ejecutar una transición
   (requiere el tipo de campo archivo); firma electrónica (e.firma/FIEL: certificados y custodia de llaves, otra spec);
   **tipo de campo `image`/`file` en catálogos** (DDL, captura, importación, OData, miniaturas y límites por registro: la
-  base `meta.[File]` ya existe); SVG sanitizado y WebP; códigos QR y de barras (los pedirá el CFDI, ahora 032); diseño libre por
+  base `meta.[File]` ya existe); SVG sanitizado y WebP; códigos QR y de barras (los pedirá el CFDI, ahora 033); diseño libre por
   coordenadas.
 
 ### 028 — Mejoras del proceso (retrospectiva 001)
 Origen: la [retrospectiva 001](retrospectivas/001-specs-001-026.md) de las specs 001–026 y el pedido del dueño
-(2026-10-25) de aplicarla. Ventas pasa a la 031 y CFDI 4.0 a la 032.
+(2026-10-25) de aplicarla. Ventas pasa a la 031 y CFDI 4.0 a la 032 (y con la 031, Endurecimiento 4, a la 032 y la 033).
 - **Estado:** implementado en la [spec 028](specs/028-mejoras-proceso/spec.md). Reglas (P3, P4, P7, P12): STRIDE con 8
   filas obligatorias y prueba enlazada, revisión adversarial con un subagente independiente en cada VERIFY, auditoría
   externa cada 5 specs (ver [Auditorías](#auditorías)), una corrida completa + lo nuevo tres veces (`--veces=3`), criterios
@@ -384,9 +385,12 @@ ya marcados) y sus hallazgos se vuelven una spec de endurecimiento.
 | 2026-10-23 (origen de la 014) | 012–013 | 7 defectos |
 | 2026-10-24 (origen de la 021) | 014–020 | 8 defectos |
 | 2026-10-25, auditoría 4 (origen de la 029) | 021–028 | 9 defectos (1 alto: rutas de varios saltos fuera de alcance); ninguno de los 29 riesgos marcados estaba resuelto |
-| **Próxima: adelantada, antes de abrir la 031** (al cerrar la 030) | 029–030 | — |
+| 2026-10-25, auditoría 5 (origen de la 031), adelantada | 029 (y la 030 en curso) | 5 defectos (1 alto: la importación calculaba avisos sin el alcance de quien importa) y 9 observaciones del canario y el inventario |
+| **Próxima: al cerrar la 035** (o antes si una spec agrega un punto de entrada, un trabajo asíncrono o delegación) | 031–035 | — |
 
-La auditoría 4 cubrió 021–028. La siguiente **conviene adelantarla** (al cerrar la 030 y antes de la 031, sin esperar 5 specs):
+La auditoría 5 (adelantada, sobre la 029) confirmó que las 139 rutas conservan una capacidad igual o más estricta y
+encontró que la regla «lo vivo con el alcance de quien lo ve» de la 029 no llegaba a la importación, a las transiciones ni
+al PDF; la 031 la cierra. La auditoría 4 cubrió 021–028 y pidió adelantar la 5 (al cerrar la 030 y antes de la 031, sin esperar 5 specs):
 la 029 cambió la autorización de **todas** las rutas (capacidad como metadato, requisito de autorización en lugar de
 comprobaciones en cada handler) y la visibilidad de las fórmulas en todos los caminos. La auditoría ya tiene herramientas:
 [`rutas.md`](rutas.md) (qué pide cada ruta, generado y probado) y `web/e2e/canario.spec.ts` (fugas por cualquier ruta GET).
@@ -419,6 +423,19 @@ Origen: retrospectiva 001 (P5, P8, P9 y P14) y los riesgos R-028-2, R-028-3 y R-
 - **Pendiente (diferido con razón):** fragmentar la suite (R-028-2: corre en un solo trabajo de CI); caché del modelo por
   instancia (R-030-1, solo importa con varias instancias); 16 de 23 pantallas sin captura de referencia (R-030-3); autenticación SQL
   para un SQL Server en contenedor (no hace falta con LocalDB en Windows).
+
+### 031 — Endurecimiento 4: lo que se le dice a una persona, con su alcance
+Origen: la auditoría externa 5 (2026-10-25, solo lectura sobre la 029), que la 030 dejó planeada antes de Ventas.
+- **Estado:** implementado en la [spec 031](specs/031-endurecimiento-4/spec.md). **Lo que se le dice o se le pregunta a una
+  persona se evalúa con su alcance** en la importación (vista previa = `/compute`), en el 428/400 de las transiciones (también
+  las que ejecuta una automatización síncrona) y en `UNITCOST` del PDF; lo que se guarda y decide sigue con la autoridad del
+  motor (A-01, A-04, A-05). **Costeo 1.2.0** con seguridad por campo para los costos: la cuenta de servicio de la tienda ya
+  no los lee (A-03). Quien aprueba no mueve a un usuario o equipo a su unidad (A-02). **`FallbackPolicy`** que niega lo no
+  declarado, tableros, reportes y OData con límite por usuario y un canario que toma las rutas del inventario, falla con un
+  parámetro sin resolver y lee XLSX.
+- **Pendiente (diferido con razón):** `Producto.CostoUltimo` (Compras) lo lee la Integración de tienda; protegerlo pide
+  roles de otro módulo o un permiso por campo para cuentas de servicio (R-031-1, capacidad nueva del motor); que el
+  almacenista vea el costo de entrada (R-029-6, decisión del dueño).
 
 ## Specs planeadas (después de la 029)
 En este orden, por decisión del dueño (2026-10-25):
@@ -453,14 +470,16 @@ En este orden, por decisión del dueño (2026-10-25):
    - *Verificación:* las regresiones de 012-3 y 021-3 corren en integración y fallan con `cd81760` y `f6c5445`; CI en
      verde en `main` y un push con una prueba rota falla; `npm --prefix web test` cubre 026 F-03 y F-06; cada guardia falla
      con el CSS o componente anterior a su hallazgo. En CLARIFY, revisar si se divide (P12): son cuatro frentes.
-   - **Antes de la 031 (número al abrirla, decisión del dueño si se renumera):** auditoría externa adelantada de la 029–030 y
-     una spec de pendientes con D-06 (tareas programadas que se saltan registros, R-029-4), D-07 (importación «1,5» → 15 y
-     fechas con desfase, R-029-5), R-021-5 (`ForwardedHeaders`) y R-021-6 (bloqueo de navegación en la SPA), más lo que
-     encuentre la auditoría. Sus pruebas de concurrencia y fallas parciales van en integración.
-3. **031 — Módulo de Ventas:** clientes, cotización, pedido, salida de almacén con costo de ventas (póliza de salidas),
+   - ~~**Antes de Ventas:** auditoría externa adelantada de la 029–030 y una spec con lo que encuentre.~~ Hecho: la
+     auditoría 5 y la **031 — Endurecimiento 4** (ver arriba). La otra mitad de esa «spec de pendientes» sigue abierta:
+     D-06 (tareas programadas que se saltan registros, R-029-4), D-07 (importación «1,5» → 15 y fechas con desfase,
+     R-029-5), R-021-5 (`ForwardedHeaders`), R-021-6 (bloqueo de navegación en la SPA) y un permiso por campo para cuentas
+     de servicio (R-031-1). Va en su propia spec; **el dueño decide si antes de Ventas** (se numeraría al abrirla y Ventas y
+     CFDI se recorrerían). Sus pruebas de concurrencia y fallas parciales van en integración.
+3. **032 — Módulo de Ventas:** clientes, cotización, pedido, salida de almacén con costo de ventas (póliza de salidas),
    factura y cobranza. Usa `merge` para extender Producto e Inventario, avisos (límite de crédito) y rutas de tres niveles;
    declara su módulo con `setApp` (orden 15, entre Compras e Inventario).
-4. **032 — CFDI 4.0 con PAC:** timbrado de la factura de Ventas con un proveedor autorizado, cancelación y complemento de
+4. **033 — CFDI 4.0 con PAC:** timbrado de la factura de Ventas con un proveedor autorizado, cancelación y complemento de
    pago; el secreto del PAC fuera del código (constitución II.7). Su representación impresa usa las plantillas de la 027
    (con un bloque de código QR nuevo).
 5. **Pólizas en moneda extranjera** (pendiente de la 020).

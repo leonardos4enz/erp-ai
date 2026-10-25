@@ -59,6 +59,8 @@ export default defineConfig({
       // Spec 029: exportar e importar como lo hace la suite; la búsqueda se deja baja para probar su 429 (capacidades.spec.ts).
       Security__BulkPerMinute: '1000',
       Security__SearchesPerMinute: '120',
+      // Spec 031: tableros, reportes y OData como los recorre la suite (en producción, 120 por minuto).
+      Security__AggregatesPerMinute: '1000',
       // Spec 008: el receptor de webhooks de la suite escucha en 127.0.0.1 por http; ninguna otra IP interna se permite.
       Webhooks__AllowHttp: 'true',
       Webhooks__AllowedInternalAddresses: '127.0.0.1',

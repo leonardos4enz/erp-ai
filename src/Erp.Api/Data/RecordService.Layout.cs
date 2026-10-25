@@ -54,7 +54,9 @@ public sealed partial class RecordService
         Unary u => ReadsHidden(u.Operand, e, model, user),
         Binary b => ReadsHidden(b.Left, e, model, user) || ReadsHidden(b.Right, e, model, user),
         InList i => ReadsHidden(i.Value, e, model, user) || i.Items.Any(x => ReadsHidden(x, e, model, user)),
-        Call c => c.Args.Any(a => ReadsHidden(a, e, model, user)),
+        // Spec 031 (revisión adversarial F-A): UNITCOST lee el valor y la cantidad costeada del catálogo de saldo.
+        Call c => c is { Name: "UNITCOST", Args: [Literal { Value: string book }, ..] } && DerivedAccess.CostBookHidden(book, model, user)
+                  || c.Args.Any(a => ReadsHidden(a, e, model, user)),
         _ => false,
     };
 

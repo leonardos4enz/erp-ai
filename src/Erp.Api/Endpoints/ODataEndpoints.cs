@@ -47,7 +47,8 @@ public static partial class ODataEndpoints
         // Spec 021 (H7 CA2): partidas expandidas por página; la suite lo baja para probarlo con pocos registros.
         var maxLines = Math.Clamp(config.GetValue("OData:MaxExpandedLines", ODataQuery.DefaultMaxExpandedLines), 1, ODataQuery.DefaultMaxExpandedLines);
         g.MapGet("/{segment}", (string segment, HttpContext http, MetadataStore store, RecordService records, CancellationToken ct) =>
-            Run(http, () => SegmentAsync(segment, http, store, records, pageSize, maxLines, ct))).Requires(Capability.Records);
+            Run(http, () => SegmentAsync(segment, http, store, records, pageSize, maxLines, ct))).Requires(Capability.Records)
+            .Costly("$filter, $orderby y $expand sobre un catálogo").RequireRateLimiting(RatePolicies.Aggregate); // spec 031
         g.MapMethods("/{**rest}", ["POST", "PUT", "PATCH", "DELETE", "MERGE"], (HttpContext http) =>
         {
             http.Response.Headers.Allow = "GET";

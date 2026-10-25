@@ -63,7 +63,8 @@ app.UseCsrfHeaderCheck();
 app.MapErpRoutes();
 
 if (spaFiles is not null)
-    app.MapFallbackToFile("index.html", new StaticFileOptions { FileProvider = spaFiles });
+    // La SPA es pública (pide sesión al cargar): la política por omisión de la 031 niega lo que no se declara.
+    app.MapFallbackToFile("index.html", new StaticFileOptions { FileProvider = spaFiles }).AllowAnonymous();
 
 app.Run();
 

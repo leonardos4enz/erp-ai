@@ -1,7 +1,9 @@
 // Spec 029 · H2-H4: canario de fugas. Un valor único (CANARIO-<guid>) vive donde el usuario «CN Lector» no debe llegar: un
 // campo oculto para su rol, un registro fuera de su alcance, ese mismo registro detrás de uno visible (2 y 3 saltos) y un
 // registro de otra empresa. Luego se recorren TODAS las rutas GET del inventario (docs/sdd/rutas.md) y los POST que
-// devuelven datos, como ese usuario, y ninguna respuesta puede contener el canario (JSON, CSV ni el texto del PDF).
+// devuelven datos, como ese usuario, y ninguna respuesta puede contener el canario (JSON, CSV, XLSX ni el texto del PDF).
+// Spec 031 (auditoría 5): un parámetro de ruta sin resolver hace fallar el recorrido, las rutas que no son GET salen del
+// inventario y lo que se le dice al lector en la importación es lo mismo que en /compute (el bit, no solo la cadena).
 // Autocontenido: crea sus catálogos (grupo «Pruebas 029»), su empresa y su usuario, y los archiva al terminar.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -207,12 +209,12 @@ function pdfText(pdf: Buffer): string {
 
 // ---------------- Recorrido del inventario ----------------
 
-type InventoryRoute = { method: string; path: string; capability: string };
+type InventoryRoute = { method: string; path: string; capability: string; effect: string };
 function inventory(): InventoryRoute[] {
   const md = fs.readFileSync(path.join(HERE, '..', '..', 'docs', 'sdd', 'rutas.md'), 'utf8');
   return md.split('\n').filter((l) => l.startsWith('| ') && l.includes('`'))
     .map((l) => l.split('|').map((c) => c.trim()))
-    .map((c) => ({ method: c[1], path: c[2].replace(/`/g, ''), capability: c[3] }));
+    .map((c) => ({ method: c[1], path: c[2].replace(/`/g, ''), capability: c[3], effect: c[4] }));
 }
 
 /** Rutas concretas de una plantilla, con los registros del canario en cada parámetro. */
@@ -236,24 +238,57 @@ function expand(template: string, ids: Record<string, number>): string[] {
   fill('{id:int}', ['1']);
   fill('{token}', ['x']);
   fill('{key}', ['x']);
+  // Spec 031: un parámetro nuevo (p. ej. {code}) se pedía con el texto literal y la ruta pasaba sin recorrerse.
+  const unresolved = urls.filter((u) => /\{[^}]*\}/.test(u));
+  if (unresolved.length) throw new Error(`expand() no sabe llenar ${unresolved.join(', ')}: agrega el parámetro con los datos del canario`);
   return urls;
 }
 
 /** Parámetros de consulta que hacen que una ruta devuelva más (búsquedas, formato, todas las columnas). */
 const QUERIES: Record<string, Record<string, string>[]> = {
   '/api/search': [{ q: 'CND-' }, { q: 'CNS-' }, { q: 'CANARIO' }],
-  '/api/data/{entity}/': [{}, { search: 'CANARIO' }, { search: 'Secreto' }],
-  '/api/data/{entity}/lookup': [{}, { search: 'Secreto' }, { search: 'CANARIO' }],
-  '/api/data/{entity}/export': [{ format: 'csv' }, { format: 'csv', columns: 'Folio,Nombre,Oculto,Dos,Tres,OtraEmpresa,Copia,Dato,Secreto' }],
-  '/api/reports/{entity}/{name}/export': [{ format: 'csv' }],
+  '/api/data/{entity}/': [{}, { search: 'CANARIO' }, { search: 'Secreto' }, ...['Dos', 'Tres', 'Copia', 'Oculto'].map((sort) => ({ sort, dir: 'desc' }))],
+  // Spec 031: el buscador filtrado (por un campo que ve y por uno oculto, que es 400).
+  '/api/data/{entity}/lookup': [{}, { search: 'Secreto' }, { search: 'CANARIO' }, { filterField: 'Secreto', filterValue: '1' },
+    { filterField: 'Puente', filterValue: '1' }, { filterField: 'Oculto', filterValue: 'CANARIO' }],
+  '/api/data/{entity}/export': [{ format: 'csv' }, { format: 'csv', columns: 'Folio,Nombre,Oculto,Dos,Tres,OtraEmpresa,Copia,Dato,Secreto' },
+    { format: 'xlsx' }, { format: 'xlsx', columns: 'Folio,Nombre,Oculto,Dos,Tres,OtraEmpresa,Copia,Dato,Secreto' }],
+  '/api/reports/{entity}/{name}/export': [{ format: 'csv' }, { format: 'xlsx' }],
   '/api/audit': [{}, { entity: 'CnDoc' }, { entity: 'CnSecreto' }, { entity: 'CnEmpresa' }],
   '/api/users/lookup': [{}],
   '/odata/{segment}': [{}, { $expand: 'Puente' }],
 };
 
+/**
+ * Spec 031: el texto de cada parte de un ZIP (un .xlsx), por su directorio central: el canario dentro de una celda va
+ * comprimido y `includes` sobre los bytes no lo vería.
+ */
+function zipText(zip: Buffer): string {
+  let eocd = zip.length - 22;
+  while (eocd >= 0 && zip.readUInt32LE(eocd) !== 0x06054b50) eocd--;
+  if (eocd < 0) throw new Error('no es un ZIP');
+  const count = zip.readUInt16LE(eocd + 10);
+  let at = zip.readUInt32LE(eocd + 16);
+  const parts: string[] = [];
+  for (let i = 0; i < count; i++) {
+    if (zip.readUInt32LE(at) !== 0x02014b50) throw new Error('directorio central dañado');
+    const method = zip.readUInt16LE(at + 10), size = zip.readUInt32LE(at + 20);
+    const nameLen = zip.readUInt16LE(at + 28), extraLen = zip.readUInt16LE(at + 30), commentLen = zip.readUInt16LE(at + 32);
+    const local = zip.readUInt32LE(at + 42);
+    const start = local + 30 + zip.readUInt16LE(local + 26) + zip.readUInt16LE(local + 28);
+    const data = zip.subarray(start, start + size);
+    parts.push((method === 8 ? zlib.inflateRawSync(data) : data).toString('utf8'));
+    at += 46 + nameLen + extraLen + commentLen;
+  }
+  return parts.join('\n');
+}
+
 async function bodyText(res: { headers(): Record<string, string>; body(): Promise<Buffer> }) {
   const body = await res.body();
-  return (res.headers()['content-type'] ?? '').includes('pdf') ? pdfText(body) : body.toString('utf8');
+  const type = res.headers()['content-type'] ?? '';
+  if (type.includes('pdf')) return pdfText(body);
+  if (type.includes('spreadsheetml')) return zipText(body);
+  return body.toString('utf8');
 }
 
 test('H2 CA2: ninguna ruta GET del inventario devuelve el canario al lector', async () => {
@@ -273,29 +308,93 @@ test('H2 CA2: ninguna ruta GET del inventario devuelve el canario al lector', as
       }
   expect(visited).toBeGreaterThan(150);
   expect(leaks, 'rutas que devuelven el canario').toEqual([]);
+  // La extracción de XLSX funciona (si no, buscar el canario en Excel no probaría nada).
+  const own = await (await admin()).get('/api/data/CnDoc/export', { params: { format: 'xlsx', columns: 'Nombre,Oculto' } });
+  expect(zipText(await own.body())).toContain(canary);
 });
 
-test('H2 CA2: tampoco los POST que devuelven datos: /compute, vista previa de importación y transición', async () => {
+test('H2 CA2 (031): ordenar por una fórmula o un campo que no ve se ignora (el orden no es un oráculo)', async () => {
+  const l = await lector();
+  const order = async (params: Record<string, string>) =>
+    ((await (await l.get('/api/data/CnDoc', { params: { pageSize: '50', ...params } })).json()).items as { id: number }[]).map((r) => r.id);
+  const base = await order({});
+  expect(base.length).toBeGreaterThan(1);
+  for (const sort of ['Dos', 'Tres', 'OtraEmpresa', 'Copia', 'Oculto'])
+    for (const dir of ['asc', 'desc']) expect(await order({ sort, dir }), `sort=${sort}&dir=${dir}`).toEqual(base);
+});
+
+/**
+ * Una fila que el lector sí puede importar. Spec 031: la de la 029 traía también «Puente visible», cuyo campo para mostrar es
+ * una fórmula que no ve (F-B), así que la fila fallaba y la vista previa no calculaba avisos: la prueba no probaba nada.
+ */
+const IMPORT_CSV = Buffer.from('Nombre;Puente doble\nImportado;Puente doble visible\n');
+
+test('H2 CA2: tampoco las rutas que no son GET y devuelven datos (tomadas del inventario)', async () => {
   const l = await lector();
   const { canary, ids } = state;
   const leaks: string[] = [];
-  const check = async (what: string, res: { headers(): Record<string, string>; body(): Promise<Buffer>; status(): number }) => {
+  type Res = { headers(): Record<string, string>; body(): Promise<Buffer>; status(): number };
+  const check = async (what: string, res: Res) => {
     if ((await bodyText(res)).includes(canary)) leaks.push(`${what} (${res.status()})`);
   };
-  for (const values of [{ Puente: ids.puente, Puente2: ids.puente2 }, { Puente: ids.puenteEmpresa }, { Puente: ids.secreto }, {}])
-    await check(`compute nuevo ${JSON.stringify(values)}`, await l.post('/api/data/CnDoc/compute', { data: { values: { Nombre: 'x', ...values } } }));
-  for (const id of [ids.doc, ids.docEmpresa])
-    await check(`compute ${id}`, await l.post('/api/data/CnDoc/compute', { data: { id, values: {} } }));
-  const csv = Buffer.from('Nombre;Puente;Puente doble\nImportado;Puente visible;Puente doble visible\n');
-  await check('importación (vista previa)', await l.post('/api/data/CnDoc/import', { params: { dryRun: 'true' }, data: csv, headers: { 'Content-Type': 'application/octet-stream' } }));
-  // Crear y editar devuelven el registro con sus fórmulas (y avisos).
-  const created = await l.post('/api/data/CnDoc', { data: { Nombre: 'Del lector', Puente: ids.puente, Puente2: ids.puente2 } });
-  expect(created.status(), await created.text()).toBe(201);
-  await check('crear', created);
-  const mine = await created.json();
-  await check('editar', await l.put(`/api/data/CnDoc/${mine.id}`, { data: { Nombre: 'Del lector (editado)', _rowVersion: mine._rowVersion } }));
-  await check('transición', await l.post(`/api/data/CnDoc/${ids.doc}/transition`, { data: { transition: 'cerrar', _rowVersion: await version(state.ids.doc) } }));
-  expect(leaks, 'POST que devuelven el canario').toEqual([]);
+  let mine: { id: number; _rowVersion: string } | undefined;
+  // Spec 031 (auditoría 5): la lista sale del inventario. Una ruta nueva que escribe datos o no guarda nada, y que el lector
+  // puede llamar, hace fallar la prueba hasta que tenga su llamada aquí. Las de efecto «sesión» (sus vistas, su empresa,
+  // cerrar sesión) no devuelven registros.
+  const calls: Record<string, () => Promise<void>> = {
+    'POST /api/data/{entity}/compute': async () => {
+      for (const values of [{ Puente: ids.puente, Puente2: ids.puente2 }, { Puente: ids.puenteEmpresa }, { Puente: ids.secreto }, {}])
+        await check(`compute nuevo ${JSON.stringify(values)}`, await l.post('/api/data/CnDoc/compute', { data: { values: { Nombre: 'x', ...values } } }));
+      for (const id of [ids.doc, ids.docEmpresa])
+        await check(`compute ${id}`, await l.post('/api/data/CnDoc/compute', { data: { id, values: {} } }));
+    },
+    'POST /api/data/{entity}/import': async () => {
+      const res = await l.post('/api/data/CnDoc/import', { params: { dryRun: 'true' }, data: IMPORT_CSV, headers: { 'Content-Type': 'application/octet-stream' } });
+      expect((await res.json()).valid, await res.text()).toBe(true);
+      await check('importación (vista previa)', res);
+    },
+    // Crear y editar devuelven el registro con sus fórmulas (y avisos).
+    'POST /api/data/{entity}/': async () => {
+      const created = await l.post('/api/data/CnDoc', { data: { Nombre: 'Del lector', Puente: ids.puente, Puente2: ids.puente2 } });
+      expect(created.status(), await created.text()).toBe(201);
+      await check('crear', created);
+      mine = await created.json();
+    },
+    'PUT /api/data/{entity}/{id:long}': async () =>
+      check('editar', await l.put(`/api/data/CnDoc/${mine!.id}`, { data: { Nombre: 'Del lector (editado)', _rowVersion: mine!._rowVersion } })),
+    'POST /api/data/{entity}/{id:long}/transition': async () =>
+      check('transición', await l.post(`/api/data/CnDoc/${ids.doc}/transition`, { data: { transition: 'cerrar', _rowVersion: await version(state.ids.doc) } })),
+    // El lector no borra (403); el cuerpo del rechazo tampoco lleva el dato.
+    'DELETE /api/data/{entity}/{id:long}': async () => check('borrar', await l.delete(`/api/data/CnDoc/${mine!.id}`)),
+    ...Object.fromEntries(['POST', 'PUT', 'PATCH', 'DELETE', 'MERGE'].map((method) => [`${method} /odata/{**rest}`, async () =>
+      check(`OData ${method}`, await l.fetch('/odata/CnDoc', { method, data: { Nombre: canary } }))])),
+  };
+  // Revisión adversarial 031 (F-I): una capacidad alternativa («registros o usuarios») también la puede llamar el lector.
+  const routes = inventory().filter((r) => !['GET', '*'].includes(r.method)
+    && r.capability.split(' o ').some((c) => ['registros', 'sesión', 'auditoría'].includes(c))
+    && ['ninguno', 'datos'].includes(r.effect)).map((r) => `${r.method} ${r.path}`);
+  expect(routes.length).toBeGreaterThan(8);
+  expect(routes.filter((k) => !calls[k]), 'rutas del inventario que el canario no recorre').toEqual([]);
+  // En el orden de la tabla de llamadas: crear antes de editar y de borrar.
+  for (const [key, call] of Object.entries(calls)) if (routes.includes(key)) await call();
+  expect(leaks, 'rutas que devuelven el canario').toEqual([]);
+});
+
+test('H1 CA1 (031): la vista previa de la importación le dice al lector los mismos avisos que /compute', async () => {
+  const l = await lector();
+  const { ids } = state;
+  const compute = await (await l.post('/api/data/CnDoc/compute', { data: { values: { Nombre: 'Importado', Puente2: ids.puente2 } } })).json();
+  const res = await l.post('/api/data/CnDoc/import', { params: { dryRun: 'true' }, data: IMPORT_CSV, headers: { 'Content-Type': 'application/octet-stream' } });
+  expect(res.status(), await res.text()).toBe(200);
+  const preview = await res.json();
+  // La fila se importa (si no, la vista previa no calcularía avisos y la comparación no probaría nada).
+  expect(preview.valid, JSON.stringify(preview.errors)).toBe(true);
+  const imported = (preview.warnings as { message: string }[]).map((w) => w.message).sort();
+  const computed = Object.values((compute.warnings ?? {}) as Record<string, string[]>).flat().sort();
+  // Regresión (auditoría 5 A-01): con el secreto legible para el motor, «el dato secreto está vacío» salía en /compute y no
+  // en la importación: un bit por fila sobre el registro fuera de alcance.
+  expect(computed).toContain(AVISO);
+  expect(imported).toEqual(computed);
 });
 
 // ---------------- H3: alcance en cada salto (D-01) ----------------
@@ -357,10 +456,11 @@ test('H4 CA3: con onWarning block, el 400 solo dice los avisos que el usuario pu
   const res = await l.post(`/api/data/CnDoc/${state.ids.doc}/transition`, { data: { transition: 'cerrar', _rowVersion: await version(state.ids.doc) } });
   expect(res.status()).toBe(400);
   const text = await res.text();
-  // Regresión (auditoría 4 D-08): el aviso que lee el campo oculto no se lista (revelaba que tiene valor). Al ejecutar, el
-  // motor evalúa con su autoridad: el secreto no está vacío y solo queda ese aviso, así que el mensaje es genérico.
+  // Regresión (auditoría 4 D-08): el aviso que lee el campo oculto no se lista (revelaba que tiene valor). El motor bloquea
+  // con su autoridad (el secreto no está vacío y solo queda ese aviso); spec 031 (A-01): lo que se le dice es lo que /compute
+  // le muestra (para él, el secreto está vacío), nunca el cruce con los avisos del motor.
   expect(text).not.toContain(AVISO_OCULTO);
-  expect(text).toContain('incumple una regla del catálogo');
+  expect(text).toContain(AVISO);
   expect((await (await l.get(`/api/data/CnDoc/${state.ids.doc}`)).json())._workflow.state).toBe('Abierto');
   // Al administrador (que ve el campo) sí.
   expect(await (await (await admin()).post(`/api/data/CnDoc/${state.ids.doc}/transition`, { data: { transition: 'cerrar', _rowVersion: await version(state.ids.doc) } })).text()).toContain(AVISO_OCULTO);

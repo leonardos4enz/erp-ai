@@ -95,3 +95,4 @@ y cada sesión queda como registro de una sola entrega. Al cerrar la spec:
 | 028 | [Mejoras del proceso (retrospectiva 001)](specs/028-mejoras-proceso/spec.md) | Implementado |
 | 029 | [Endurecimiento 3: capacidades declaradas y canario de fugas](specs/029-endurecimiento-3/spec.md) | Implementado |
 | 030 | [Integración y CI](specs/030-integracion-ci/spec.md) | Implementado |
+| 031 | [Endurecimiento 4: lo que se le dice a una persona, con su alcance](specs/031-endurecimiento-4/spec.md) | Implementado |

@@ -1,7 +1,7 @@
 {
   "id": "costeo",
   "name": "Costeo",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "icon": "calculator",
   "description": "Valuación de existencias con costo promedio ponderado o FIFO por producto, y póliza de entrada por cada recepción de mercancía.",
   "requires": ["inventario", "contabilidad"],
@@ -99,6 +99,16 @@
         { "op": "setViews", "entity": "Recepcion", "merge": true, "views": [
             { "name": "PolizasPendientes", "label": "Pólizas pendientes", "filters": [ { "field": "PolizaPendiente", "op": "eq", "value": true } ], "sort": "Fecha", "dir": "asc" }
           ] }
+      ] } }
+  ,
+    { "version": "1.2.0",
+      "description": "Seguridad de los costos (spec 031, auditoría 5 A-03): el valor, la cantidad costeada y el costo promedio de las existencias, el costo de los movimientos y el de la salida de un traspaso solo los leen el supervisor de inventario, el almacenista (captura entradas con costo) y el contador. Antes los leía cualquier rol que leyera esos catálogos, también la cuenta de servicio «Integración de tienda» por la API y OData.",
+      "plan": { "description": "Costeo 1.2.0", "operations": [
+        { "op": "setSecurity", "entity": "Existencia", "security": { "systemManaged": true, "fields": [
+            { "field": "Valor", "read": ["Supervisor de inventario", "Almacenista", "Contador"] }, { "field": "CantidadCosteada", "read": ["Supervisor de inventario", "Almacenista", "Contador"] }, { "field": "CostoPromedio", "read": ["Supervisor de inventario", "Almacenista", "Contador"] } ] } },
+        { "op": "setSecurity", "entity": "MovimientoInventario", "security": { "fields": [
+            { "field": "CostoUnitario", "read": ["Supervisor de inventario", "Almacenista", "Contador"] }, { "field": "CostoTotal", "read": ["Supervisor de inventario", "Almacenista", "Contador"] } ] } },
+        { "op": "setSecurity", "entity": "TraspasoPartida", "security": { "fields": [ { "field": "CostoOrigen", "read": ["Supervisor de inventario", "Almacenista", "Contador"] } ] } }
       ] } }
   ],
   "roles": [],

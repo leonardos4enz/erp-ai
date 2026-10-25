@@ -93,7 +93,7 @@ Total: 139 rutas.
 | POST | `/api/auth/logout` | sesión | sesión |  |  |  |
 | GET | `/api/auth/me` | sesión |  |  |  |  |
 | GET | `/api/dashboards/` | registros |  |  |  |  |
-| GET | `/api/dashboards/{name}` | registros |  |  |  |  |
+| GET | `/api/dashboards/{name}` | registros |  |  | corre un reporte por tarjeta (aggregate) |  |
 | GET | `/api/data/{entity}/` | registros |  |  |  |  |
 | POST | `/api/data/{entity}/` | registros | datos |  |  |  |
 | POST | `/api/data/{entity}/compute` | registros | ninguno |  |  |  |
@@ -129,7 +129,7 @@ Total: 139 rutas.
 | GET | `/api/model/print/preview/{token}` | modelador |  |  |  |  |
 | GET | `/api/model/provenance` | modelador |  |  |  |  |
 | GET | `/api/reports/` | registros |  |  |  |  |
-| GET | `/api/reports/{entity}/{name}` | registros |  |  |  |  |
+| GET | `/api/reports/{entity}/{name}` | registros |  |  | agrega el catálogo completo (aggregate) |  |
 | GET | `/api/reports/{entity}/{name}/export` | registros |  |  | hasta 1000 grupos en un archivo (bulk) |  |
 | GET | `/api/search` | registros |  |  | busca en todos los catálogos con folio (search) |  |
 | GET | `/api/users/lookup` | sesión |  |  |  |  |
@@ -151,4 +151,4 @@ Total: 139 rutas.
 | PATCH | `/odata/{**rest}` | registros | ninguno |  |  |  |
 | POST | `/odata/{**rest}` | registros | ninguno |  |  |  |
 | PUT | `/odata/{**rest}` | registros | ninguno |  |  |  |
-| GET | `/odata/{segment}` | registros |  |  |  |  |
+| GET | `/odata/{segment}` | registros |  |  | $filter, $orderby y $expand sobre un catálogo (aggregate) |  |

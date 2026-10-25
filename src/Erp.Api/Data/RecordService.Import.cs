@@ -84,7 +84,7 @@ public sealed partial class RecordService
                         if (RecordFilter.For(e, user, write: true) is { } scope && !await MatchesAsync(cn, tx, e, id, scope, ct))
                             throw new Forbidden("Quedaría fuera de los registros que tu rol puede modificar.");
                         imported++;
-                        foreach (var w in VisibleWarnings(sink.Items, model, user).Take(MaxImportErrors - warnings.Count))
+                        foreach (var w in sink.Items.Take(MaxImportErrors - warnings.Count)) // spec 031: ya son los que se le dicen
                             warnings.Add(new(rowNumber, colOf.GetValueOrDefault(w.Key), e.FindField(w.Key)?.Name, w.Message));
                     }
                     catch (ValidationFailed vf)

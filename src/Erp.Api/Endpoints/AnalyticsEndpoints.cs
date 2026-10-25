@@ -31,7 +31,8 @@ public static class AnalyticsEndpoints
         var reports = app.MapGroup("/api/reports").RequireAuthorization();
         reports.MapGet("/", (HttpContext http, ReportService svc, CancellationToken ct) => svc.ListAsync(http.CurrentUser(), ct)).Requires(Capability.Records);
         reports.MapGet("/{entity}/{name}", (string entity, string name, string? filters, HttpContext http, ReportService svc, CancellationToken ct) =>
-            svc.RunAsync(entity, name, FilterSql.Parse(filters), http.CurrentUser(), ct)).Requires(Capability.Records);
+            svc.RunAsync(entity, name, FilterSql.Parse(filters), http.CurrentUser(), ct)).Requires(Capability.Records)
+            .Costly("agrega el catálogo completo").RequireRateLimiting(RatePolicies.Aggregate);
         reports.MapGet("/{entity}/{name}/export", async (string entity, string name, string? format, string? filters,
             HttpContext http, ReportService svc, CancellationToken ct) =>
         {
@@ -71,7 +72,7 @@ public static class AnalyticsEndpoints
                 widgets.Add(new WidgetResult(w.Type, w.Label ?? r.Label, w.Wide, e.Name, r.Name, w.Measure, result));
             }
             return new DashboardResult(d.Name, d.Label, d.Icon ?? "layout-dashboard", d.Description, widgets, u.CanManageModel ? d : null);
-        }).Requires(Capability.Records);
+        }).Requires(Capability.Records).Costly("corre un reporte por tarjeta").RequireRateLimiting(RatePolicies.Aggregate); // spec 031
     }
 
     private static IReadOnlyList<string> AppsOf(DashboardDef d, UserContext u, IReadOnlyDictionary<string, EntityDef> model) =>

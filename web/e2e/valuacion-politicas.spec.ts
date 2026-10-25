@@ -121,10 +121,10 @@ async function pageAs(browser: Browser, w: keyof typeof users): Promise<Page> {
   return page;
 }
 
-test('H8: Inventario 1.6.0 y Costeo 1.1.0 están instalados con las políticas por defecto', async () => {
+test('H8: Inventario 1.6.0 y Costeo 1.1.0 (o posteriores) están instalados con las políticas por defecto', async () => {
   const mods = (await get('admin', '/api/admin/modules')) as { id: string; installedVersion?: string; version: string }[];
   expect(mods.find((m) => m.id === 'inventario')).toMatchObject({ installedVersion: '1.8.0' }); // 1.7.0: spec 023; 1.8.0: spec 024 (módulo de navegación)
-  expect(mods.find((m) => m.id === 'costeo')).toMatchObject({ installedVersion: '1.1.0' });
+  expect(mods.find((m) => m.id === 'costeo')).toMatchObject({ installedVersion: '1.2.0' }); // 1.2.0: seguridad de los costos (spec 031)
   const valuar = (await model('MovimientoInventario')).automations!.find((a) => a.name === 'Valuar')!.actions[0];
   expect(valuar).toMatchObject({ uncostedEntry: 'fallback', methodChange: 'merge', totalCost: 'CostoTotal', quantityField: 'CantidadCosteada' });
   expect((await model('Recepcion')).rules!.map((r) => r.name)).toEqual(expect.arrayContaining(['TipoCambioDeLaRecepcion', 'PolizaConCuentas']));

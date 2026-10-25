@@ -142,6 +142,8 @@ public sealed class RelatedLoader(SqlConnection cn, SqlTransaction? tx, IReadOnl
         if (quantity <= 0 || key.Count == 0 || key.Any(k => k is null) || !model.TryGetValue(book, out var b)) return null;
         // Spec 029 (F-C): en vivo, quien tiene restringido el catálogo de saldo no lee sus capas (la llave podría ser ajena).
         if (viewer is not null && Security.RecordFilter.HasGrants(b, viewer)) return null;
+        // Spec 031 (revisión adversarial F-A): ni quien no ve el valor o la cantidad costeada del saldo (seguridad por campo).
+        if (viewer is not null && Security.DerivedAccess.CostBookHidden(b.Name, model, viewer)) return null;
         int? companyId = null;
         if (b.PerCompany)
         {

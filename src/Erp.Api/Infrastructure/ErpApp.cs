@@ -115,7 +115,10 @@ public static class ErpApp
                     c.HttpContext.Items[UserContextExtensions.ItemKey] = user;
                 };
             });
-        services.AddAuthorization();
+        // Spec 031 (H6, auditoría 5): una ruta sin capacidad declarada (p. ej. mapeada fuera de MapErpRoutes, que no sale en
+        // el inventario) se niega en lugar de quedar anónima. Las anónimas lo declaran (AllowAnonymous).
+        services.AddAuthorization(o => o.FallbackPolicy = new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder()
+            .AddRequirements(new UndeclaredRouteRequirement()).Build());
         // Spec 029: capacidad declarada por ruta.
         services.AddSingleton<Microsoft.AspNetCore.Authorization.IAuthorizationHandler, CapabilityHandler>();
         services.AddSingleton<Microsoft.AspNetCore.Authorization.IAuthorizationMiddlewareResultHandler, CapabilityResultHandler>();
@@ -164,6 +167,14 @@ public static class ErpApp
                     PermitLimit = config.GetValue("Security:BulkPerMinute", 20),
                     Window = TimeSpan.FromMinutes(1), QueueLimit = 0,
                 }));
+            // Spec 031 (H6): tableros (un reporte por tarjeta), reportes y OData agregan o recorren muchas filas; por usuario.
+            o.AddPolicy(RatePolicies.Aggregate, http => RateLimitPartition.GetFixedWindowLimiter(
+                http.User.Identity?.Name ?? http.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = config.GetValue("Security:AggregatesPerMinute", 120),
+                    Window = TimeSpan.FromMinutes(1), QueueLimit = 0,
+                }));
             o.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(http => RateLimitPartition.GetFixedWindowLimiter(
                 http.User.Identity?.Name ?? http.Connection.RemoteIpAddress?.ToString() ?? "unknown",
                 // Configurable solo para la suite E2E, que hace como administrador más de 600 peticiones por minuto.
@@ -205,4 +216,5 @@ public static class RatePolicies
 {
     public const string Search = "search";
     public const string Bulk = "bulk";
+    public const string Aggregate = "aggregate";
 }

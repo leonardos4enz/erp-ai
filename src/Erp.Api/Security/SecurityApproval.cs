@@ -239,6 +239,9 @@ public sealed class SecurityApproval(Db db, EnvironmentOptions env)
         {
             case SecurityChangeKinds.UserCreate or SecurityChangeKinds.UserUpdate:
                 if (kind == SecurityChangeKinds.UserUpdate && targetId == user.Id) return "El cambio es a tu propio usuario: lo aprueba otro administrador.";
+                // Spec 031 (H3, auditoría 5 A-02): pasar a alguien (con sus registros) a la unidad propia o a una que cuelga de ella.
+                if (kind == SecurityChangeKinds.UserUpdate && GainsMember(user, Str(before, "unit"), Str(payload, "unit"), units ?? []))
+                    return "El cambio pasa al usuario a tu unidad (o a una que depende de ella) y te deja ver sus registros: lo aprueba otro administrador.";
                 var b = Ints(before, "roleIds");
                 var a = Ints(payload, "roleIds");
                 needed = a.Except(b).Concat(b.Except(a)).Select(id => roles.TryGetValue(id, out var r) ? r.Caps : AdminCapabilities.None)
@@ -252,8 +255,15 @@ public sealed class SecurityApproval(Db db, EnvironmentOptions env)
                     .Or(new AdminCapabilities(false, Flag(before, "canManageModel"), Flag(before, "canManageUsers"), Flag(before, "canViewAudit")));
                 break;
             case SecurityChangeKinds.TeamCreate or SecurityChangeKinds.TeamUpdate:
-                return Ints(payload, "memberIds").Contains(user.Id) && !Ints(before, "memberIds").Contains(user.Id)
-                    ? "El cambio te agrega al equipo: lo aprueba otro administrador." : null;
+                if (Ints(payload, "memberIds").Contains(user.Id) && !Ints(before, "memberIds").Contains(user.Id))
+                    return "El cambio te agrega al equipo: lo aprueba otro administrador.";
+                // Spec 031 (revisión adversarial F-C): reactivar un equipo del que eres miembro te devuelve sus registros.
+                if (kind == SecurityChangeKinds.TeamUpdate && Ints(before, "memberIds").Contains(user.Id)
+                    && Prop(before, "isActive") is { ValueKind: JsonValueKind.False } && Flag(payload, "isActive"))
+                    return "El cambio reactiva un equipo del que eres miembro: lo aprueba otro administrador.";
+                // Spec 031 (H3): un equipo es dueño de registros (015); al crearlo aún no tiene ninguno.
+                return kind == SecurityChangeKinds.TeamUpdate && GainsMember(user, Str(before, "unit"), Str(payload, "unit"), units ?? [])
+                    ? "El cambio pasa al equipo a tu unidad (o a una que depende de ella) y te deja ver sus registros: lo aprueba otro administrador." : null;
             case SecurityChangeKinds.UnitMove:
                 // Con «unitTree», quien tiene la unidad nueva superior (o una de más arriba) gana lo que ve la unidad movida.
                 return GainsUnit(user, Int(before, "parentId"), Int(payload, "parentId"), units ?? [])
@@ -284,6 +294,28 @@ public sealed class SecurityApproval(Db db, EnvironmentOptions env)
         if (mine is null) return false;
         bool Under(int? parent) => parent is { } id && units.FirstOrDefault(u => u.Id == id) is { } p && p.Path.StartsWith(mine.Path, StringComparison.Ordinal);
         return Under(newParent) && !Under(oldParent);
+    }
+
+    private static string? Str(string? json, string property) =>
+        Prop(json, property) is { ValueKind: JsonValueKind.String } v ? v.GetString() : null;
+
+    /// <summary>
+    /// Spec 031 (H3): ¿el usuario o equipo pasa de <paramref name="oldUnit"/> a la unidad de <paramref name="user"/> o a una que
+    /// cuelga de ella, sin haber estado antes? Con alcance «unit» o «unitTree», quien aprueba ganaría ver sus registros (la
+    /// regla de <c>unit.move</c> de la 029 aplicada al principal en lugar de a la unidad). Al crear un usuario aún no tiene
+    /// registros: no aplica.
+    /// </summary>
+    internal static bool GainsMember(UserContext user, string? oldUnit, string? newUnit, IReadOnlyList<UnitPath> units)
+    {
+        if (string.IsNullOrWhiteSpace(user.Unit) || newUnit is null) return false;
+        var mine = units.FirstOrDefault(u => string.Equals(u.Name, user.Unit, StringComparison.OrdinalIgnoreCase));
+        if (mine is null) return false;
+        bool Under(string? name) => name is not null && units.FirstOrDefault(u => string.Equals(u.Name, name, StringComparison.OrdinalIgnoreCase)) is { } p
+                                    && p.Path.StartsWith(mine.Path, StringComparison.Ordinal);
+        bool Mine(string? name) => string.Equals(name, mine.Name, StringComparison.OrdinalIgnoreCase);
+        // Revisión adversarial F-B: con alcance «unit» (la unidad exacta) quien revisa no veía a alguien de una unidad hija;
+        // pasarlo a la suya también le da sus registros.
+        return Under(newUnit) && (!Under(oldUnit) || Mine(newUnit) && !Mine(oldUnit));
     }
 
     private static async Task<IReadOnlyList<UnitPath>> LoadUnitsAsync(DbConnection cn, DbTransaction? tx) =>

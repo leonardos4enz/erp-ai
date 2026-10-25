@@ -93,7 +93,7 @@ public sealed partial class RecordService
         await EnsureAccessAsync(cn, null, e, id, user, write: false, ct);
         if (e.PrintTemplates is not { Count: > 0 }) return [];
         var draft = await LoadDraftAsync(cn, null, e, model, id, ct) ?? throw new NotFound("El registro no existe.");
-        var loader = new RelatedLoader(cn, null, model);
+        var loader = new RelatedLoader(cn, null, model, viewer: user); // spec 031 (H5): UNITCOST con su alcance, como /compute
         var ctx = new PrintContext(new LoaderPrintData(loader, user), user, model);
         var scope = PrintHeaderScope(draft, e, ctx);
         var env = Env(user, draft, loader);
@@ -113,7 +113,7 @@ public sealed partial class RecordService
         await using var cn = await db.OpenAsync(ct);
         await EnsureAccessAsync(cn, null, e, id, user, write: false, ct);
         var draft = await LoadDraftAsync(cn, null, e, model, id, ct) ?? throw new NotFound("El registro no existe.");
-        var loader = new RelatedLoader(cn, null, model);
+        var loader = new RelatedLoader(cn, null, model, viewer: user); // spec 031 (H5): UNITCOST con su alcance, como /compute
         var ctx = new PrintContext(new LoaderPrintData(loader, user), user, model);
         var scope = PrintHeaderScope(draft, e, ctx);
         var env = Env(user, draft, loader);

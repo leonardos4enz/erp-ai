@@ -85,6 +85,7 @@ public class ErpHost : IAsyncLifetime
             ["Security:PrintsPerMinute"] = "1000",
             ["Security:BulkPerMinute"] = "1000",
             ["Security:SearchesPerMinute"] = "1000",
+            ["Security:AggregatesPerMinute"] = "1000",
             ["Webhooks:PollSeconds"] = "1",
             ["Webhooks:RetryDelaysSeconds"] = "1,1",
             ["Automations:PollSeconds"] = "1",
@@ -107,6 +108,9 @@ public class ErpHost : IAsyncLifetime
     public Task<Client> LoginAsync(string username, string password) => (_main ?? throw new InvalidOperationException("El anfitrión no arrancó.")).LoginAsync(username, password);
 
     public Client Anonymous(bool csrfHeader = true) => _main!.Anonymous(csrfHeader);
+
+    /// <summary>Servicios de la instancia principal (p. ej. sus rutas reales, spec 031).</summary>
+    public IServiceProvider Services => (_main ?? throw new InvalidOperationException("El anfitrión no arrancó.")).Services;
 
     /// <summary>SQL directo sobre la base de la clase (preparación de datos e inyección de fallas, nunca lo que se prueba).</summary>
     /// Síncrono dentro de <c>Task.Run</c>: con canalizaciones con nombre (LocalDB) una E/S asíncrona de SqlClient se anula si

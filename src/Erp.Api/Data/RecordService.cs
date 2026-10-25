@@ -280,6 +280,8 @@ public sealed partial class RecordService(Db db, MetadataStore store)
         // Spec 010: el registro es de la empresa actual de quien lo crea (en una automatización, de quien disparó el evento).
         int? company = !e.PerCompany ? null : user.Company?.Id
             ?? throw new Forbidden($"No tienes una empresa asignada: pide al administrador una para capturar {e.LabelPlural.ToLowerInvariant()}.");
+        // Spec 031 (H1): lo que se le dice a quien importa se calcula aparte, sobre el borrador antes de calcularlo.
+        var told = c.Depth == 0 && c.Sink is not null ? CloneDraft(draft) : null;
         var env = Env(user, draft, loader);
         Compute(draft, e, model, loader, env);
         // Spec 014 (H6): lo que tocarán sus automatizaciones se bloquea antes de validar e insertar; si se bloqueó un
@@ -290,7 +292,9 @@ public sealed partial class RecordService(Db db, MetadataStore store)
             Compute(draft, e, model, loader, env);
         }
         var warnings = Validate(draft, e, model, loader, env, user);
-        if (c.Depth == 0) c.Sink?.Items.AddRange(warnings); // spec 023: avisos de la fila importada
+        // Spec 023: avisos de la fila importada. Spec 031 (H1, auditoría 5 A-01): los que /compute le daría (su alcance en cada
+        // salto); los guardados en la auditoría son los del motor.
+        if (told is not null) c.Sink!.Items.AddRange(ShownWarnings(cn, tx, e, model, told, user, null, (d, l, en) => Compute(d, e, model, l, en)));
         await CheckLedgerAsync(cn, tx, e, model, draft, company, before: null, id: null, ct);
 
         await AssignFoliosAsync(cn, tx, e, draft, c.Folios, ct);
@@ -436,15 +440,13 @@ public sealed partial class RecordService(Db db, MetadataStore store)
         var loader = new RelatedLoader(c.Cn, c.Tx, c.Model);
         var env = Env(c.User, draft, loader);
         var from = draft.Header.GetValueOrDefault(Workflow.StateField) as string;
-        draft.Header[Workflow.StateField] = t.To;
-        var scope = HeaderScope(draft, e, c.Model, loader);
-        foreach (var s in t.Set ?? [])
-            if (e.FindField(s.Field) is { } f)
-                draft.Header[f.Name] = Coerce(f, ExprEvaluator.Evaluate(s.Value, scope, env));
-        Compute(draft, e, c.Model, loader, env);
+        var told = CloneDraft(draft);
+        Advance(draft, e, c.Model, t, loader, env);
         var warnings = Validate(draft, e, c.Model, loader, env, c.User, checkRequired: false);
-        // Spec 023: confirm / block / allow. Una automatización (sin lista de aceptados) no tiene a quién preguntar.
-        CheckWarnings(t, warnings, acceptedWarnings, c.Model, c.User);
+        // Spec 023: confirm / block / allow. Una automatización (sin lista de aceptados) no tiene a quién preguntar. Spec 031
+        // (H1, H4): lo que se le dice o se le pregunta se evalúa con el alcance de quien ejecuta (o disparó la automatización).
+        CheckWarnings(t, warnings, acceptedWarnings,
+            () => ShownWarnings(c.Cn, c.Tx, e, c.Model, told, c.User, id, (d, l, en) => Advance(d, e, c.Model, t, l, en)));
         await CheckLedgerAsync(c.Cn, c.Tx, e, c.Model, draft, draft.CompanyId, LedgerSnapshot(e, before), id, c.Ct);
 
         await UpdateHeaderAsync(c.Cn, c.Tx, e, id, draft.Header, rowVersion, c.User.Id, c.Ct);
@@ -452,6 +454,17 @@ public sealed partial class RecordService(Db db, MetadataStore store)
         await Audit.WriteAsync(c.Cn, c.Tx, c.Http, $"workflow.{t.Name}", e.Name, id.ToString(), before, AuditAfter(draft, warnings));
         await FireAsync(c, e, id, AutomationEvents.Transition, t.Name);
         await FireAsync(c, e, id, AutomationEvents.EnterState, t.To);
+    }
+
+    /// <summary>Estado nuevo, asignaciones de la transición y fórmulas.</summary>
+    private static void Advance(DocDraft d, EntityDef e, IReadOnlyDictionary<string, EntityDef> model, WorkflowTransition t, RelatedLoader loader, ExprEnv env)
+    {
+        d.Header[Workflow.StateField] = t.To;
+        var scope = HeaderScope(d, e, model, loader);
+        foreach (var s in t.Set ?? [])
+            if (e.FindField(s.Field) is { } f)
+                d.Header[f.Name] = Coerce(f, ExprEvaluator.Evaluate(s.Value, scope, env));
+        Compute(d, e, model, loader, env);
     }
 
     public async Task DeleteAsync(string entityName, long id, HttpContext http, CancellationToken ct)

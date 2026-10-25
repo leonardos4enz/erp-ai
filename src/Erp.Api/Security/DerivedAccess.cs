@@ -32,6 +32,24 @@ public static class DerivedAccess
 
     internal static Info? For(FieldDef f) => Table.TryGetValue(f, out var i) ? i : null;
 
+    /// <summary>
+    /// Spec 031 (revisión adversarial F-A): lo que <c>UNITCOST('libro', …)</c> revela del catálogo de saldo: los campos donde las
+    /// acciones <c>cost</c> guardan el valor y la cantidad costeada de sus capas (en Costeo, <c>Existencia.Valor</c> y
+    /// <c>CantidadCosteada</c>). Quien no ve uno de ellos tampoco recibe el costo unitario de las capas.
+    /// </summary>
+    public static IEnumerable<(EntityDef Entity, FieldDef Field)> CostBookFields(string book, IReadOnlyDictionary<string, EntityDef> model)
+    {
+        if (!model.TryGetValue(book, out var b)) yield break;
+        foreach (var a in model.Values.SelectMany(e => e.Automations ?? []).SelectMany(x => x.Actions)
+                     .Where(a => a.Type == AutomationActions.Cost && string.Equals(a.Entity, b.Name, StringComparison.OrdinalIgnoreCase)))
+            foreach (var name in new[] { a.Field, a.QuantityField })
+                if (name is not null && b.FindField(name) is { } f) yield return (b, f);
+    }
+
+    /// <summary>¿El usuario deja de ver algún campo que <c>UNITCOST</c> revela de ese libro?</summary>
+    public static bool CostBookHidden(string book, IReadOnlyDictionary<string, EntityDef> model, UserContext u) =>
+        CostBookFields(book, model).Any(x => !FieldAccess.CanSee(x.Entity, x.Field, u));
+
     /// <summary>¿La fórmula se oculta a este usuario por lo que lee? (Falso si no es fórmula o el modelo no se anotó.)</summary>
     public static bool Hides(FieldDef f, UserContext u)
     {
@@ -88,6 +106,7 @@ public static class DerivedAccess
                     if (c.Name == "UNITCOST" && c.Args is [Literal { Value: string book }, ..] && model.TryGetValue(book, out var balance))
                     {
                         crosses.Add(Root(balance));
+                        foreach (var (be, bf) in CostBookFields(book, model)) Visit(be, bf); // spec 031 (F-A)
                         if (Root(balance).PerCompany && !Root(e).PerCompany) company = true;
                     }
                     foreach (var a in c.Args) Walk(e, a);

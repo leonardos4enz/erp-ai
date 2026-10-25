@@ -1,5 +1,10 @@
+using System.Security.Claims;
 using System.Text;
 using Erp.Api.Infrastructure;
+using Erp.Api.Security;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -26,11 +31,7 @@ public class RouteInventoryTests
         public string? RatePolicy => Endpoint.Metadata.GetMetadata<EnableRateLimitingAttribute>()?.PolicyName;
     }
 
-    private static readonly Lazy<IReadOnlyList<Route>> All = new(Load);
-
-    internal static IReadOnlyList<Route> Routes => All.Value;
-
-    private static IReadOnlyList<Route> Load()
+    private static readonly Lazy<WebApplication> App = new(() =>
     {
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions
         {
@@ -40,6 +41,16 @@ public class RouteInventoryTests
         builder.AddErp();
         var app = builder.Build();
         app.MapErpRoutes();
+        return app;
+    });
+
+    private static readonly Lazy<IReadOnlyList<Route>> All = new(Load);
+
+    internal static IReadOnlyList<Route> Routes => All.Value;
+
+    private static IReadOnlyList<Route> Load()
+    {
+        var app = App.Value;
         return ((IEndpointRouteBuilder)app).DataSources.SelectMany(d => d.Endpoints).OfType<RouteEndpoint>()
             .SelectMany(e => (e.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods ?? ["*"])
                 .Select(m => new Route(m, "/" + (e.RoutePattern.RawText ?? "").TrimStart('/'), e)))
@@ -128,6 +139,36 @@ public class RouteInventoryTests
                 if (apply.Effect is { Effect: Effect.Model or Effect.Security } && apply.Review is null) missing.Add(apply.Key);
         }
         Assert.True(missing.Count == 0, "«Aplicar» sin huella de su vista previa: " + string.Join(", ", missing));
+    }
+
+    [Fact]
+    public async Task Una_ruta_sin_capacidad_declarada_no_responde_a_nadie()
+    {
+        // Spec 031 (auditoría 5): sin política por omisión, una ruta mapeada fuera de MapErpRoutes (sin .Requires) era anónima
+        // y tampoco salía en el inventario.
+        var services = App.Value.Services;
+        var fallback = services.GetRequiredService<IOptions<AuthorizationOptions>>().Value.FallbackPolicy;
+        Assert.NotNull(fallback);
+        var superuser = new UserContext { Id = 1, Username = "admin", DisplayName = "A", SecurityStamp = Guid.Empty, Roles = [], IsSuperuser = true, CanManageModel = true, CanManageUsers = true, CanViewAudit = true };
+        var http = new DefaultHttpContext { RequestServices = services };
+        http.Items[UserContextExtensions.ItemKey] = superuser;
+        var principal = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Name, "admin")], "prueba"));
+        var auth = services.GetRequiredService<IAuthorizationService>();
+        Assert.False((await auth.AuthorizeAsync(principal, http, fallback!)).Succeeded);
+        // Las rutas que declaran capacidad no usan la política por omisión: la suya sí deja pasar al superusuario.
+        var policy = Routes.First(r => r.Key == "GET /api/admin/users").Endpoint.Metadata.GetMetadata<AuthorizationPolicy>();
+        Assert.True((await auth.AuthorizeAsync(principal, http, policy!)).Succeeded);
+    }
+
+    [Fact]
+    public void Lo_que_agrega_o_recorre_un_catalogo_es_costoso()
+    {
+        // Spec 031 (auditoría 5): un tablero corre un reporte por tarjeta; reportes y OData recorren el catálogo.
+        foreach (var key in new[] { "GET /api/dashboards/{name}", "GET /api/reports/{entity}/{name}", "GET /odata/{segment}" })
+        {
+            var r = Routes.Single(x => x.Key == key);
+            Assert.True(r.Costly is not null && r.RatePolicy is not null, $"{key} no es costosa o no tiene límite");
+        }
     }
 
     [Fact]
