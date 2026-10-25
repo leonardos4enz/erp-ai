@@ -371,8 +371,9 @@ export function EntityFormPage() {
   const alerts: ReactNode = (
     <>
       {conflict && (
+        // Spec 030 (guardia de alerta): el guardado se rechazó; es un error que se anuncia, no un aviso.
         <Alert
-          tone="warning"
+          tone="danger"
           title="Otro usuario modificó este registro"
           action={<Button size="sm" icon={RefreshCw} onClick={() => void load()}>Recargar</Button>}
         >

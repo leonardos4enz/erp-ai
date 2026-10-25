@@ -144,3 +144,13 @@ export function apply(text: string, c: Completion, s: Suggestion): { text: strin
   const next = text.slice(0, c.from) + insert + text.slice(c.to);
   return { text: next, caret: c.from + insert.length };
 }
+
+/**
+ * Tras elegir una referencia («Cliente ›») o abrir una función, la lista se vuelve a abrir. Regresión (revisión 026, F-06):
+ * se calcula con el texto y el cursor **actuales** del control, no con los del momento de elegir: si la persona ya siguió
+ * escribiendo («Cliente.Zona.»), la lista mostraba sugerencias viejas.
+ */
+export function completeAfterChoice(s: Suggestion, current: { text: string; caret: number }, scope: CompletionScope): Completion | null {
+  if (s.kind !== 'function' && !(s.detail ?? '').endsWith('›')) return null;
+  return complete(current.text, current.caret, scope, s.kind === 'function');
+}

@@ -7,15 +7,18 @@ revisión de una persona o de un agente de IA usando la app como lo haría un us
 El `verify.md` sigue la [plantilla](plantillas/verify.md) y los riesgos que quedan van a [riesgos.md](riesgos.md).
 
 ```
- 1. Pruebas unitarias        dotnet test            código de seguridad crítica
-                                                    (030: integración con SQL real — concurrencia, fallas parciales)
+ 1. Pruebas unitarias        dotnet test            Erp.Tests: código de seguridad crítica (sin base)
+                                                    Erp.IntegrationTests (030): API real sobre SQL — permisos,
+                                                    concurrencia, fallas parciales; una base _IT por clase
+                             npm --prefix web test  Vitest (030): lógica de la SPA sin DOM y pantallas sin captura
  2. Suite E2E (Playwright)   npm --prefix web run e2e
-      ├─ api-security.spec   API real: CSRF, inyección, permisos, bloqueo, concurrencia
       ├─ hN-*.spec           un escenario por criterio de aceptación de la spec
       ├─ accesibilidad       axe-core (WCAG 2.1 AA) en las pantallas clave
-      ├─ guardia             falla si hay errores JS o violaciones de CSP en consola
-      │                      (030: desbordes, alertas fuera de la vista, foco en body)
+      ├─ guardia             falla si hay errores JS o violaciones de CSP en consola, y (030) si un absoluto
+      │                      desborda el documento, si un 4xx no deja su aviso en la vista o si el foco cae en body
       └─ visual.spec         capturas claro/oscuro/móvil contra referencias aprobadas
+    CI (030)                 .github/workflows/ci.yml: en cada push, unitarias + build + Vitest + npm audit;
+                             en main, integración + E2E completa (segunda corrida completa de la spec)
  3. Revisión adversarial     agente sin el contexto de la sesión, leyendo el diff (sección 4)
  4. Revisión exploratoria    agente con navegador (o persona) + reporte en verify.md
 ```
@@ -26,8 +29,35 @@ El `verify.md` sigue la [plantilla](plantillas/verify.md) y los riesgos que qued
 dotnet test
 ```
 ```bash
+npm --prefix web test
+```
+```bash
 npm --prefix web run e2e
 ```
+
+### Integración con SQL real (spec 030)
+- `dotnet test` corre `tests/Erp.Tests` (sin base) y `tests/Erp.IntegrationTests`, que necesita LocalDB (o el servidor de
+  `E2E_SQL_SERVER`). Solo las unitarias: `dotnet test tests/Erp.Tests`.
+- Cada clase de prueba levanta la API real en memoria (`WebApplicationFactory<Program>`, la composición de `ErpApp`) sobre
+  su propia base `ErpAi_<clase>_<azar>_IT`, que se valida (sufijo `_IT` o `_E2E`, nunca `ErpAi`) y se borra al terminar.
+  Corre en paralelo con la suite E2E de la misma carpeta si no hay que recompilar `src/Erp.Api` (la E2E tiene
+  `Erp.Api.exe` en uso); si hay cambios, primero una, luego la otra. Las clases que miden tiempos van en la colección
+  `SinParalelo`.
+- **Toda fila «Concurrencia» o «Fallas parciales» del STRIDE tiene su prueba aquí**, no en Playwright: `Concurrently(n, fn)`
+  (con barrera), `Invariant` (recibido ≤ pedido, una sola vez, ≥ 0, folios únicos y consecutivos), `FailWhenAsync`
+  (restricción CHECK temporal: falla el segundo paso) y `HoldAsync` (otra conexión retiene filas: la API queda detenida en el
+  paso que se observa). Una segunda instancia sobre la misma base: `SiblingAsync` (p. ej. sin cambios directos).
+- Las pruebas de API sin página van aquí; Playwright prueba pantallas.
+- Contra el código anterior: `npm --prefix web run it:regresion -- <commit> <filtro>` (worktree en el commit con el proyecto
+  de integración copiado; resumen en `tests/Erp.IntegrationTests/TestResults/regresion-<sha>.json`).
+
+### Guardias de la suite (spec 030)
+`helpers.ts` las corre en **cada** prueba que usa el *fixture* `page` (no en las páginas de `browser.newContext()`): `desborde` (el documento se desplaza y deja de hacerlo al ocultar
+los absolutos), `alerta` (tras un 4xx a una escritura hay un `role="alert"` con texto dentro de la vista), `foco` (tras
+cerrar un diálogo o un rechazo, el foco no está en `body`). Una prueba que provoca la situación a propósito la apaga con
+`test.use({ guardias: { …, alerta: false } })` y un comentario que diga por qué. Las páginas de contextos propios
+(`browser.newContext()`) no tienen guardias (R-030-4). `src/__tests__/pantallas.test.ts` (Vitest) exige que cada ruta de
+`App.tsx` tenga captura de referencia o una razón escrita, y lista las que no tienen.
 
 - La suite crea una base **desechable**: nunca toca los datos de desarrollo. En la carpeta principal es `ErpAi_E2E`
   con la API en el puerto 5090; en un worktree, `ErpAi_<worktree>_<huella>_E2E` y su propio bloque de 10 puertos libre (spec 028).
@@ -72,18 +102,28 @@ npm --prefix web run e2e
   archivos de los que dependen, p. ej. `compras.spec.ts`). `--repeat-each=3` solo sirve en un archivo idempotente: repite
   dentro de la misma base y las pruebas «preparar» que crean datos con nombre fijo fallan en la segunda vuelta (028).
 - Tras corregir un hallazgo: su archivo con `--veces=3` y la corrida completa final.
-- La segunda corrida completa es de CI cuando exista (spec 030); si CI falla, la spec se reabre. **Mientras no exista**,
-  la sesión que abre la spec siguiente corre la suite completa antes de cambiar código: si falla, corrige primero eso.
+- **La segunda corrida completa es de CI** (spec 030): el push a `main` corre integración y la suite E2E completa en
+  `windows-2025` (`.github/workflows/ci.yml`). La sesión que cierra la spec mira esa corrida
+  (`curl -s "https://api.github.com/repos/leonardos4enz/erp-ai/actions/runs?branch=main&per_page=1"`, o la pestaña Actions) y
+  la registra en `verify.md` si alcanza a terminar. Con dos pushes seguidos GitHub descarta la corrida pendiente del medio:
+  vale la del último commit de `main`.
+- **Si CI falla, la spec se reabre**: la corrige la propia spec con un commit nuevo (sin abrir la siguiente) y se vuelve a
+  subir. La sesión que abre la spec siguiente comprueba primero que la última corrida de `main` esté en verde; si está en
+  rojo, corrige eso antes de cambiar código. Si CI no está disponible (GitHub caído, sin minutos), corre la suite completa
+  como antes de la 030 y lo dice en `verify.md`.
 - Registrar en `verify.md` cada corrida con su duración.
 
-### Fragmentación (`--shard`): todavía no
+### Fragmentación (`--shard`): todavía no (revisado de nuevo en la 030)
 La suite no se puede partir por archivo (revisado en la 028): 13 archivos declaran en su encabezado que dependen de que
 otro corra antes (`compras` instala Compras para `entornos`, `explorador`, `integraciones`, `interfaz`, `inventario`,
 `navegacion`, `seguridad`…; `inventario` para `multiempresa`, `pendientes` y `valuacion-contable`, que instala
 Contabilidad para `valuacion-politicas`, `valuacion-rutas-avisos` y `visual-pdf`) y las capturas de
 `visual*.spec.ts` muestran el menú, que cambia con los catálogos que crean los demás archivos. Para fragmentar hace falta
 que cada archivo instale lo que necesita (o un *fixture* de proyecto que deje Compras, Inventario y Contabilidad listos
-en cada fragmento) y que las capturas no dependan de lo que dejaron otros. Queda para la 030 (CI), donde paga.
+en cada fragmento) y que las capturas no dependan de lo que dejaron otros. En la 030 se movieron a integración las pruebas de
+API de `api-security`, `endurecimiento`, `endurecimiento-2` y `pendientes` (ya no dependen de que otro archivo instale
+Compras), pero el resto sigue igual; CI corre la suite en un solo trabajo (~8 min en local), así que fragmentar todavía no
+paga (R-028-2).
 
 ### Instancia para la revisión exploratoria
 `npm --prefix web run revision` levanta la API sobre una base desechable propia (`ErpAi_Revision_E2E`, o la del

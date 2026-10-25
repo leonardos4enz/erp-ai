@@ -35,7 +35,7 @@ en orden, no en paralelo: casi todas tocan el núcleo del motor (`PlanCompiler`,
 | 027 Documentos PDF con plantillas visuales | Implementado ([spec](specs/027-documentos-pdf/spec.md)) |
 | 028 Mejoras del proceso (retrospectiva 001) | Implementado ([spec](specs/028-mejoras-proceso/spec.md)) |
 | 029 Endurecimiento 3: capacidades declaradas y canario de fugas | Implementado ([spec](specs/029-endurecimiento-3/spec.md)) |
-| 030 Integración y CI | Planeado |
+| 030 Integración y CI | Implementado ([spec](specs/030-integracion-ci/spec.md)) |
 | 031 Módulo de Ventas | Planeado |
 | 032 CFDI 4.0 con PAC | Planeado |
 
@@ -405,6 +405,21 @@ Origen: retrospectiva 001 (P1 y P2) y la auditoría 4 (2026-10-25), que el dueñ
   030 o spec propia; costos de Inventario copiados por automatizaciones (R-029-6) → decisión del dueño; aprobación de
   seguridad para módulos y planes con `setSecurity` (R-029-8).
 
+### 030 — Integración y CI
+Origen: retrospectiva 001 (P5, P8, P9 y P14) y los riesgos R-028-2, R-028-3 y R-029-12.
+- **Estado:** implementado en la [spec 030](specs/030-integracion-ci/spec.md). **Integración con SQL real**
+  (`tests/Erp.IntegrationTests`: API real con `WebApplicationFactory`, base `_IT` por clase, `Concurrently`, invariantes,
+  fallas inyectadas, segunda instancia sobre la misma base); las pruebas de API de `api-security`, `endurecimiento`,
+  `endurecimiento-2` y `pendientes` pasaron ahí, y 012-3 y 021-3 fallan con `cd81760` y `f6c5445`
+  (`npm --prefix web run it:regresion`). **CI** en GitHub Actions (rápido en Ubuntu en cada push; integración y E2E completa
+  en `windows-2025` con LocalDB en `main`): es la segunda corrida completa. **Vitest** para la lógica del modelador.
+  **Guardias de la suite** (desborde por absolutos, 4xx sin aviso en la vista, foco en `body`, pantallas sin captura), que
+  encontraron y corrigieron: `.content` sin `position: relative` (causa raíz de los absolutos que escapan), botones que al
+  esperar al servidor sacaban el foco, foco perdido cuando desaparece lo que lo tenía y el conflicto de edición sin `role="alert"`.
+- **Pendiente (diferido con razón):** fragmentar la suite (R-028-2: corre en un solo trabajo de CI); caché del modelo por
+  instancia (R-030-1, solo importa con varias instancias); 16 de 23 pantallas sin captura de referencia (R-030-3); autenticación SQL
+  para un SQL Server en contenedor (no hace falta con LocalDB en Windows).
+
 ## Specs planeadas (después de la 029)
 En este orden, por decisión del dueño (2026-10-25):
 1. ~~**029 — Endurecimiento 3: capacidades declaradas y canario de fugas** (retrospectiva P1 y P2).~~ Implementado (ver arriba).
@@ -420,7 +435,7 @@ En este orden, por decisión del dueño (2026-10-25):
      recorridas como ese usuario sin que el canario aparezca.
    - *Verificación:* quitar la capacidad de una ruta hace fallar el inventario; el canario falla con el código de la 011
      (antes de la 012) en `/api/audit` y en `__label`; el snapshot está en el diff.
-2. **030 — Integración y CI** (retrospectiva P5, P8, P14 y P9).
+2. ~~**030 — Integración y CI** (retrospectiva P5, P8, P14 y P9).~~ Implementado (ver arriba).
    - *Problema:* las unitarias no usan base, así que toda prueba de concurrencia o falla parcial vive en Playwright, se
      escribe a mano y solo después de una auditoría; no hay CI (`.github/workflows` no existe) y la segunda corrida
      completa la hace cada sesión; la lógica de la SPA solo se prueba por E2E (026 F-06 fue intermitente); las lecciones
@@ -438,6 +453,10 @@ En este orden, por decisión del dueño (2026-10-25):
    - *Verificación:* las regresiones de 012-3 y 021-3 corren en integración y fallan con `cd81760` y `f6c5445`; CI en
      verde en `main` y un push con una prueba rota falla; `npm --prefix web test` cubre 026 F-03 y F-06; cada guardia falla
      con el CSS o componente anterior a su hallazgo. En CLARIFY, revisar si se divide (P12): son cuatro frentes.
+   - **Antes de la 031 (número al abrirla, decisión del dueño si se renumera):** auditoría externa adelantada de la 029–030 y
+     una spec de pendientes con D-06 (tareas programadas que se saltan registros, R-029-4), D-07 (importación «1,5» → 15 y
+     fechas con desfase, R-029-5), R-021-5 (`ForwardedHeaders`) y R-021-6 (bloqueo de navegación en la SPA), más lo que
+     encuentre la auditoría. Sus pruebas de concurrencia y fallas parciales van en integración.
 3. **031 — Módulo de Ventas:** clientes, cotización, pedido, salida de almacén con costo de ventas (póliza de salidas),
    factura y cobranza. Usa `merge` para extender Producto e Inventario, avisos (límite de crédito) y rutas de tres niveles;
    declara su módulo con `setApp` (orden 15, entre Compras e Inventario).

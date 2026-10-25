@@ -25,8 +25,15 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
     'btn', `btn-${variant}`, size !== 'md' && `btn-${size}`, iconOnly && 'btn-icon', block && 'btn-block', className,
   ].filter(Boolean).join(' ');
   const iconSize = size === 'sm' ? 15 : 16;
+  // Spec 030 (guardia de foco; mismo patrón que 022 F-03): mientras espera al servidor el botón no se deshabilita con
+  // `disabled` (el navegador sacaba el foco al body y, si el servidor rechazaba, quien usa el teclado quedaba al inicio de
+  // la página): queda `aria-disabled`, enfocable, e ignora los clics (también el envío del formulario).
+  const busy = loading && !disabled;
+  const onClick = rest.onClick;
   return (
-    <button ref={ref} type={type ?? 'button'} className={cls} disabled={disabled || loading} aria-busy={loading || undefined} {...rest}>
+    <button ref={ref} type={type ?? 'button'} className={cls} disabled={disabled} aria-disabled={busy || undefined} aria-busy={loading || undefined}
+      {...rest}
+      onClick={(e) => { if (busy) { e.preventDefault(); return; } onClick?.(e); }}>
       {loading ? <Loader2 size={iconSize} className="spin" aria-hidden /> : Icon ? <Icon size={iconSize} aria-hidden /> : null}
       {children}
     </button>

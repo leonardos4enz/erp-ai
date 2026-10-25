@@ -1,0 +1,93 @@
+# Spec 030 (H3): integración continua. Repositorio público: ningún secreto; la contraseña del administrador de prueba y la
+# clave de firma de paquetes las genera cada corrida (web/e2e/run.mjs, tests/Erp.IntegrationTests/Harness/ErpHost.cs).
+# - En cada push y pull request: unitarias (.NET), build de la SPA, Vitest y auditoría de dependencias (NuGetAudit ya
+#   rompe el build con NU1902–NU1904 al restaurar Erp.Api).
+# - En main (y a mano): integración con SQL real y la suite E2E completa. Es la segunda corrida completa de cada spec
+#   (docs/sdd/verificacion.md): si falla, la spec se reabre antes de abrir la siguiente.
+# Windows y LocalDB (decisión 2 de la spec 030): las capturas de referencia son de Chromium en Windows y la suite usa
+# Integrated Security, como en local.
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Con dos pushes seguidos a main, GitHub descarta la corrida pendiente del medio: la regla es «el último main en verde».
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  rapido:
+    name: Unitarias, build, Vitest y auditoría
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Pruebas unitarias (.NET)
+        run: dotnet test tests/Erp.Tests
+      - name: Dependencias de la SPA
+        run: npm --prefix web ci
+      - name: Build de la SPA
+        run: npm --prefix web run build
+      - name: Pruebas unitarias de la SPA (Vitest)
+        run: npm --prefix web test
+      - name: Auditoría de dependencias de producción (npm)
+        run: npm --prefix web audit --omit=dev --audit-level=high
+
+  completo:
+    name: Integración y E2E (SQL Server LocalDB)
+    needs: rapido
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    runs-on: windows-2025
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: SQL Server LocalDB
+        shell: pwsh
+        run: |
+          sqllocaldb info
+          sqllocaldb start MSSQLLocalDB
+          sqllocaldb info MSSQLLocalDB
+          $sqlcmd = Get-Command sqlcmd -ErrorAction SilentlyContinue
+          if (-not $sqlcmd) { throw 'sqlcmd no está en el PATH del runner (lo usan run.mjs e instancia.mjs).' }
+          sqlcmd -S "(localdb)\MSSQLLocalDB" -E -b -Q "SELECT @@VERSION"
+      - name: Pruebas de integración (SQL real)
+        # Revisión adversarial 030 (F-J): una prueba colgada no consume los 90 minutos.
+        run: dotnet test tests/Erp.IntegrationTests --blame-hang-timeout 10m
+      - name: Dependencias de la SPA y Chromium
+        working-directory: web
+        run: |
+          npm ci
+          npx playwright install chromium
+      - name: Suite E2E completa
+        run: npm --prefix web run e2e
+      - name: Reporte de Playwright (video y trace de las fallas)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            web/e2e/.report
+            web/e2e/.results
+          retention-days: 14

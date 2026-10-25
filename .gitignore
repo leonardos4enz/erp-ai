@@ -12,3 +12,4 @@ appsettings.*.local.json
 web/e2e/.auth/
 web/e2e/.results/
 web/e2e/.report/
+TestResults/

@@ -4,7 +4,7 @@ import { ApiError } from '../api/client';
 import { modelApi } from '../api/endpoints';
 import type { EntityDef, ExprFunction, FieldDef } from '../api/types';
 import { buildCondition, parseCondition, type CondGroup } from '../lib/conditionBuilder';
-import { apply, complete, type Completion } from '../lib/exprComplete';
+import { apply, complete, completeAfterChoice, type Completion } from '../lib/exprComplete';
 import { ConditionBuilder } from './ConditionBuilder';
 import { Button, Field } from './ui';
 
@@ -112,13 +112,15 @@ export function ExprInput({ label, value, onChange, scope, entities, hint, error
     caretAfter.current = r.caret;
     onChange(r.text);
     setCompletion(null);
-    // Después de una referencia o de abrir una función, seguir sugiriendo.
+    // Después de una referencia o de abrir una función, seguir sugiriendo con el texto actual (026 F-06, completeAfterChoice).
     const s = completion.items[i];
-    // Regresión (revisión 026, F-06): se lee el texto actual; con el de la elección, si la persona ya siguió escribiendo,
-    // la lista mostraba sugerencias viejas.
-    if (s.kind === 'function' || (s.detail ?? '').endsWith('›')) {
-      requestAnimationFrame(() => { const el = ref.current; if (el) refresh(el.value, el.selectionStart ?? el.value.length, s.kind === 'function'); });
-    }
+    const scope = completionScope;
+    requestAnimationFrame(() => {
+      const el = ref.current;
+      if (!el || !scope) return;
+      const next = completeAfterChoice(s, { text: el.value, caret: el.selectionStart ?? el.value.length }, scope);
+      if (next) { setCompletion(next); setActive(0); }
+    });
   }
 
   function onKeyDown(e: KeyboardEvent) {

@@ -144,3 +144,13 @@ test('H6 CA2 (UI): si el modelo cambió, el diálogo avisa y vuelve a calcular l
   }
   expect((await (await a.get('/api/admin/modules')).json()).find((m: { id: string }) => m.id === 'compras').installed).toBe(false);
 });
+
+// Spec 030: de api-security.spec.ts (sus demás pruebas pasaron a tests/Erp.IntegrationTests/ApiSecurityTests.cs). La
+// cabecera Server la quita Kestrel (AddServerHeader = false), que la integración no usa (TestServer): se prueba aquí.
+test('spec 001: la API no anuncia el servidor', async () => {
+  const api = await anonApi();
+  const res = await api.get('/api/health');
+  expect(res.status()).toBe(200);
+  expect(res.headers()['server']).toBeUndefined();
+  await api.dispose();
+});

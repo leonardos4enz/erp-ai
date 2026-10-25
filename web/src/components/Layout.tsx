@@ -311,7 +311,44 @@ export function Layout() {
   );
 }
 
+/**
+ * Spec 030 (guardia de foco; mismo patrón que 022 F-03, que se corrigió solo en los diálogos): el foco no se pierde en body.
+ * - Un botón que se deshabilita mientras espera al servidor saca el foco; al rehabilitarse (también si el servidor rechaza)
+ *   lo recupera.
+ * - Si lo que tenía el foco desaparece (el «Revisar cambios» de un editor que se cierra al aplicar, la tarjeta de un módulo
+ *   que se vuelve a pintar, la fila que se borró), pasa al contenido principal, que es por donde se sigue.
+ * Si la persona hace clic fuera de todo lo enfocable, se respeta.
+ */
+function useFocusRescue() {
+  useEffect(() => {
+    let last: HTMLElement | null = null;
+    const onFocusIn = (e: FocusEvent) => { last = e.target instanceof HTMLElement ? e.target : null; };
+    const onPointerDown = (e: PointerEvent) => {
+      if (!(e.target instanceof Element) || !e.target.closest('a[href], button, input, select, textarea, [tabindex]')) last = null;
+    };
+    const rescue = () => {
+      if (!last || (document.activeElement && document.activeElement !== document.body)) return;
+      // Revisión adversarial 030 (F-L): uno conectado pero oculto (pestaña o panel con display: none) no puede recibirlo.
+      const hidden = last.isConnected && last.checkVisibility && !last.checkVisibility();
+      if (last.isConnected && !hidden) { if (!last.matches(':disabled')) last.focus({ preventScroll: true }); return; }
+      if (document.querySelector('[data-dialog-root]')) return; // el diálogo abierto maneja su foco
+      last = null;
+      document.getElementById('main')?.focus({ preventScroll: true });
+    };
+    const watcher = new MutationObserver(rescue);
+    watcher.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['disabled'] });
+    document.addEventListener('focusin', onFocusIn);
+    document.addEventListener('pointerdown', onPointerDown, true);
+    return () => {
+      watcher.disconnect();
+      document.removeEventListener('focusin', onFocusIn);
+      document.removeEventListener('pointerdown', onPointerDown, true);
+    };
+  }, []);
+}
+
 function Shell() {
+  useFocusRescue();
   const { me } = useAuth();
   const { current } = useApps();
   const { theme, toggle } = useTheme();
@@ -399,7 +436,7 @@ function Shell() {
           <Button variant="ghost" size="sm" iconOnly icon={theme === 'dark' ? Sun : Moon} aria-label={theme === 'dark' ? 'Usar tema claro' : 'Usar tema oscuro'} onClick={toggle} />
           <UserMenu />
         </header>
-        <main className="content" id="main">
+        <main className="content" id="main" tabIndex={-1}>
           {/* Spec 010: al cambiar de empresa la página se vuelve a montar (y vuelve a pedir sus datos). */}
           <Outlet key={me?.company?.id ?? 0} />
         </main>

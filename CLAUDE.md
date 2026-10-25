@@ -22,9 +22,13 @@ se declaran como datos; el motor genera tablas, API y pantallas. Idioma del proy
   riesgo en [riesgos.md](docs/sdd/riesgos.md), no una mitigación. «Revisión de código» no basta para una amenaza alta.
 - **Revisión adversarial en VERIFY:** un subagente sin el contexto de la sesión lee el diff y la tabla STRIDE (no las
   conclusiones del plan) para romper la seguridad y la concurrencia. Sus hallazgos son F-xx como cualquier otro.
-- **Una corrida completa al cerrar**, más los archivos nuevos o modificados con `--veces=3` (no dos completas). Al
-  abrir la spec siguiente, su primera acción tras el `rev-list` es correr la suite completa: es la segunda corrida de la
-  anterior (hasta que CI la haga, spec 030). Si falla, se corrige primero lo anterior.
+- **Una corrida completa al cerrar**, más los archivos nuevos o modificados con `--veces=3` (no dos completas). **La
+  segunda corrida completa es CI** (spec 030): el push a `main` corre integración y E2E completa. Si CI falla, la spec se
+  reabre y se corrige con un commit nuevo antes de abrir la siguiente. Al abrir una spec, tras el `rev-list`, comprobar que
+  la última corrida de CI en `main` esté en verde (ver [verificacion.md](docs/sdd/verificacion.md)); si está en rojo, eso va
+  primero. Sin CI disponible, correr la suite completa como antes.
+- **Concurrencia y fallas parciales se prueban en integración** (`tests/Erp.IntegrationTests`, SQL real), no en Playwright;
+  las pruebas de API sin página también.
 - **Alcance congelado en VERIFY:** un pedido nuevo entra solo si bloquea el uso; si no, va al roadmap como spec siguiente.
 - **Dividir la spec** (se decide en CLARIFY) si cumple dos de: más de 6 historias, más de ~2 500 líneas de producto,
   seguridad o concurrencia junto con UI nueva, más de una pantalla principal.
@@ -36,7 +40,10 @@ se declaran como datos; el motor genera tablas, API y pantallas. Idioma del proy
 
 ## Comandos
 ```bash
-dotnet test                       # unitarias (núcleo de seguridad)
+dotnet test                       # unitarias (núcleo de seguridad) e integración con SQL real (030, necesita LocalDB)
+dotnet test tests/Erp.Tests       # solo unitarias (sin base)
+npm --prefix web test             # Vitest: lógica de la SPA sin DOM y pantallas sin captura (030)
+npm --prefix web run it:regresion -- <commit> <filtro>   # pruebas de integración contra el código anterior (030)
 ACTUALIZAR_RUTAS=1 dotnet test --filter RouteInventory   # regenera docs/sdd/rutas.md tras agregar o cambiar una ruta (029)
 npm --prefix web run e2e          # E2E Playwright sobre base desechable (ver abajo)
 npm --prefix web run e2e -- e2e/<archivo>.spec.ts --veces=3   # lo nuevo, 3 veces sobre base nueva
@@ -65,8 +72,10 @@ compilan en su propia carpeta.
 - El backend debe cumplir el contrato del plan al pie de la letra (p. ej. `/compute` → `{ values }`).
 - En expresiones, comparar contra nulo da *desconocido*: una regla sobre un campo vacío no se viola.
 - En expresiones un vacío vale 0 en la aritmética y en `ROUND`: «sin dato» se protege con `IF(ISBLANK(...), NULL, ...)` (022 F-04).
-- Una lección que se repite se vuelve **guardia de la suite**, no otra línea aquí (absolutos que escapan: 3 veces; error
-  fuera de la vista: 3; foco en `body`: 3; ver la spec 030).
+- Una lección que se repite se vuelve **guardia de la suite**, no otra línea aquí. Desde la 030 `helpers.ts` falla solo, en las
+  pruebas que usan el *fixture* `page`, si un absoluto desborda el documento, si un 4xx a una escritura pedida no deja su
+  `role="alert"` en la vista o si el foco cae en `body`, y Vitest
+  falla si una ruta nueva no tiene captura ni razón escrita (ver [verificacion.md](docs/sdd/verificacion.md)).
 - La regla de un camino debe valer en **todos**: bitácora, etiquetas, buscador, reportes, exportación, OData, webhooks,
   importación, paquetes, reversión, impresión y asistente (012, 021).
 - Toda operación «revisar → aplicar» o «abrir → guardar» lleva huella o versión (012-5, 021-2).
@@ -76,7 +85,7 @@ compilan en su propia carpeta.
 
 ## Antes de cada push (repositorio público)
 - `git diff --cached` sin secretos: contraseñas reales, API keys (la de Anthropic se captura en la app, cifrada; nunca en archivos), tokens.
-- Sin artefactos: `bin/`, `obj/`, `node_modules/`, `web/dist/`, `web/e2e/.auth|.results|.report`, `*.tsbuildinfo`.
+- Sin artefactos: `bin/`, `obj/`, `TestResults/`, `node_modules/`, `web/dist/`, `web/e2e/.auth|.results|.report`, `*.tsbuildinfo`.
 - Credenciales de desarrollo: el usuario `admin` es del dueño; no cambiarla ni escribirla en archivos.
 
 ## Commits
