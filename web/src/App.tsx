@@ -19,6 +19,7 @@ import { EnvironmentsPage } from './pages/EnvironmentsPage';
 import { CompaniesPage } from './pages/CompaniesPage';
 import { AssistantPage } from './pages/AssistantPage';
 import { ExplorerPage } from './pages/ExplorerPage';
+import { ImagesPage } from './pages/ImagesPage';
 import { ReportPage, ReportsPage } from './pages/ReportsPage';
 import { DashboardPage, DashboardsPage } from './pages/DashboardsPage';
 import { NotFoundPage, ForbiddenPage } from './pages/StatusPages';
@@ -61,6 +62,7 @@ export function App() {
         <Route path="admin/model" element={<Guard allow={!!(me?.canManageModel || me?.isSuperuser)}><ModelerPage /></Guard>} />
         {/* Spec 025: explorador del modelo y de la base de datos (solo lectura). */}
         <Route path="admin/explorer" element={<Guard allow={!!(me?.canManageModel || me?.isSuperuser)}><ExplorerPage /></Guard>} />
+        <Route path="admin/images" element={<Guard allow={!!(me?.canManageModel || me?.isSuperuser)}><ImagesPage /></Guard>} />
         <Route path="admin/security" element={<Guard allow={!!(me?.canManageUsers || me?.isSuperuser)}><SecurityPage /></Guard>} />
         <Route path="admin/modules" element={<Guard allow={!!me?.isSuperuser}><ModulesPage /></Guard>} />
         <Route path="admin/integrations" element={<Guard allow={!!me?.isSuperuser}><IntegrationsPage /></Guard>} />

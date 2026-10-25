@@ -21,7 +21,8 @@ var builder = WebApplication.CreateBuilder(args);
 builder.WebHost.ConfigureKestrel(k =>
 {
     k.AddServerHeader = false;
-    k.Limits.MaxRequestBodySize = 2 * 1024 * 1024; // 2 MB: los catálogos no reciben archivos
+    // 2 MB: los catálogos no reciben archivos; las imágenes (spec 027) se cortan en 1 MB al leerse.
+    k.Limits.MaxRequestBodySize = 2 * 1024 * 1024;
 });
 
 // ---------- JSON ----------
@@ -133,6 +134,14 @@ builder.Services.AddRateLimiter(o =>
             PermitLimit = builder.Configuration.GetValue("Security:TokenRequestsPerMinute", 30),
             Window = TimeSpan.FromMinutes(1), QueueLimit = 0,
         }));
+    // Spec 027 (H5 CA4): generar un PDF cuesta CPU y memoria; por usuario.
+    o.AddPolicy(PrintEndpoints.RatePolicy, http => RateLimitPartition.GetFixedWindowLimiter(
+        http.User.Identity?.Name ?? http.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = builder.Configuration.GetValue("Security:PrintsPerMinute", 30),
+            Window = TimeSpan.FromMinutes(1), QueueLimit = 0,
+        }));
     o.GlobalLimiter =PartitionedRateLimiter.Create<HttpContext, string>(http => RateLimitPartition.GetFixedWindowLimiter(
         http.User.Identity?.Name ?? http.Connection.RemoteIpAddress?.ToString() ?? "unknown",
         // Configurable solo para la suite E2E, que hace como administrador más de 600 peticiones por minuto.
@@ -191,6 +200,8 @@ app.MapAssistant();
 app.MapOAuthToken(); // spec 018
 app.MapOData();
 app.MapExplorer(); // spec 025
+app.MapFiles(); // spec 027
+app.MapPrint();
 app.MapGet("/api/health", () => Results.Ok(new { status = "ok" })).AllowAnonymous();
 app.MapFallback("/api/{**path}", () => Results.Problem(title: "Ruta no encontrada.", statusCode: 404));
 app.MapFallback("/oauth/{**path}", () => Results.Problem(title: "Ruta no encontrada.", statusCode: 404));

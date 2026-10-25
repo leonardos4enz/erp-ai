@@ -353,6 +353,32 @@ export interface LedgerDef {
   period?: { entity: string; start: string; end: string; open: string };
 }
 
+/* ---------- Spec 027: plantillas de impresión ---------- */
+export type PrintBlockType = 'header' | 'text' | 'fields' | 'table' | 'totals' | 'image' | 'separator' | 'signatures' | 'pageBreak' | 'footer';
+export type PrintFormat = 'text' | 'number' | 'integer' | 'money' | 'percent' | 'date' | 'dateLong' | 'datetime';
+export type PrintAlign = 'left' | 'center' | 'right';
+/** Un valor impreso: `value` es una expresión en el ámbito del bloque (la partida en una tabla). */
+export interface PrintValue { label: string; value: string; format?: PrintFormat; decimals?: number; currency?: string; width?: number; align?: PrintAlign; bold?: boolean }
+export interface PrintSignature { label: string; name?: string }
+export interface PrintBlock {
+  type: PrintBlockType;
+  visibleWhen?: string;
+  logo?: boolean; company?: boolean; title?: string; subtitle?: string;
+  text?: string; size?: number; bold?: boolean; italic?: boolean; align?: PrintAlign; pageNumbers?: boolean;
+  items?: PrintValue[]; perRow?: number;
+  lines?: string; columns?: PrintValue[];
+  file?: string; width?: number;
+  signatures?: PrintSignature[];
+}
+export interface PrintPage { size?: 'letter' | 'a4'; orientation?: 'portrait' | 'landscape'; margin?: number }
+export interface PrintTemplate {
+  name: string; label: string; description?: string; roles?: string[]; companies?: string[]; when?: string; default?: boolean;
+  page?: PrintPage; blocks: PrintBlock[];
+}
+export interface PrintChoice { name: string; label: string; description?: string | null; default: boolean }
+/** Spec 027: imagen de plantilla (dato del entorno, por clave). */
+export interface StoredImage { id: number; key: string; contentType: string; size: number; width: number; height: number; sha256: string; createdBy: string; createdAt: string; url: string }
+
 /** Spec 005: «cuando pase X en este catálogo, haz Y en otros registros». */
 export interface Automation {
   name: string;
@@ -400,6 +426,8 @@ export interface EntityDef {
   schedules?: ScheduleDef[] | null;
   /** Spec 020: libro de partida doble. */
   ledger?: LedgerDef | null;
+  /** Spec 027: plantillas de impresión (solo la reciben los modeladores). */
+  printTemplates?: PrintTemplate[] | null;
   /** Spec 010: un registro por empresa (las partidas siguen a su documento). */
   perCompany?: boolean;
   isChild?: boolean;
@@ -426,7 +454,7 @@ export interface Me {
 
 /** Spec 010: empresa del entorno (dato, no metadato). */
 export interface CompanyInfo { id: number; code: string; name: string; baseCurrency: string }
-export interface Company extends CompanyInfo { isDefault: boolean; isActive: boolean; users: number }
+export interface Company extends CompanyInfo { isDefault: boolean; isActive: boolean; users: number; taxId?: string | null; address?: string | null; logoUrl?: string | null }
 export interface ExchangeRate { id: number; from: string; to: string; date: string; rate: number; updatedBy: string; updatedAt: string }
 
 export type Operation =
@@ -448,6 +476,7 @@ export type Operation =
   | { op: 'setWebhooks'; entity: string; webhooks: WebhookDef[]; merge?: boolean }
   | { op: 'setSchedules'; entity: string; schedules: ScheduleDef[]; merge?: boolean }
   | { op: 'setLedger'; entity: string; ledger: LedgerDef | null }
+  | { op: 'setPrintTemplates'; entity: string; templates: PrintTemplate[]; merge?: boolean }
   | { op: 'setDashboard'; dashboard: DashboardDef }
   | { op: 'archiveDashboard'; name: string }
   | { op: 'setApp'; app: AppDef }
@@ -746,7 +775,7 @@ export interface PendingChange { securityChange: SecurityChange; secret?: string
 export const isPending = (x: unknown): x is PendingChange => typeof x === 'object' && x !== null && 'securityChange' in x;
 
 /* ---------- Spec 026: origen de cada elemento y editor de expresiones ---------- */
-export type OriginKind = 'entity' | 'field' | 'rule' | 'automation' | 'view' | 'report' | 'webhook' | 'schedule' | 'workflow' | 'layout' | 'security' | 'ledger';
+export type OriginKind = 'entity' | 'field' | 'rule' | 'automation' | 'view' | 'report' | 'webhook' | 'schedule' | 'workflow' | 'layout' | 'security' | 'ledger' | 'printTemplate';
 export interface PackageStamp { id: string; name: string; version: string }
 /** `package` nulo = local; `step` = «base» o la versión de la actualización que lo dejó como está. */
 export interface ElementOrigin { kind: OriginKind; name: string; package: string | null; packageName: string | null; step: string | null; modified: boolean }

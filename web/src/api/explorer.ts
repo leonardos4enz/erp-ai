@@ -42,8 +42,8 @@ export interface EntityCard {
 }
 
 export type UsageKind = 'formula' | 'default' | 'rule' | 'transition' | 'layout' | 'automation' | 'schedule' | 'webhook' | 'access'
-  | 'view' | 'report' | 'dashboard' | 'lookup' | 'ledger' | 'display' | 'reference';
-export interface Usage { entity: string; kind: UsageKind; location: string; expression?: string | null; target: { entity: string; field?: string | null }; tab: 'catalogo' | 'formulario' | 'proceso' }
+  | 'view' | 'report' | 'dashboard' | 'lookup' | 'ledger' | 'display' | 'reference' | 'print';
+export interface Usage { entity: string; kind: UsageKind; location: string; expression?: string | null; target: { entity: string; field?: string | null }; tab: 'catalogo' | 'formulario' | 'proceso' | 'impresion' }
 
 export interface FlowNode { name: string; label: string; app: string }
 export interface FlowEdge {

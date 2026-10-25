@@ -15,12 +15,18 @@
     <PackageReference Include="Anthropic" Version="13.2.1" />
     <PackageReference Include="Dapper" Version="2.1.89" />
     <PackageReference Include="Microsoft.Data.SqlClient" Version="7.1.1" />
+    <PackageReference Include="PDFsharp-MigraDoc" Version="6.2.4" />
     <!-- Fijado: la versión transitiva 9.0.18 tiene vulnerabilidades conocidas (GHSA-846f-f764-76mx). -->
     <PackageReference Include="System.Security.Cryptography.Pkcs" Version="10.0.13" />
   </ItemGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="Erp.Tests" />
+  </ItemGroup>
+
+  <!-- Spec 027 (ADR-0007): la fuente de los PDF viaja dentro del ensamblado (Lato, SIL OFL 1.1): igual en Windows y Linux. -->
+  <ItemGroup>
+    <EmbeddedResource Include="Printing\Fonts\*.ttf" LogicalName="Erp.Fonts.%(Filename)%(Extension)" />
   </ItemGroup>
 
 </Project>

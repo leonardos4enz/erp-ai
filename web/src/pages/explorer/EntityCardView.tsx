@@ -194,6 +194,18 @@ function Card({ c, onOpen }: { c: EntityCard; onOpen: (v: ExplorerView, e?: stri
         ) : <None>No es un libro contable.</None>}
       </Section>
 
+      <Section title="Plantillas de impresión" count={e.printTemplates?.length ?? 0}>
+        {e.printTemplates?.length ? (
+          <ul className="ex-list">
+            {e.printTemplates.map((t) => (
+              <li key={t.name}><strong>{t.label}</strong>{t.default && <> <Badge tone="success">Predeterminada</Badge></>} · {t.blocks.length} bloque(s)
+                {t.roles?.length ? ` · roles ${t.roles.join(', ')}` : ''}
+                {t.when && <div className="mono subtle ex-expr">{t.when}</div>}</li>
+            ))}
+          </ul>
+        ) : <None>Sin plantillas de impresión.</None>}
+      </Section>
+
       <Section title="Formulario (layout)">
         {e.layout?.sections.length ? (
           <ul className="ex-list">

@@ -196,7 +196,10 @@ code, pre, .mono { font-family: var(--font-mono); font-size: 0.8125rem; }
 .page-header-icon { width: 40px; height: 40px; border-radius: var(--radius-md); background: var(--accent-soft); color: var(--accent-text); display: grid; place-items: center; flex-shrink: 0; }
 .page-title { font-size: var(--text-xl); font-weight: 600; letter-spacing: -0.015em; }
 .page-subtitle { color: var(--text-muted); margin-top: 2px; }
-.page-actions { margin-left: auto; display: flex; gap: var(--space-2); align-items: center; }
+.page-actions { margin-left: auto; display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+/* Regresión (revisión exploratoria 027, F-03): con «Descargar PDF» y «Volver», en el teléfono el título se encogía a una
+   palabra por renglón y el botón lo tapaba. El título conserva un ancho mínimo y las acciones bajan a su propio renglón. */
+.page-header > .grow { min-width: min(9rem, 100%); }
 
 .toolbar { display: flex; gap: var(--space-3); align-items: center; margin-bottom: var(--space-4); flex-wrap: wrap; }
 .toolbar .input-wrap { width: 320px; max-width: 100%; }
@@ -908,3 +911,35 @@ code, pre, .mono { font-family: var(--font-mono); font-size: 0.8125rem; }
 .cond-in { border: 0; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); }
 .expr-complex { display: block; }
 .expr-group { min-width: 0; }
+
+/* Spec 027: imágenes (logo de empresa e imágenes de plantillas). Fondo a cuadros: se ve si la imagen tiene transparencia. */
+.image-upload { border: 0; padding: 0; margin: 0; min-width: 0; display: grid; gap: var(--space-2); }
+.image-upload-row { display: flex; align-items: center; gap: var(--space-4); flex-wrap: wrap; min-width: 0; }
+.image-upload-thumb { width: 120px; height: 72px; border: 1px solid var(--border); border-radius: var(--radius-md); display: grid; place-items: center; overflow: hidden; flex-shrink: 0;
+  background: repeating-conic-gradient(var(--surface-2) 0% 25%, var(--surface) 0% 50%) 50% / 12px 12px; }
+.image-upload-thumb img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.company-logo { width: 40px; height: 28px; object-fit: contain; border-radius: var(--radius-sm); background: #fff; border: 1px solid var(--border); flex-shrink: 0; }
+
+/* Spec 027: editor de plantillas de impresión y vista previa. */
+.print-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 42%); gap: var(--space-4); align-items: start; }
+@media (max-width: 1100px) { .print-layout { grid-template-columns: minmax(0, 1fr); } }
+.print-preview { position: sticky; top: var(--space-4); display: grid; gap: var(--space-3); min-width: 0; }
+.print-preview-frame { width: 100%; height: 70vh; min-height: 420px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-2); }
+.print-preview-empty { border: 1px dashed var(--border-strong); border-radius: var(--radius-md); background: var(--surface-2); padding: var(--space-6) var(--space-4); text-align: center; }
+.block-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
+.block { border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: var(--radius-sm); background: var(--surface); min-width: 0; }
+.block[data-dragging="true"] { opacity: .5; }
+.block[data-drop="true"] { box-shadow: 0 -3px 0 var(--accent); }
+.block-head { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-2); flex-wrap: wrap; }
+.block-head .item-toggle { flex: 1 1 160px; }
+.block-head .item-title { white-space: nowrap; }
+/* Revisión exploratoria 027 (F-04): en el teléfono el resumen partía el nombre del bloque a media palabra. */
+@media (max-width: 640px) { .block-head .item-name { display: none; } }
+.block-grip { cursor: grab; color: var(--text-muted); display: inline-flex; padding: 4px; border-radius: var(--radius-sm); }
+.block-body { border-top: 1px solid var(--border); background: var(--surface-2); padding: var(--space-3); display: grid; gap: var(--space-3); }
+.value-row { display: grid; grid-template-columns: minmax(120px, 0.9fr) minmax(0, 1.6fr) minmax(120px, 0.8fr) auto; gap: var(--space-2); align-items: start; }
+@media (max-width: 640px) {
+  .value-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .value-row > :nth-child(2), .value-row > :nth-child(3) { grid-column: 1 / -1; }
+}
+.image-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: var(--space-3); }

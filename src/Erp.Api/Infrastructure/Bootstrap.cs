@@ -651,6 +651,32 @@ public static class Bootstrap
         IF COL_LENGTH('meta.AutomationRun', 'LeaseToken') IS NULL ALTER TABLE meta.AutomationRun ADD LeaseToken uniqueidentifier NULL;
         IF COL_LENGTH('meta.ScheduleState', 'ContentHash') IS NULL ALTER TABLE meta.ScheduleState ADD ContentHash char(64) NULL;
 
+        -- Spec 027: plantillas de impresión (metadato) y archivos de imagen del entorno (logos e imágenes de plantillas).
+        -- Los archivos son datos del entorno: no viajan en paquetes. Reemplazar uno archiva el anterior (no se borra).
+        IF COL_LENGTH('meta.Entity', 'PrintTemplatesJson') IS NULL ALTER TABLE meta.Entity ADD PrintTemplatesJson nvarchar(max) NULL;
+        IF OBJECT_ID('meta.[File]') IS NULL
+        CREATE TABLE meta.[File] (
+            Id int IDENTITY PRIMARY KEY,
+            Purpose nvarchar(10) NOT NULL,
+            FileKey nvarchar(63) NULL,
+            ContentType nvarchar(20) NOT NULL,
+            Size int NOT NULL,
+            Width int NOT NULL,
+            Height int NOT NULL,
+            Sha256 char(64) NOT NULL,
+            Content varbinary(max) NOT NULL,
+            IsArchived bit NOT NULL DEFAULT 0,
+            CreatedBy int NOT NULL REFERENCES meta.[User](Id),
+            CreatedAt datetime2(3) NOT NULL DEFAULT SYSUTCDATETIME(),
+            ArchivedAt datetime2(3) NULL
+        );
+        IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_File_Key')
+            CREATE UNIQUE INDEX UX_File_Key ON meta.[File] (FileKey) WHERE FileKey IS NOT NULL AND IsArchived = 0;
+        IF COL_LENGTH('meta.Company', 'LogoFileId') IS NULL
+            ALTER TABLE meta.Company ADD LogoFileId int NULL CONSTRAINT FK_Company_Logo REFERENCES meta.[File](Id);
+        IF COL_LENGTH('meta.Company', 'TaxId') IS NULL ALTER TABLE meta.Company ADD TaxId nvarchar(20) NULL;
+        IF COL_LENGTH('meta.Company', 'Address') IS NULL ALTER TABLE meta.Company ADD Address nvarchar(500) NULL;
+
         -- Constitución II.4: la auditoría es de solo inserción, incluso para la propia aplicación.
         IF OBJECT_ID('meta.TR_AuditLog_Immutable') IS NULL
             EXEC('CREATE TRIGGER meta.TR_AuditLog_Immutable ON meta.AuditLog INSTEAD OF UPDATE, DELETE AS

@@ -1,7 +1,7 @@
 {
   "id": "compras",
   "name": "Compras",
-  "version": "1.9.0",
+  "version": "1.10.0",
   "icon": "shopping-cart",
   "description": "Requisiciones, órdenes de compra con autorización por montos y recepción de mercancía con cantidades recibidas y pendientes. Incluye proveedores, productos y catálogos base.",
   "plan": {
@@ -544,6 +544,79 @@
       "plan": { "description": "Compras 1.9.0: módulo de navegación", "operations": [
         { "op": "setApp", "app": { "name": "Compras", "label": "Compras", "icon": "shopping-cart", "order": 10,
             "description": "Requisiciones, órdenes de compra con autorización y recepción de mercancía; proveedores y productos." } }
+      ] } },
+    { "version": "1.10.0",
+      "description": "Documentos PDF (spec 027): la orden de compra se descarga en PDF. «Orden de compra para proveedor» (predeterminada, de la orden autorizada en adelante) con logo, datos de la empresa, partidas, totales y firmas; «Orden de compra interna» para cualquier rol que lea la orden: quien no ve los importes recibe la tabla sin precios y los totales «(sin acceso)».",
+      "plan": { "description": "Compras 1.10.0: plantillas de impresión de la orden de compra", "operations": [
+        { "op": "setPrintTemplates", "entity": "OrdenCompra", "merge": true, "templates": [
+            { "name": "Proveedor", "label": "Orden de compra para proveedor", "default": true,
+              "description": "La que se envía al proveedor: solo de la orden autorizada en adelante.",
+              "roles": ["Comprador", "Gerente de compras", "Director"],
+              "when": "Estado IN ('Autorizada', 'Enviada', 'RecibidaParcial', 'Recibida', 'Cerrada')",
+              "page": { "size": "letter", "margin": 15 },
+              "blocks": [
+                { "type": "header", "logo": true, "company": true, "title": "Orden de compra", "subtitle": "{{ Folio }}" },
+                { "type": "fields", "perRow": 2, "items": [
+                    { "label": "Proveedor", "value": "Proveedor" },
+                    { "label": "RFC del proveedor", "value": "Proveedor.RFC" },
+                    { "label": "Fecha", "value": "Fecha", "format": "dateLong" },
+                    { "label": "Fecha de entrega", "value": "FechaEntrega", "format": "dateLong" },
+                    { "label": "Entregar en", "value": "Almacen" },
+                    { "label": "Condición de pago", "value": "CondicionPago" },
+                    { "label": "Moneda", "value": "Moneda.Clave" },
+                    { "label": "Comprador", "value": "Comprador" }
+                  ] },
+                { "type": "text", "visibleWhen": "NOT ISBLANK(Almacen.Direccion)", "size": 8, "text": "Domicilio de entrega: {{ Almacen.Direccion }}" },
+                { "type": "table", "lines": "Partidas", "columns": [
+                    { "label": "Producto", "value": "Producto", "width": 5 },
+                    { "label": "Cantidad", "value": "Cantidad", "format": "number", "width": 2 },
+                    { "label": "Unidad", "value": "Unidad", "width": 2 },
+                    { "label": "Precio unitario", "value": "PrecioUnitario", "format": "number", "width": 3 },
+                    { "label": "Desc.", "value": "DescuentoPct", "format": "percent", "width": 2 },
+                    { "label": "Importe", "value": "Importe", "format": "number", "width": 3 }
+                  ] },
+                { "type": "totals", "items": [
+                    { "label": "Subtotal", "value": "Subtotal", "format": "money", "currency": "Moneda.Clave" },
+                    { "label": "Descuento", "value": "Descuento", "format": "money", "currency": "Moneda.Clave" },
+                    { "label": "IVA", "value": "IVA", "format": "money", "currency": "Moneda.Clave" },
+                    { "label": "Total", "value": "Total", "format": "money", "currency": "Moneda.Clave", "bold": true }
+                  ] },
+                { "type": "text", "visibleWhen": "NOT ISBLANK(Notas)", "text": "Notas: {{ Notas }}" },
+                { "type": "text", "size": 8, "italic": true, "text": "Favor de citar el folio {{ Folio }} en su factura y en la remisión de entrega." },
+                { "type": "signatures", "signatures": [
+                    { "label": "Elaboró", "name": "{{ Comprador }}" },
+                    { "label": "Autorizó", "name": "{{ AutorizadoPor }}" }
+                  ] },
+                { "type": "footer", "text": "Orden de compra {{ Folio }}", "pageNumbers": true }
+              ] },
+            { "name": "Interna", "label": "Orden de compra interna",
+              "description": "Para seguimiento dentro de la empresa, en cualquier estado. Cada rol ve lo que su seguridad le permite.",
+              "page": { "size": "letter", "margin": 15 },
+              "blocks": [
+                { "type": "header", "logo": true, "company": true, "title": "Orden de compra (uso interno)", "subtitle": "{{ Folio }} · {{ Estado }}" },
+                { "type": "fields", "perRow": 3, "items": [
+                    { "label": "Proveedor", "value": "Proveedor" },
+                    { "label": "Fecha", "value": "Fecha" },
+                    { "label": "Entrega", "value": "FechaEntrega" },
+                    { "label": "Almacén destino", "value": "Almacen" },
+                    { "label": "Requisición", "value": "Requisicion" },
+                    { "label": "Comprador", "value": "Comprador" }
+                  ] },
+                { "type": "table", "lines": "Partidas", "columns": [
+                    { "label": "Producto", "value": "Producto", "width": 5 },
+                    { "label": "Pedido", "value": "Cantidad", "format": "number", "width": 2 },
+                    { "label": "Recibido", "value": "CantidadRecibida", "format": "number", "width": 2 },
+                    { "label": "Pendiente", "value": "Pendiente", "format": "number", "width": 2 },
+                    { "label": "Importe", "value": "Importe", "format": "number", "width": 3 }
+                  ] },
+                { "type": "totals", "items": [
+                    { "label": "Total", "value": "Total", "format": "money", "currency": "Moneda.Clave", "bold": true }
+                  ] },
+                { "type": "text", "visibleWhen": "Estado = 'Rechazada'", "text": "Motivo de rechazo: {{ MotivoRechazo }}" },
+                { "type": "text", "visibleWhen": "Estado = 'Cancelada'", "text": "Motivo de cancelación: {{ MotivoCancelacion }}" },
+                { "type": "footer", "text": "Uso interno · {{ Folio }}", "pageNumbers": true }
+              ] }
+          ] }
       ] } }
   ],
   "roles": [    { "name": "Solicitante", "description": "Crea y envía requisiciones de compra.", "canManageModel": false, "canManageUsers": false, "canViewAudit": false,

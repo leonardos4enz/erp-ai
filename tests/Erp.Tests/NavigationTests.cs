@@ -218,7 +218,7 @@ public class NavigationTests
         var list = Apps.Effective(model, apps, _ => true);
         Assert.Equal(["Compras", "Inventario", "Contabilidad"], list.Select(a => a.Name));
         Assert.All(list, a => Assert.True(a.Declared));
-        Assert.Equal(["1.9.0", "1.8.0", "1.2.0"], new[] { Package("compras.json").Version, Package("inventario.json").Version, Package("contabilidad.json").Version });
+        Assert.Equal(["1.10.0", "1.8.0", "1.3.0"], new[] { Package("compras.json").Version, Package("inventario.json").Version, Package("contabilidad.json").Version });
     }
 
     [Fact]

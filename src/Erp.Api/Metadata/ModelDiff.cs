@@ -311,7 +311,7 @@ public static class ModelDiff
         AddFieldOp o => o.Entity, UpdateFieldOp o => o.Entity, ArchiveFieldOp o => o.Entity, RestoreFieldOp o => o.Entity,
         SetWorkflowOp o => o.Entity, SetRulesOp o => o.Entity, SetAutomationsOp o => o.Entity, SetSecurityOp o => o.Entity,
         SetLayoutOp o => o.Entity, SetViewsOp o => o.Entity, SetReportsOp o => o.Entity, SetWebhooksOp o => o.Entity,
-        SetSchedulesOp o => o.Entity, SetLedgerOp o => o.Entity,
+        SetSchedulesOp o => o.Entity, SetLedgerOp o => o.Entity, SetPrintTemplatesOp o => o.Entity,
         _ => null,
     };
 
@@ -395,6 +395,8 @@ public static class ModelDiff
         // Spec 016: si una tarea corre es decisión de cada entorno (meta.ScheduleState): solo viaja la definición.
         if (!JsonEq(Norm(d.Schedules), Norm(t?.Schedules))) sets.Add(new SetSchedulesOp { Entity = name, Schedules = d.Schedules ?? [] });
         if (!JsonEq(d.Ledger, t?.Ledger)) sets.Add(new SetLedgerOp { Entity = name, Ledger = d.Ledger });
+        // Spec 027: las plantillas viajan; las imágenes que nombran son datos de cada entorno (como el destino de un webhook).
+        if (!JsonEq(Norm(d.PrintTemplates), Norm(t?.PrintTemplates))) sets.Add(new SetPrintTemplatesOp { Entity = name, Templates = d.PrintTemplates ?? [] });
     }
 
     private static UpdateEntityOp? EntityChange(EntityDef d, EntityDef t, List<string> warnings)

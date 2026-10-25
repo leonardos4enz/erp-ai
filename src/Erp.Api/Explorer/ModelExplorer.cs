@@ -286,6 +286,7 @@ public static class ModelExplorer
         SetWebhooksOp x => x.Entity,
         SetSchedulesOp x => x.Entity,
         SetLedgerOp x => x.Entity,
+        SetPrintTemplatesOp x => x.Entity,
         _ => null,
     };
 }

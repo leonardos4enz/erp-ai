@@ -102,6 +102,7 @@ public static partial class PlanCompiler
                 SetWebhooksOp op => SetWebhooks(ctx, op),
                 SetSchedulesOp op => SetSchedules(ctx, op),
                 SetLedgerOp op => SetLedger(ctx, op),
+                SetPrintTemplatesOp op => SetPrintTemplates(ctx, op),
                 _ => ctx.Fail("Operación desconocida."),
             };
             // Solo se registra el efecto si la operación fue válida; así las siguientes ven un modelo coherente.
@@ -162,6 +163,9 @@ public static partial class PlanCompiler
                 // Spec 016: igual con las tareas programadas (consulta, rol y acciones dependen de otros catálogos).
                 if (e.Schedules is { } schedules)
                     foreach (var m in ScheduleRules.Validate(e, schedules, working, knownRoles)) errors.Add(new(at, $"{e.Label} › {m}"));
+                // Spec 027: una plantilla lee campos del registro, de sus partidas y de catálogos relacionados.
+                if (e.PrintTemplates is { } templates)
+                    foreach (var m in PrintRules.Validate(e, templates, working, knownRoles)) errors.Add(new(at, $"{e.Label} › {m}"));
             }
             foreach (var d in boards.Values.Where(d => !d.IsArchived))
                 foreach (var m in InterfaceRules.ValidateDashboard(d, working, knownRoles))
@@ -619,6 +623,18 @@ public static partial class PlanCompiler
             : op.Reports.Count == 0 ? $"Quitar los reportes de '{e.Label}'"
             : $"Definir {op.Reports.Count} reporte(s) en '{e.Label}': {string.Join(", ", op.Reports.Select(r => r.Label))}";
         return new(e with { Reports = reports.Count == 0 ? null : reports }, text, []);
+    }
+
+    private static OpResult? SetPrintTemplates(Ctx ctx, SetPrintTemplatesOp op)
+    {
+        var e = ctx.Active(op.Entity);
+        if (e is null) return null;
+        var list = op.Merge ? MergeByName(e.PrintTemplates, op.Templates, t => t.Name) : op.Templates;
+        var names = string.Join(", ", op.Templates.Select(t => t.Label));
+        var text = op.Merge ? $"Agregar o actualizar {op.Templates.Count} plantilla(s) de impresión en '{e.Label}': {names}"
+            : op.Templates.Count == 0 ? $"Quitar las plantillas de impresión de '{e.Label}'"
+            : $"Definir {op.Templates.Count} plantilla(s) de impresión en '{e.Label}': {names}";
+        return new(e with { PrintTemplates = list.Count == 0 ? null : list }, text, []);
     }
 
     /// <summary>

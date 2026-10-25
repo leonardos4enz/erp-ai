@@ -32,8 +32,9 @@ en orden, no en paralelo: casi todas tocan el núcleo del motor (`PlanCompiler`,
 | 024 Navegación por módulos | Implementado ([spec](specs/024-navegacion-modulos/spec.md)) |
 | 025 Explorador del modelo y de la base de datos | Implementado ([spec](specs/025-explorador-modelo/spec.md)) |
 | 026 Modelador por módulos y sin JSON | Implementado ([spec](specs/026-modelador-visual/spec.md)) |
-| 027 Módulo de Ventas | Planeado |
-| 028 CFDI 4.0 con PAC | Planeado |
+| 027 Documentos PDF con plantillas visuales | Implementado ([spec](specs/027-documentos-pdf/spec.md)) |
+| 028 Módulo de Ventas | Planeado |
+| 029 CFDI 4.0 con PAC | Planeado |
 
 ## Diagnóstico
 | Brecha señalada | Situación actual | Spec |
@@ -272,7 +273,7 @@ reglas de negocio** (constitución I.1), configurables por metadatos con valores
   ventas) y revaluación, que siguen de la 020.
 
 ### 023 — Capacidades del motor: listas que se fusionan, reglas de aviso y rutas de tres niveles
-Origen: pendientes de la 022 que limitan a los módulos y que Ventas (024, luego 025, 026, ahora 027) necesitará; plan del dueño (2026-10-24).
+Origen: pendientes de la 022 que limitan a los módulos y que Ventas (024, luego 025, 026, 027, ahora 028) necesitará; plan del dueño (2026-10-24).
 - **Estado:** implementado en la [spec 023](specs/023-capacidades-motor/spec.md). `merge` en las seis listas del catálogo
   (reglas, automatizaciones, vistas, reportes, webhooks, tareas): agrega o reemplaza por nombre en su lugar; la vista previa
   ya no dice que quita lo que un `merge` conserva, y un paquete de Entornos que extiende un catálogo que no crea llega al
@@ -334,13 +335,36 @@ parecían contenido (bug) y ocho secciones en JSON manual. Ventas pasa a la 027 
 - **Pendiente:** origen de lo que llegó por paquetes de Entornos (hoy «Local»), fusión de tres vías al actualizar un
   módulo, rutas de más de un salto en el selector de agrupación de reportes y deshacer/rehacer en los editores.
 
-## Specs planeadas (después de la 026)
-En este orden, por decisión del dueño (2026-10-24):
-1. **027 — Módulo de Ventas:** clientes, cotización, pedido, salida de almacén con costo de ventas (póliza de salidas),
+### 027 — Documentos PDF con plantillas visuales
+Origen: pedido del dueño (2026-10-25): diseñar desde el sistema el PDF de los documentos (orden de compra, póliza y, después,
+la representación impresa del CFDI). Ventas pasa a la 028 y CFDI 4.0 a la 029.
+- **Estado:** implementado en la [spec 027](specs/027-documentos-pdf/spec.md). **Archivos de imagen** del entorno
+  (`meta.[File]`): PNG y JPEG validados por firma y estructura completa (polyglots, bombas de descompresión y dimensiones
+  falsas se rechazan; SVG y WebP no), servidos autenticados con su tipo, `nosniff`, CSP `sandbox` y caché por huella;
+  **logo, RFC y domicilio por empresa** (superusuario) e **imágenes de plantilla por clave** (*Configuración › Modelo ›
+  Imágenes*). **Plantillas de impresión como metadato** (`setPrintTemplates` con `merge`): varias por catálogo, con roles,
+  empresas, condición, predeterminada, página y bloques (encabezado, texto con `{{ campos }}`, campos con etiqueta, tabla de
+  partidas, totales, imagen, separador, firmas, salto y pie con «Página N de M»); viajan en paquetes, origen, explorador y
+  asistente. **Editor visual** en la pestaña *Impresión* del modelador (teclado y arrastre, constructor de condiciones,
+  «Ver como JSON» plegado) con **vista previa** de un registro real. **Generación en el servidor** con PDFsharp + MigraDoc
+  (MIT, [ADR-0007](../adr/0007-motor-pdf.md)) y fuente Lato incrustada: alcance por registro y por salto de ruta, campos
+  ocultos «(sin acceso)» (columnas omitidas, bloques condicionados ocultos), auditoría y límites. «Descargar PDF» en el
+  formulario. Compras 1.10.0 (OC para proveedor e interna) y Contabilidad 1.3.0 (póliza).
+- **Pendiente (diferido con razón):** enviar el PDF por correo (no hay capacidad de correo: necesita su spec con
+  servidor SMTP/proveedor, plantillas de mensaje y bitácora); adjuntarlo automáticamente al ejecutar una transición
+  (requiere el tipo de campo archivo); firma electrónica (e.firma/FIEL: certificados y custodia de llaves, otra spec);
+  **tipo de campo `image`/`file` en catálogos** (DDL, captura, importación, OData, miniaturas y límites por registro: la
+  base `meta.[File]` ya existe); SVG sanitizado y WebP; códigos QR y de barras (los pedirá el CFDI, 029); diseño libre por
+  coordenadas.
+
+## Specs planeadas (después de la 027)
+En este orden, por decisión del dueño (2026-10-25):
+1. **028 — Módulo de Ventas:** clientes, cotización, pedido, salida de almacén con costo de ventas (póliza de salidas),
    factura y cobranza. Usa `merge` para extender Producto e Inventario, avisos (límite de crédito) y rutas de tres niveles;
    declara su módulo con `setApp` (orden 15, entre Compras e Inventario).
-2. **028 — CFDI 4.0 con PAC:** timbrado de la factura de Ventas con un proveedor autorizado, cancelación y complemento de
-   pago; el secreto del PAC fuera del código (constitución II.7).
+2. **029 — CFDI 4.0 con PAC:** timbrado de la factura de Ventas con un proveedor autorizado, cancelación y complemento de
+   pago; el secreto del PAC fuera del código (constitución II.7). Su representación impresa usa las plantillas de la 027
+   (con un bloque de código QR nuevo).
 3. **Pólizas en moneda extranjera** (pendiente de la 020).
 4. **Revaluación de existencias** (pendiente de la 020).
 5. **Reversa de pólizas con otra póliza** (pendiente de la 020).

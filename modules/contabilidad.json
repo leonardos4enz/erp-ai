@@ -1,7 +1,7 @@
 {
   "id": "contabilidad",
   "name": "Contabilidad",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "icon": "landmark",
   "description": "Catálogo de cuentas, pólizas de partida doble y periodos contables con cierre. El cuadre y los periodos cerrados los garantiza el motor por cualquier vía.",
   "plan": {
@@ -140,6 +140,40 @@
       "plan": { "description": "Contabilidad 1.2.0: módulo de navegación", "operations": [
         { "op": "setApp", "app": { "name": "Contabilidad", "label": "Contabilidad", "icon": "landmark", "order": 30,
             "description": "Catálogo de cuentas, pólizas de partida doble y periodos contables con cierre." } }
+      ] } },
+    { "version": "1.3.0",
+      "description": "Documentos PDF (spec 027): la póliza se descarga en PDF con sus cuentas, cargos, abonos, totales y firmas de elaboró, revisó y autorizó.",
+      "plan": { "description": "Contabilidad 1.3.0: plantilla de impresión de la póliza", "operations": [
+        { "op": "setPrintTemplates", "entity": "Poliza", "merge": true, "templates": [
+            { "name": "Poliza", "label": "Póliza", "default": true,
+              "page": { "size": "letter", "margin": 15 },
+              "blocks": [
+                { "type": "header", "logo": true, "company": true, "title": "Póliza de {{ Tipo }}", "subtitle": "{{ Folio }} · {{ Estado }}" },
+                { "type": "fields", "perRow": 3, "items": [
+                    { "label": "Fecha", "value": "Fecha", "format": "dateLong" },
+                    { "label": "Tipo", "value": "Tipo" },
+                    { "label": "Origen", "value": "Origen" },
+                    { "label": "Referencia", "value": "Referencia" }
+                  ] },
+                { "type": "text", "text": "Concepto: {{ Concepto }}" },
+                { "type": "table", "lines": "Partidas", "columns": [
+                    { "label": "Cuenta", "value": "Cuenta.Codigo", "width": 2 },
+                    { "label": "Nombre", "value": "Cuenta.Nombre", "width": 4 },
+                    { "label": "Concepto", "value": "Concepto", "width": 4 },
+                    { "label": "Cargo", "value": "Cargo", "format": "number", "width": 2 },
+                    { "label": "Abono", "value": "Abono", "format": "number", "width": 2 }
+                  ] },
+                { "type": "totals", "items": [
+                    { "label": "Total cargos", "value": "TotalCargos", "format": "money" },
+                    { "label": "Total abonos", "value": "TotalAbonos", "format": "money", "bold": true }
+                  ] },
+                { "type": "text", "visibleWhen": "Diferencia <> 0", "bold": true, "text": "La póliza no cuadra: diferencia de {{ Diferencia }}." },
+                { "type": "signatures", "signatures": [
+                    { "label": "Elaboró" }, { "label": "Revisó" }, { "label": "Autorizó" }
+                  ] },
+                { "type": "footer", "text": "Póliza {{ Folio }}", "pageNumbers": true }
+              ] }
+          ] }
       ] } }
   ],
   "roles": [

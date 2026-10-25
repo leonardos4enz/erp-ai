@@ -16,8 +16,14 @@ public static class CompanyEndpoints
     public const int MaxRates = 200;
     public const decimal MaxRate = 100_000_000_000m;
 
-    public sealed record CompanyDto(int Id, string Code, string Name, string BaseCurrency, bool IsDefault, bool IsActive, int Users);
-    public sealed record CompanyRequest(string? Code, string? Name, string? BaseCurrency, bool IsActive = true);
+    public const int MaxTaxId = 20;
+    public const int MaxAddress = 500;
+
+    /// <param name="TaxId">Spec 027: identificación fiscal (RFC) que imprime el encabezado del PDF.</param>
+    /// <param name="LogoUrl">Spec 027: URL del logo con su huella (nula sin logo).</param>
+    public sealed record CompanyDto(int Id, string Code, string Name, string BaseCurrency, bool IsDefault, bool IsActive, int Users,
+        string? TaxId = null, string? Address = null, string? LogoUrl = null);
+    public sealed record CompanyRequest(string? Code, string? Name, string? BaseCurrency, bool IsActive = true, string? TaxId = null, string? Address = null);
     public sealed record RateDto(int Id, string From, string To, string Date, decimal Rate, string UpdatedBy, DateTime UpdatedAt);
     public sealed record RateRequest(string? From, string? To, string? Date, decimal? Rate);
     public sealed record SwitchRequest(int CompanyId);
@@ -36,6 +42,9 @@ public static class CompanyEndpoints
         });
         g.MapPost("/companies", (CompanyRequest req, HttpContext http, Db db, MetadataStore store) => Save(null, req, http, db, store));
         g.MapPut("/companies/{id:int}", (int id, CompanyRequest req, HttpContext http, Db db, MetadataStore store) => Save(id, req, http, db, store));
+        // Spec 027 (H1): logo de la empresa. El cuerpo es la imagen tal cual; la valida el servidor por su contenido.
+        g.MapPut("/companies/{id:int}/logo", SaveLogo);
+        g.MapDelete("/companies/{id:int}/logo", RemoveLogo);
         g.MapGet("/exchange-rates", ListRates);
         g.MapPut("/exchange-rates", SaveRate);
         g.MapDelete("/exchange-rates/{id:int}", DeleteRate);
@@ -77,6 +86,10 @@ public static class CompanyEndpoints
         if (name.Length is 0 or > MaxName) errors["name"] = [$"El nombre es obligatorio (máx. {MaxName})."];
         var currency = req.BaseCurrency?.Trim().ToUpperInvariant() ?? "";
         if (!Companies.IsCurrency(currency)) errors["baseCurrency"] = ["Usa el código ISO de 3 letras (p. ej. MXN, USD)."];
+        var taxId = string.IsNullOrWhiteSpace(req.TaxId) ? null : req.TaxId.Trim().ToUpperInvariant();
+        if (taxId?.Length > MaxTaxId) errors["taxId"] = [$"Máximo {MaxTaxId} caracteres."];
+        var address = string.IsNullOrWhiteSpace(req.Address) ? null : req.Address.Trim().ReplaceLineEndings("\n");
+        if (address?.Length > MaxAddress) errors["address"] = [$"Máximo {MaxAddress} caracteres."];
         if (errors.Count > 0) throw new ValidationFailed(errors);
 
         await using var cn = await db.OpenAsync();
@@ -94,16 +107,18 @@ public static class CompanyEndpoints
                             new { id }, tx) is not null)
                         throw new Conflict($"No se puede cambiar la moneda base: la empresa ya tiene registros en {e.LabelPlural}. Sus importes están en {before.BaseCurrency}.");
             await cn.ExecuteAsync("""
-                UPDATE meta.Company SET Name = @name, BaseCurrency = @currency, IsActive = @IsActive, UpdatedAt = SYSUTCDATETIME() WHERE Id = @id
-                """, new { id, name, currency, req.IsActive }, tx);
+                UPDATE meta.Company SET Name = @name, BaseCurrency = @currency, IsActive = @IsActive, TaxId = @taxId, Address = @address,
+                       UpdatedAt = SYSUTCDATETIME() WHERE Id = @id
+                """, new { id, name, currency, req.IsActive, taxId, address }, tx);
         }
         else
         {
             if (await cn.ExecuteScalarAsync<int?>("SELECT 1 FROM meta.Company WHERE Code = @code", new { code }, tx) is not null)
                 throw new ValidationFailed(new Dictionary<string, string[]> { ["code"] = ["Ya existe una empresa con esa clave."] });
             id = await cn.ExecuteScalarAsync<int>("""
-                INSERT meta.Company (Code, Name, BaseCurrency, IsActive) OUTPUT inserted.Id VALUES (@code, @name, @currency, @IsActive)
-                """, new { code, name, currency, req.IsActive }, tx);
+                INSERT meta.Company (Code, Name, BaseCurrency, IsActive, TaxId, Address) OUTPUT inserted.Id
+                VALUES (@code, @name, @currency, @IsActive, @taxId, @address)
+                """, new { code, name, currency, req.IsActive, taxId, address }, tx);
         }
         var after = (await LoadAsync(cn, tx)).First(c => c.Id == id);
         await Audit.WriteAsync(cn, tx, http, AuditActions.CompanyChange, "Empresa", after.Code, before, after);
@@ -115,10 +130,54 @@ public static class CompanyEndpoints
         (await cn.QueryAsync<CompanyRow>("""
             SELECT c.Id, c.Code, c.Name, c.BaseCurrency, c.IsDefault, c.IsActive,
                    (SELECT COUNT(*) FROM meta.UserCompany uc JOIN meta.[User] u ON u.Id = uc.UserId
-                     WHERE uc.CompanyId = c.Id AND u.IsService = 0 AND u.IsTeam = 0) AS Users
-              FROM meta.Company c ORDER BY c.IsDefault DESC, c.Name
+                     WHERE uc.CompanyId = c.Id AND u.IsService = 0 AND u.IsTeam = 0) AS Users,
+                   c.TaxId, c.Address, c.LogoFileId, f.Sha256 AS LogoSha
+              FROM meta.Company c LEFT JOIN meta.[File] f ON f.Id = c.LogoFileId
+             ORDER BY c.IsDefault DESC, c.Name
             """, transaction: tx))
-        .Select(c => new CompanyDto(c.Id, c.Code, c.Name, c.BaseCurrency.Trim(), c.IsDefault, c.IsActive, c.Users)).ToList();
+        .Select(c => new CompanyDto(c.Id, c.Code, c.Name, c.BaseCurrency.Trim(), c.IsDefault, c.IsActive, c.Users, c.TaxId, c.Address,
+            c.LogoFileId is { } logo ? $"/api/files/{logo}?v={c.LogoSha}" : null)).ToList();
+
+    // ---------------- Logo (spec 027) ----------------
+
+    private static async Task<CompanyDto> SaveLogo(int id, HttpContext http, Db db, CancellationToken ct)
+    {
+        RequireSuperuser(http);
+        var data = await FileEndpoints.ReadBodyAsync(http, ct);
+        await using var cn = await db.OpenAsync(ct);
+        await using var tx = await cn.BeginTransactionAsync(ct);
+        var previous = await cn.QuerySingleOrDefaultAsync<LogoRow>(
+            "SELECT Id, LogoFileId FROM meta.Company WITH (UPDLOCK) WHERE Id = @id", new { id }, tx) ?? throw new NotFound("La empresa no existe.");
+        var saved = await Files.FileStore.SaveAsync(cn, tx, data, Files.FilePurposes.Logo, null, http.CurrentUser().Id);
+        await cn.ExecuteAsync("UPDATE meta.Company SET LogoFileId = @file, UpdatedAt = SYSUTCDATETIME() WHERE Id = @id", new { id, file = saved.Id }, tx);
+        var old = previous.LogoFileId is { } oldId ? await Files.FileStore.FindAsync(cn, tx, oldId) : null;
+        if (old is not null) await Files.FileStore.ArchiveAsync(cn, tx, old.Id);
+        var after = (await LoadAsync(cn, tx)).First(c => c.Id == id);
+        await Audit.WriteAsync(cn, tx, http, AuditActions.FileChange, "Empresa", after.Code,
+            before: old is null ? null : new { logo = FileEndpoints.Summary(old) }, after: new { logo = FileEndpoints.Summary(saved) });
+        await tx.CommitAsync(ct);
+        return after;
+    }
+
+    private static async Task<CompanyDto> RemoveLogo(int id, HttpContext http, Db db, CancellationToken ct)
+    {
+        RequireSuperuser(http);
+        await using var cn = await db.OpenAsync(ct);
+        await using var tx = await cn.BeginTransactionAsync(ct);
+        var previous = await cn.QuerySingleOrDefaultAsync<LogoRow>(
+            "SELECT Id, LogoFileId FROM meta.Company WITH (UPDLOCK) WHERE Id = @id", new { id }, tx) ?? throw new NotFound("La empresa no existe.");
+        if (previous.LogoFileId is { } oldId)
+        {
+            var old = await Files.FileStore.FindAsync(cn, tx, oldId);
+            await cn.ExecuteAsync("UPDATE meta.Company SET LogoFileId = NULL, UpdatedAt = SYSUTCDATETIME() WHERE Id = @id", new { id }, tx);
+            await Files.FileStore.ArchiveAsync(cn, tx, oldId);
+            var code = (await LoadAsync(cn, tx)).First(c => c.Id == id).Code;
+            await Audit.WriteAsync(cn, tx, http, AuditActions.FileChange, "Empresa", code, before: old is null ? null : new { logo = FileEndpoints.Summary(old) });
+        }
+        var after = (await LoadAsync(cn, tx)).First(c => c.Id == id);
+        await tx.CommitAsync(ct);
+        return after;
+    }
 
     // ---------------- Tipos de cambio ----------------
 
@@ -191,6 +250,8 @@ public static class CompanyEndpoints
             r.Rate, r.DisplayName, DateTime.SpecifyKind(r.UpdatedAt, DateTimeKind.Utc)))
         .ToList();
 
-    private sealed record CompanyRow(int Id, string Code, string Name, string BaseCurrency, bool IsDefault, bool IsActive, int Users);
+    private sealed record LogoRow(int Id, int? LogoFileId);
+    private sealed record CompanyRow(int Id, string Code, string Name, string BaseCurrency, bool IsDefault, bool IsActive, int Users,
+        string? TaxId, string? Address, int? LogoFileId, string? LogoSha);
     private sealed record RateRow(int Id, string FromCurrency, string ToCurrency, DateTime RateDate, decimal Rate, string DisplayName, DateTime UpdatedAt);
 }

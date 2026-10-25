@@ -15,7 +15,7 @@ public static class Provenance
     {
         public const string Entity = "entity", Field = "field", Rule = "rule", Automation = "automation", View = "view",
             Report = "report", Webhook = "webhook", Schedule = "schedule", Workflow = "workflow", Layout = "layout",
-            Security = "security", Ledger = "ledger";
+            Security = "security", Ledger = "ledger", PrintTemplate = "printTemplate";
     }
 
     public sealed record PackageStamp(string Id, string Name, string Version);
@@ -168,6 +168,7 @@ public static class Provenance
         foreach (var r in e.Reports ?? []) Add(Kinds.Report, r.Name, r);
         foreach (var w in e.Webhooks ?? []) Add(Kinds.Webhook, w.Name, w);
         foreach (var s in e.Schedules ?? []) Add(Kinds.Schedule, s.Name, s);
+        foreach (var t in e.PrintTemplates ?? []) Add(Kinds.PrintTemplate, t.Name, t); // spec 027
         Add(Kinds.Workflow, "", e.Workflow);
         Add(Kinds.Layout, "", e.Layout);
         Add(Kinds.Security, "", e.Security);

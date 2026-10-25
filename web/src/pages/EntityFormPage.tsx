@@ -9,6 +9,7 @@ import { ConfirmDialog } from '../components/Dialog';
 import { resolveIcon } from '../components/DynamicIcon';
 import { FieldInput } from '../components/FieldInput';
 import { LinesEditor } from '../components/LinesEditor';
+import { PrintMenu } from '../components/PrintMenu';
 import { useToast } from '../components/Toast';
 import { WarningsAlert } from '../components/Warnings';
 import { HistoryPanel, stateLabel, TransitionDialog, WorkflowBar } from '../components/Workflow';
@@ -413,7 +414,13 @@ export function EntityFormPage() {
       // "Registrar …" evita errores de género ("Nuevo orden", "Nueva almacén") con etiquetas definidas por el usuario.
       title={isNew ? `Registrar ${def.label.toLowerCase()}` : folio ? `${def.label} ${folio}` : `${def.label} #${id}`}
       subtitle={subtitle}
-      actions={<Button variant="ghost" icon={ArrowLeft} onClick={() => navigate(listPath)}>Volver</Button>}
+      actions={(
+        <>
+          {/* Spec 027 (H5): solo con el registro guardado; el servidor dice qué plantillas aplican. */}
+          {!isNew && row && <PrintMenu entity={def.name} id={Number(row.id)} version={String(row._rowVersion ?? '')} />}
+          <Button variant="ghost" icon={ArrowLeft} onClick={() => navigate(listPath)}>Volver</Button>
+        </>
+      )}
     />
   );
 

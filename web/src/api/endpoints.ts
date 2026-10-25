@@ -1,6 +1,6 @@
-import { api } from './client';
+import { api, ApiError } from './client';
 import type {
-  AppSummary, SearchHit, AuditEntry, AutomationRun, AutomationRunDetail, ScheduleSummary, ChangePlan, Company, EntityOrigin, ExprFunction, FieldDef, ExchangeRate, ChangeSetSummary, DashboardResult, DashboardSummary, EntityDef, HistoryEntry, LayoutState, LookupItem, Me,
+  AppSummary, SearchHit, AuditEntry, AutomationRun, AutomationRunDetail, ScheduleSummary, ChangePlan, Company, EntityOrigin, ExprFunction, FieldDef, ExchangeRate, ChangeSetSummary, DashboardResult, DashboardSummary, EntityDef, HistoryEntry, LayoutState, LookupItem, Me, PrintChoice, PrintTemplate, StoredImage,
   ApiKey, AssistantStatus, OAuthClient, OAuthScope, BusinessUnit, PendingChange, SecurityChange, Team, Conversation, ConversationSummary, Proposal, EnvironmentInfo, ExportableCatalogs, ExportPreview, ExportRequest, ImportResult, ModuleInfo, PackageImport, ModulePreview, WebhookDelivery, WebhookSummary, Paged, PlanPreview, ReportResult, ReportSummary, Role, Row, RowList, SavedView, User, ViewFilter, ViewList,
 } from './types';
 
@@ -32,6 +32,17 @@ export const modelApi = {
   checkExpression: (entity: string, expression: string, fields?: FieldDef[], signal?: AbortSignal) =>
     api<{ errors: string[] }>('/model/expressions/check', { method: 'POST', body: { entity, expression, fields }, signal }),
   functions: () => api<ExprFunction[]>('/model/expressions/functions'),
+  /** Spec 027: PDF de un registro con la plantilla del borrador; devuelve la ficha para mostrarlo en el marco. */
+  printPreview: (entity: string, id: number, template: PrintTemplate, signal?: AbortSignal) =>
+    api<{ token: string; warnings: string[] }>('/model/print/preview', { method: 'POST', body: { entity, id, template }, signal }),
+  printPreviewUrl: (token: string) => `/api/model/print/preview/${enc(token)}`,
+};
+
+/** Spec 027: imágenes de plantillas (datos del entorno, por clave). */
+export const imagesApi = {
+  list: (signal?: AbortSignal) => api<StoredImage[]>('/admin/images', { signal }),
+  save: (key: string, file: Blob) => api<StoredImage>(`/admin/images/${enc(key)}`, { method: 'PUT', rawBody: file }),
+  remove: (key: string) => api<void>(`/admin/images/${enc(key)}`, { method: 'DELETE' }),
 };
 
 export interface ListQuery {
@@ -80,6 +91,21 @@ export const dataApi = {
     }),
   transition: (entity: string, id: number | string, input: TransitionInput) =>
     api<Row>(`/data/${enc(entity)}/${enc(String(id))}/transition`, { method: 'POST', body: input }),
+  /** Spec 027: plantillas de impresión que aplican al registro y al usuario (la predeterminada primero). */
+  printChoices: (entity: string, id: number | string, signal?: AbortSignal) =>
+    api<PrintChoice[]>(`/data/${enc(entity)}/${enc(String(id))}/print`, { signal }),
+  /** Spec 027: PDF del registro; el nombre del archivo lo fija el servidor (folio). */
+  pdf: async (entity: string, id: number | string, template?: string) => {
+    const res = await fetch(`/api/data/${enc(entity)}/${enc(String(id))}/pdf${template ? `?template=${enc(template)}` : ''}`,
+      { credentials: 'same-origin', headers: { Accept: 'application/pdf' } });
+    if (!res.ok) {
+      let problem = {};
+      try { problem = await res.json(); } catch { /* sin cuerpo */ }
+      throw new ApiError(res.status, problem);
+    }
+    const name = /filename="?([^";]+)"?/.exec(res.headers.get('Content-Disposition') ?? '')?.[1] ?? `${entity}-${id}.pdf`;
+    return { blob: await res.blob(), name };
+  },
   history: (entity: string, id: number | string, signal?: AbortSignal) =>
     api<HistoryEntry[]>(`/data/${enc(entity)}/${enc(String(id))}/history`, { signal }),
   /** Spec 008: vista previa (dryRun) o importación de un CSV/XLSX; todo o nada. */
@@ -155,7 +181,7 @@ export interface UserInput {
   companyIds?: number[];
 }
 
-export interface CompanyInput { code?: string; name: string; baseCurrency: string; isActive: boolean }
+export interface CompanyInput { code?: string; name: string; baseCurrency: string; isActive: boolean; taxId?: string; address?: string }
 export interface RateInput { from: string; to: string; date: string; rate: number }
 
 /** Spec 010: empresas y tipos de cambio (datos del entorno). */
@@ -167,6 +193,9 @@ export const companiesApi = {
     api<ExchangeRate[]>('/admin/exchange-rates', { query: { from: q.from || undefined, to: q.to || undefined }, signal }),
   saveRate: (r: RateInput) => api<ExchangeRate>('/admin/exchange-rates', { method: 'PUT', body: r }),
   removeRate: (id: number) => api<void>(`/admin/exchange-rates/${id}`, { method: 'DELETE' }),
+  /** Spec 027: logo de la empresa (el servidor lo valida por su contenido). */
+  saveLogo: (id: number, file: Blob) => api<Company>(`/admin/companies/${id}/logo`, { method: 'PUT', rawBody: file }),
+  removeLogo: (id: number) => api<Company>(`/admin/companies/${id}/logo`, { method: 'DELETE' }),
 };
 
 export interface RoleInput {

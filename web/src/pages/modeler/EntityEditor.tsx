@@ -2,13 +2,13 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   AlertCircle, Archive, ArchiveRestore, ArrowDown, ArrowUp, BookOpen, CheckCircle2, ChevronDown, ChevronUp, Eye, KeyRound, LayoutTemplate, ListFilter, Loader2, Package, Plus,
-  ShieldCheck, Table2, Trash2, Webhook, Workflow as WorkflowIcon, Zap,
+  Printer, ShieldCheck, Table2, Trash2, Webhook, Workflow as WorkflowIcon, Zap,
 } from 'lucide-react';
 import { ApiError } from '../../api/client';
 import { adminApi, modelApi } from '../../api/endpoints';
 import { GENERAL_APP } from '../../lib/apps';
 import type {
-  Automation, ChangePlan, ElementOrigin, EntityDef, EntityOrigin, FieldDef, FieldType, FormulaResultType, LedgerDef, Layout, Operation, OriginKind, PlanPreview, ReportDef, Rule,
+  Automation, ChangePlan, ElementOrigin, EntityDef, EntityOrigin, FieldDef, FieldType, FormulaResultType, LedgerDef, Layout, Operation, OriginKind, PlanPreview, PrintTemplate, ReportDef, Rule,
   ScheduleDef, SecurityPolicy, ViewDef, WebhookDef, Workflow,
 } from '../../api/types';
 import { ConfirmDialog } from '../../components/Dialog';
@@ -25,6 +25,7 @@ import { AutomationsEditor } from './sections/AutomationsEditor';
 import { CompilerErrors, InvalidJson, JsonAdvanced, OriginBadge, PackageNotice, SectionShell, selfScope, type SectionCtx } from './sections/common';
 import { SchedulesEditor, WebhooksEditor } from './sections/IntegrationsEditor';
 import { LedgerEditor } from './sections/LedgerEditor';
+import { PrintTemplatesEditor } from './sections/PrintTemplatesEditor';
 import { RulesEditor } from './sections/RulesEditor';
 import { SecurityEditor } from './sections/SecurityEditor';
 import { ReportsEditor, ViewsEditor } from './sections/ViewsReportsEditor';
@@ -89,6 +90,8 @@ interface Draft {
   webhooksJson: string;
   schedulesJson: string;
   ledgerJson: string;
+  /** Spec 027. */
+  printTemplatesJson: string;
 }
 
 let keySeq = 0;
@@ -106,7 +109,7 @@ function draftFrom(def?: EntityDef): Draft {
   if (!def) {
     const f = blankField(0);
     f.label = 'Nombre'; f.name = 'Nombre'; f.required = true; f.maxLength = 150;
-    return { name: '', label: '', labelPlural: '', icon: 'package', description: '', displayField: '', group: '', perCompany: false, fields: [f], rulesJson: '', workflowJson: '', automationsJson: '', securityJson: '', layoutJson: '', viewsJson: '', reportsJson: '', webhooksJson: '', schedulesJson: '', ledgerJson: '' };
+    return { name: '', label: '', labelPlural: '', icon: 'package', description: '', displayField: '', group: '', perCompany: false, fields: [f], rulesJson: '', workflowJson: '', automationsJson: '', securityJson: '', layoutJson: '', viewsJson: '', reportsJson: '', webhooksJson: '', schedulesJson: '', ledgerJson: '', printTemplatesJson: '' };
   }
   const fields = def.fields
     .slice()
@@ -125,6 +128,7 @@ function draftFrom(def?: EntityDef): Draft {
     webhooksJson: def.webhooks?.length ? pretty(def.webhooks) : '',
     schedulesJson: def.schedules?.length ? pretty(def.schedules) : '',
     ledgerJson: def.ledger ? pretty(def.ledger) : '',
+    printTemplatesJson: def.printTemplates?.length ? pretty(def.printTemplates) : '',
   };
 }
 
@@ -200,6 +204,11 @@ function behaviourOperations(entity: string, original: EntityDef | undefined, d:
   const ledger = parseJson<LedgerDef>(d.ledgerJson, 'object');
   if (ledger.ok && canonical(ledger.value) !== canonical(original?.ledger ?? null)) {
     ops.push({ op: 'setLedger', entity, ledger: ledger.value });
+  }
+  // Spec 027: el editor escribe la lista completa (sin merge).
+  const templates = parseJson<PrintTemplate[]>(d.printTemplatesJson, 'array');
+  if (templates.ok && canonical(templates.value ?? []) !== canonical(original?.printTemplates ?? [])) {
+    ops.push({ op: 'setPrintTemplates', entity, templates: templates.value ?? [] });
   }
   return ops;
 }
@@ -314,6 +323,8 @@ function validate(d: Draft, isNew: boolean, existingNames: string[]): Record<str
   if (!schedules.ok) e.schedulesJson = schedules.error;
   const ledger = parseJson<LedgerDef>(d.ledgerJson, 'object');
   if (!ledger.ok) e.ledgerJson = ledger.error;
+  const templates = parseJson<PrintTemplate[]>(d.printTemplatesJson, 'array');
+  if (!templates.ok) e.printTemplatesJson = templates.error;
   return e;
 }
 
@@ -509,27 +520,28 @@ function FieldRow({ f, index, count, errors, entities, allEntities, roleNames, o
 
 /* ------------------------------------------------------------------------- */
 
-export type EditorTab = 'catalogo' | 'formulario' | 'proceso' | 'reglas' | 'automatizaciones' | 'seguridad' | 'vistas' | 'integraciones' | 'contabilidad';
-const TABS: EditorTab[] = ['catalogo', 'formulario', 'proceso', 'reglas', 'automatizaciones', 'seguridad', 'vistas', 'integraciones', 'contabilidad'];
+export type EditorTab = 'catalogo' | 'formulario' | 'proceso' | 'reglas' | 'automatizaciones' | 'seguridad' | 'vistas' | 'integraciones' | 'contabilidad' | 'impresion';
+const TABS: EditorTab[] = ['catalogo', 'formulario', 'proceso', 'reglas', 'automatizaciones', 'seguridad', 'vistas', 'integraciones', 'contabilidad', 'impresion'];
 export const editorTab = (v: string | null): EditorTab => (TABS.includes(v as EditorTab) ? (v as EditorTab) : 'catalogo');
-/** Spec 019: el diseñador del formulario y el diagrama del proceso usan el ancho completo. */
-export const wideTab = (t: EditorTab) => t === 'formulario' || t === 'proceso';
+/** Spec 019: el diseñador del formulario y el diagrama del proceso usan el ancho completo; spec 027: también la impresión (vista previa). */
+export const wideTab = (t: EditorTab) => t === 'formulario' || t === 'proceso' || t === 'impresion';
 
 /** Sección de cada error de validación del cliente (clave de `validate`). */
 const JSON_TAB: Record<string, EditorTab> = {
   layoutJson: 'formulario', workflowJson: 'proceso', rulesJson: 'reglas', automationsJson: 'automatizaciones', securityJson: 'seguridad',
   viewsJson: 'vistas', reportsJson: 'vistas', webhooksJson: 'integraciones', schedulesJson: 'integraciones', ledgerJson: 'contabilidad',
+  printTemplatesJson: 'impresion',
 };
 const tabOfKey = (k: string): EditorTab => JSON_TAB[k] ?? 'catalogo';
 
-type Section = 'catalog' | 'layout' | 'workflow' | 'rules' | 'automations' | 'security' | 'views' | 'reports' | 'webhooks' | 'schedules' | 'ledger';
+type Section = 'catalog' | 'layout' | 'workflow' | 'rules' | 'automations' | 'security' | 'views' | 'reports' | 'webhooks' | 'schedules' | 'ledger' | 'print';
 const SECTION_TAB: Record<Section, EditorTab> = {
   catalog: 'catalogo', layout: 'formulario', workflow: 'proceso', rules: 'reglas', automations: 'automatizaciones', security: 'seguridad',
-  views: 'vistas', reports: 'vistas', webhooks: 'integraciones', schedules: 'integraciones', ledger: 'contabilidad',
+  views: 'vistas', reports: 'vistas', webhooks: 'integraciones', schedules: 'integraciones', ledger: 'contabilidad', print: 'impresion',
 };
 const OP_SECTION: Partial<Record<Operation['op'], Section>> = {
   setRules: 'rules', setAutomations: 'automations', setSecurity: 'security', setViews: 'views', setReports: 'reports',
-  setWebhooks: 'webhooks', setSchedules: 'schedules', setLedger: 'ledger', setLayout: 'layout', setWorkflow: 'workflow',
+  setWebhooks: 'webhooks', setSchedules: 'schedules', setLedger: 'ledger', setLayout: 'layout', setWorkflow: 'workflow', setPrintTemplates: 'print',
 };
 
 /**
@@ -538,6 +550,8 @@ const OP_SECTION: Partial<Record<Operation['op'], Section>> = {
  */
 export function sectionOfError(message: string, op?: Operation['op']): Section {
   const m = message.toLowerCase();
+  // Spec 027: va primero; una plantilla menciona campos, reglas o reportes en sus textos.
+  if (m.includes('plantilla \'')) return 'print';
   if (m.includes('› tarea ') || m.includes(' tarea \'')) return 'schedules';
   if (m.includes('webhook')) return 'webhooks';
   if (m.includes('› seguridad') || m.includes('seguridad del catálogo')) return 'security';
@@ -713,6 +727,7 @@ export function EntityEditor({ original, entities, onCancel, onReview }: EntityE
   const originMap = useMemo(() => new Map((provenance?.elements ?? []).map((e) => [`${e.kind}:${e.name.toLowerCase()}`, e])), [provenance]);
   const savedList = (kind: OriginKind): { name: string }[] | null | undefined => ({
     rule: original?.rules, automation: original?.automations, view: original?.views, report: original?.reports, webhook: original?.webhooks, schedule: original?.schedules,
+    printTemplate: original?.printTemplates,
   } as Partial<Record<OriginKind, { name: string }[] | null | undefined>>)[kind];
   const ctx: SectionCtx = {
     // Un catálogo nuevo sin identificador todavía se valida como «Borrador» (no existe: se arma con los campos del borrador).
@@ -743,6 +758,7 @@ export function EntityEditor({ original, entities, onCancel, onReview }: EntityE
     { id: 'vistas', label: 'Vistas y reportes', icon: ListFilter },
     { id: 'integraciones', label: 'Integraciones', icon: Webhook },
     { id: 'contabilidad', label: 'Contabilidad', icon: BookOpen },
+    { id: 'impresion', label: 'Impresión', icon: Printer },
   ].map((t) => ({ ...t, label: tabHasErrors(t.id as EditorTab) ? `${t.label} (con errores)` : t.label })) as TabItem<EditorTab>[];
 
   return (
@@ -877,6 +893,20 @@ export function EntityEditor({ original, entities, onCancel, onReview }: EntityE
             hint="lines, debit, credit, date, states y period (entity, start, end, open). Vacío: no es un libro.">
             {(v, write) => <LedgerEditor ledger={v} onChange={write} ctx={sectionCtx('ledger')} />}
           </JsonBacked>
+        </div>
+      )}
+      {tab === 'impresion' && (
+        <div role="tabpanel" aria-label="Impresión" className="stack">
+          {isChild ? (
+            <Alert tone="info" title="Es un catálogo de partidas">Sus partidas se imprimen en la tabla de la plantilla de su documento.</Alert>
+          ) : (
+            <JsonBacked<PrintTemplate[]> kind="array" text={d.printTemplatesJson} onText={(printTemplatesJson) => setD((s) => ({ ...s, printTemplatesJson }))}
+              title="Plantillas de impresión" description="El PDF de cada registro: encabezado con logo, campos, partidas, totales y firmas. Quien consulta el registro descarga el que le aplica, con su propia seguridad."
+              jsonLabel="Plantillas de impresión (JSON)" errors={sectionErrors('print')} clientError={visibleErrors.printTemplatesJson}
+              hint="name, label, roles, companies, when, default, page (size letter|a4, orientation, margin) y blocks (header, text, fields, table, totals, image, separator, signatures, pageBreak, footer).">
+              {(v, write) => <PrintTemplatesEditor templates={v ?? []} onChange={write} ctx={sectionCtx('print')} saved={!isNew} />}
+            </JsonBacked>
+          )}
         </div>
       )}
       {tab === 'catalogo' && <div role="tabpanel" aria-label="Catálogo" className="stack" style={{ gap: 'var(--space-6)' }}>

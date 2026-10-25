@@ -158,6 +158,8 @@ public static class ModelEndpoints
             Reports = u.CanManageModel ? e.Reports : null,
             Webhooks = u.CanManageModel ? e.Webhooks : null,
             Schedules = u.CanManageModel ? e.Schedules : null,
+            // Spec 027: los usuarios eligen entre las plantillas que les aplican (/api/data/{e}/{id}/print).
+            PrintTemplates = u.CanManageModel ? e.PrintTemplates : null,
         };
     }
 }

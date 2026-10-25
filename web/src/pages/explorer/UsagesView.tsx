@@ -11,7 +11,7 @@ const KINDS: Record<UsageKind, string> = {
   formula: 'Fórmula', default: 'Valor por defecto', rule: 'Regla', transition: 'Transición', layout: 'Formulario',
   automation: 'Automatización', schedule: 'Tarea programada', webhook: 'Webhook', access: 'Seguridad', view: 'Vista',
   report: 'Reporte', dashboard: 'Tablero', lookup: 'Filtro del buscador', ledger: 'Contabilidad', display: 'Campo que lo representa',
-  reference: 'Referencia',
+  reference: 'Referencia', print: 'Plantilla de impresión',
 };
 
 interface Props { entity?: string; field?: string; onChange: (entity?: string, field?: string) => void }

@@ -50,6 +50,8 @@ export default defineConfig({
       Security__LoginAttemptsPerMinute: '1000',
       // La suite crece con cada spec y como administrador rebasa el límite global de 600 por minuto (no así una persona).
       Security__RequestsPerMinute: '5000',
+      // Spec 027: la suite descarga más PDF por minuto que una persona.
+      Security__PrintsPerMinute: '1000',
       // Spec 008: el receptor de webhooks de la suite escucha en 127.0.0.1 por http; ninguna otra IP interna se permite.
       Webhooks__AllowHttp: 'true',
       Webhooks__AllowedInternalAddresses: '127.0.0.1',

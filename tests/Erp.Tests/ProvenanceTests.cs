@@ -43,6 +43,19 @@ public class ProvenanceTests
         all.Single(e => e.Entity == entity).Elements.Single(x => x.Kind == kind && x.Name == name);
 
     [Fact]
+    public void Spec027_H6_las_plantillas_de_Compras_y_Contabilidad_compilan_y_dicen_su_paquete()
+    {
+        var installed = AllInstalled();
+        var model = InstalledModel(installed); // cada paso de cada cadena debe ser válido
+        Assert.Equal(["Proveedor", "Interna"], model["OrdenCompra"].PrintTemplates!.Select(t => t.Name));
+        Assert.Equal("Poliza", Assert.Single(model["Poliza"].PrintTemplates!).Name);
+        var all = Provenance.Compute(model, Provenance.Reproduce(Packages, installed, System));
+        var o = Origin(all, "OrdenCompra", Provenance.Kinds.PrintTemplate, "Proveedor");
+        Assert.Equal(("compras", "1.10.0", false), (o.Package, o.Step, o.Modified));
+        Assert.Equal("contabilidad", Origin(all, "Poliza", Provenance.Kinds.PrintTemplate, "Poliza").Package);
+    }
+
+    [Fact]
     public void Los_paquetes_se_ordenan_por_dependencias()
     {
         var order = Provenance.InstallOrder(Packages, AllInstalled()).Select(p => p.Id).ToList();
@@ -61,7 +74,7 @@ public class ProvenanceTests
 
         var almacen = all.Single(e => e.Entity == "Almacen");
         Assert.Equal("compras", almacen.InstalledBy!.Id);
-        Assert.Equal("1.9.0", almacen.InstalledBy.Version);
+        Assert.Equal("1.10.0", almacen.InstalledBy.Version);
         Assert.Contains(almacen.Packages, p => p.Id == "costeo");
         Assert.Equal("compras", Origin(all, "Almacen", Provenance.Kinds.Field, "Nombre").Package);
         var cuenta = Origin(all, "Almacen", Provenance.Kinds.Field, "CuentaInventario");

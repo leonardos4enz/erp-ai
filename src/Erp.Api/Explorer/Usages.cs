@@ -7,7 +7,7 @@ namespace Erp.Api.Explorer;
 public sealed record UsageTarget(string Entity, string? Field);
 
 /// <param name="Entity">Catálogo donde está la mención (el que se abre en el modelador).</param>
-/// <param name="Tab">Pestaña del editor del catálogo: <c>catalogo</c>, <c>formulario</c> o <c>proceso</c>.</param>
+/// <param name="Tab">Pestaña del editor del catálogo: <c>catalogo</c>, <c>formulario</c>, <c>proceso</c> o <c>impresion</c> (027).</param>
 public sealed record Usage(string Entity, string Kind, string Location, string? Expression, UsageTarget Target, string Tab);
 
 public static class UsageKinds
@@ -28,6 +28,8 @@ public static class UsageKinds
     public const string Ledger = "ledger";
     public const string Display = "display";
     public const string Reference = "reference";
+    /// <summary>Spec 027: plantilla de impresión.</summary>
+    public const string Print = "print";
 }
 
 /// <summary>
@@ -245,6 +247,36 @@ public sealed class UsageIndex
             foreach (var g in r.GroupBy ?? []) Name(S(UsageKinds.Report, $"{at} (agrupa)"), e, g.Field);
             foreach (var m in r.Measures) Name(S(UsageKinds.Report, $"{at} (medida)"), e, m.Field);
             Expr(S(UsageKinds.Report, $"{at} (filtro)"), e, r.Filter);
+        }
+
+        // Spec 027: plantillas de impresión (las columnas de una tabla, en el ámbito de la partida).
+        foreach (var t in e.PrintTemplates ?? [])
+        {
+            var at = $"Plantilla «{t.Label}»";
+            Expr(S(UsageKinds.Print, $"{at} (cuándo aplica)", "impresion"), e, t.When);
+            for (var i = 0; i < t.Blocks.Count; i++)
+            {
+                var b = t.Blocks[i];
+                var site = S(UsageKinds.Print, $"{at} › bloque {i + 1} ({b.Type})", "impresion");
+                Expr(site, e, b.VisibleWhen);
+                foreach (var text in new[] { b.Title, b.Subtitle, b.Text }.Concat((b.Signatures ?? []).Select(s => s.Name)))
+                    foreach (var (_, expr) in TemplateText.Parse(text).Parts.Where(p => p.IsExpr)) Expr(site, e, expr);
+                foreach (var v in b.Items ?? [])
+                {
+                    Expr(site, e, v.Value);
+                    Expr(site, e, v.Currency);
+                }
+                if (b.Type == PrintBlockTypes.Table)
+                {
+                    Name(site, e, b.Lines);
+                    var child = e.FindField(b.Lines ?? "") is { ChildEntity: { } cn } && _model.TryGetValue(cn, out var ce) ? ce : null;
+                    foreach (var c in b.Columns ?? [])
+                    {
+                        Expr(site, child, c.Value);
+                        Expr(site, child, c.Currency);
+                    }
+                }
+            }
         }
 
         if (e.Ledger is { } l)

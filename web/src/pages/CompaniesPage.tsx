@@ -5,8 +5,9 @@ import { companiesApi, type CompanyInput } from '../api/endpoints';
 import type { Company, ExchangeRate } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { ConfirmDialog, Dialog } from '../components/Dialog';
+import { ImageUpload } from '../components/ImageUpload';
 import { useToast } from '../components/Toast';
-import { Alert, Badge, Button, EmptyState, Input, LoadingBlock, PageHeader, Switch, Tabs } from '../components/ui';
+import { Alert, Badge, Button, EmptyState, Input, LoadingBlock, PageHeader, Switch, Tabs, Textarea } from '../components/ui';
 import { formatDate, formatDateTime } from '../lib/format';
 import { useAsync, useDebounced } from '../lib/hooks';
 
@@ -68,7 +69,12 @@ function CompaniesTab() {
               <tbody>
                 {(data ?? []).map((c) => (
                   <tr key={c.id}>
-                    <td><div style={{ fontWeight: 500 }}>{c.name}</div><div className="subtle mono" style={{ fontSize: 'var(--text-xs)' }}>{c.code}</div></td>
+                    <td>
+                      <div className="row" style={{ gap: 'var(--space-3)' }}>
+                        {c.logoUrl && <img className="company-logo" src={c.logoUrl} alt={`Logo de ${c.name}`} />}
+                        <div><div style={{ fontWeight: 500 }}>{c.name}</div><div className="subtle mono" style={{ fontSize: 'var(--text-xs)' }}>{c.code}{c.taxId ? ` · RFC ${c.taxId}` : ''}</div></div>
+                      </div>
+                    </td>
                     <td className="mono">{c.baseCurrency}</td>
                     <td>{c.users}</td>
                     <td>
@@ -87,14 +93,15 @@ function CompaniesTab() {
           </div>
         </div>
       )}
-      <CompanyDialog company={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); setTick((t) => t + 1); }} />
+      <CompanyDialog company={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); setTick((t) => t + 1); }}
+        onLogo={(c) => { setEditing(c); setTick((t) => t + 1); }} />
     </div>
   );
 }
 
-function CompanyDialog({ company, onClose, onSaved }: { company: Company | 'new' | null; onClose: () => void; onSaved: () => void }) {
+function CompanyDialog({ company, onClose, onSaved, onLogo }: { company: Company | 'new' | null; onClose: () => void; onSaved: () => void; onLogo: (c: Company) => void }) {
   const toast = useToast();
-  const { refresh } = useAuth();
+  const { refresh, me } = useAuth();
   const isNew = company === 'new';
   const existing = company && company !== 'new' ? company : null;
   const [form, setForm] = useState<CompanyInput>({ code: '', name: '', baseCurrency: 'MXN', isActive: true });
@@ -108,7 +115,7 @@ function CompanyDialog({ company, onClose, onSaved }: { company: Company | 'new'
     setKey(openKey);
     setErr(null);
     setForm(existing
-      ? { code: existing.code, name: existing.name, baseCurrency: existing.baseCurrency, isActive: existing.isActive }
+      ? { code: existing.code, name: existing.name, baseCurrency: existing.baseCurrency, isActive: existing.isActive, taxId: existing.taxId ?? '', address: existing.address ?? '' }
       : { code: '', name: '', baseCurrency: 'MXN', isActive: true });
   }
 
@@ -153,6 +160,18 @@ function CompanyDialog({ company, onClose, onSaved }: { company: Company | 'new'
         <Switch checked={form.isActive} disabled={existing?.isDefault} onChange={(v) => set({ isActive: v })}
           label={existing?.isDefault ? 'Activa (la empresa predeterminada no se desactiva)' : 'Activa'} />
         {fieldError(err, 'isActive') && <Alert tone="danger" title={fieldError(err, 'isActive')} />}
+        {/* Spec 027: datos que imprime el encabezado de los PDF. */}
+        <Input label="RFC (identificación fiscal)" value={form.taxId ?? ''} maxLength={20} className="mono"
+          hint="Lo imprime el encabezado de los documentos PDF." onChange={(e) => set({ taxId: e.target.value.toUpperCase() })} error={fieldError(err, 'taxId')} />
+        <Textarea label="Domicilio" rows={3} value={form.address ?? ''} maxLength={500} hint="Una línea por renglón; sale en el encabezado de los PDF."
+          onChange={(e) => set({ address: e.target.value })} error={fieldError(err, 'address')} />
+        {existing && me?.isSuperuser && (
+          <ImageUpload label="Logo" url={existing.logoUrl} alt={`Logo de ${existing.name}`}
+            hint="PNG o JPEG, hasta 1 MB y 3000 px por lado. Se guarda al subirlo y sale en el encabezado de los PDF de esta empresa."
+            removeMessage={`Los PDF de ${existing.name} dejarán de llevar logo. El archivo se conserva archivado.`}
+            onUpload={async (file) => { const c = await companiesApi.saveLogo(existing.id, file); toast.success('Logo guardado', c.name); onLogo(c); }}
+            onRemove={async () => { const c = await companiesApi.removeLogo(existing.id); toast.success('Logo quitado', c.name); onLogo(c); }} />
+        )}
         <button type="submit" hidden aria-hidden tabIndex={-1} />
       </form>
     </Dialog>

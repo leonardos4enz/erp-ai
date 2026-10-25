@@ -184,6 +184,7 @@ function ModuleDialog({ module: m, mode, onClose, onDone }: { module: ModuleInfo
 const KIND_LABELS: Record<UpgradeConflict['kind'], string> = {
   entity: 'Datos generales', field: 'Campo', rule: 'Regla', automation: 'Automatización', view: 'Vista', report: 'Reporte', webhook: 'Webhook',
   schedule: 'Tarea programada', workflow: 'Proceso', layout: 'Formulario', security: 'Seguridad', ledger: 'Libro contable',
+  printTemplate: 'Plantilla de impresión',
 };
 
 function UpgradeConflicts({ conflicts }: { conflicts: UpgradeConflict[] }) {

@@ -81,6 +81,9 @@ public static class PlanWarnings
                 case SetReportsOp r:
                     if (!r.Merge) Removed(r.Entity, Current(r.Entity)?.Reports, r.Reports, x => x.Name, "reportes existentes");
                     break;
+                case SetPrintTemplatesOp p:
+                    if (!p.Merge) Removed(p.Entity, Current(p.Entity)?.PrintTemplates, p.Templates, x => x.Name, "plantillas de impresión existentes");
+                    break;
                 case SetLayoutOp l when l.Layout is null && Current(l.Entity)?.Layout is not null:
                     list.Add($"Quita el layout de «{Label(l.Entity)}»: el formulario vuelve a mostrar los campos en orden.");
                     break;

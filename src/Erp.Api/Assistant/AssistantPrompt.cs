@@ -101,6 +101,15 @@ public static class AssistantPrompt
           where: qué registros procesa; solo campos del catálogo o de referencias (Orden.Estado, hasta tres saltos), =, <>, <, >, IN, AND/OR/NOT,
           ISBLANK, TODAY() y ADDDAYS(TODAY(), n). Debe dejar de cumplirse cuando la acción termina (p. ej. cambia el estado).
           role: rol de servicio existente. Llega pausada: el administrador la activa en Configuración › Automatizaciones.
+        - setPrintTemplates { entity, merge?, templates: [{ name, label, description?, roles?, when?, default?, page?: { size?:
+          letter|a4, orientation?: portrait|landscape, margin?: 5-40 mm }, blocks: [...] }] }   Plantillas del PDF de un
+          documento (no de una partida). Bloques (todos con visibleWhen? opcional; los textos admiten {{ expresión }}):
+          header { logo?, company?, title?, subtitle? } · text { text, size?: 6-28, bold?, italic?, align?: left|center|right } ·
+          fields { perRow?: 1-3, items: [Valor] } · table { lines: campo de partidas, columns: [Valor] (en el ámbito de la
+          partida; width 1-10) } · totals { items: [Valor + bold?] } · image { file: clave de una imagen subida, width?: mm,
+          align? } · separator · signatures { signatures: [{ label, name? }] } · pageBreak · footer { text?, pageNumbers? } (uno).
+          Valor: { label, value: expresión, format?: text|number|integer|money|percent|date|dateLong|datetime, decimals?,
+          currency?: expresión con la clave de moneda (solo money) }. Una referencia o un usuario se imprimen con su etiqueta.
 
         Field: { name, label, type, required?, unique?, maxLength?, precision?, scale?, options?, referenceEntity?,
         showInList?, requiredForRoles?, displayOrder?, defaultValue?, formula?, resultType?, prefix?, padding?,

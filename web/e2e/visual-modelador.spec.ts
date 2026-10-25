@@ -102,7 +102,7 @@ test('H1 CA1 · CA2 · CA3 · CA4: catálogos agrupados por módulo, con filtro,
 
   // CA3: quién lo instaló y quién lo extiende.
   const almacenes = page.getByRole('row', { name: /^Almacenes Almacen / });
-  await expect(almacenes).toContainText(/Compras 1\.9\.0/);
+  await expect(almacenes).toContainText(/Compras 1\.10\.0/);
   await expect(almacenes).toContainText(/También: .*Costeo/);
   await expect(page.getByRole('row', { name: new RegExp(`Notas VM ${NOTA}`) })).toContainText('Local');
 
@@ -151,13 +151,13 @@ test('H2 CA5: el origen y la validación de expresiones son solo para quien admi
 test('H2 CA1 · CA2: cada campo y regla dice de qué paquete viene; lo cambiado aquí, «modificado localmente»', async ({ page }) => {
   const all = await provenance();
   const almacen = all.find((e) => e.entity === 'Almacen')!;
-  expect(almacen.installedBy).toMatchObject({ id: 'compras', version: '1.9.0' });
+  expect(almacen.installedBy).toMatchObject({ id: 'compras', version: '1.10.0' });
   expect(almacen.elements.find((x) => x.kind === 'field' && x.name === 'CuentaInventario')).toMatchObject({ package: 'costeo', modified: false });
   expect(almacen.elements.find((x) => x.kind === 'field' && x.name === 'Nombre')).toMatchObject({ package: 'compras', modified: false });
   expect(all.find((e) => e.entity === `${NOTA}`)).toMatchObject({ installedBy: null, packages: [] });
 
   await page.goto('/admin/model?edit=Almacen');
-  await expect(page.getByText(/Instalado por\s*Compras 1\.9\.0/)).toBeVisible();
+  await expect(page.getByText(/Instalado por\s*Compras 1\.10\.0/)).toBeVisible();
   await expect(page.getByText(/También lo extiende: .*Costeo/)).toBeVisible();
   const cuenta = page.locator('.field-row').filter({ has: page.locator('input[value="CuentaInventario"]') });
   await expect(cuenta.locator('.field-row-origin')).toContainText('Costeo');
@@ -222,7 +222,9 @@ test('H2 CA4: la vista previa de actualizar un módulo lista lo local y lo modif
     { op: 'setRules', entity: 'Producto', rules: [...rules.map((r) => (r.name === 'CostoNoNegativo' ? { ...r, message: 'Cambiado aquí.' } : r)),
       { name: 'ReglaLocal026', assert: 'TRUE', message: 'Regla creada en este entorno.' }] },
   ] });
-  // Como si Compras estuviera en la 1.7.0: la 1.8.0 reemplaza las reglas de Producto sin merge.
+  // Como si Compras estuviera en la 1.7.0: la 1.8.0 reemplaza las reglas de Producto sin merge. Al terminar se deja la
+  // versión que estaba (spec 027: no se fija aquí, cada spec puede subirla).
+  const installed = (await (await admin.get('/api/admin/modules')).json()).find((m: { id: string }) => m.id === 'compras').installedVersion as string;
   sql("UPDATE meta.Module SET Version = '1.7.0' WHERE Id = 'compras'");
   try {
     const preview = await (await admin.post('/api/admin/modules/compras/upgrade/preview')).json();
@@ -241,7 +243,7 @@ test('H2 CA4: la vista previa de actualizar un módulo lista lo local y lo modif
     await expectAccessible(page);
     await page.keyboard.press('Escape');
   } finally {
-    sql("UPDATE meta.Module SET Version = '1.9.0' WHERE Id = 'compras'");
+    sql(`UPDATE meta.Module SET Version = '${installed}' WHERE Id = 'compras'`);
     await applyPlan(admin, { description: 'Spec 026 · deshacer cambios locales', operations: [{ op: 'setRules', entity: 'Producto', rules }] });
   }
   // Sin cambios locales no hay choques (lo dice la unitaria con la cadena real); aquí, ya no hay actualización.

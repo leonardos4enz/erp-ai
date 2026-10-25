@@ -57,6 +57,10 @@ public static class AuditActions
     /// <summary>Spec 016: activar, pausar o ejecutar ahora una tarea programada; reintentar un trabajo asíncrono.</summary>
     public const string ScheduleChange = "automation.schedule";
     public const string AutomationRetry = "automation.retry";
+    /// <summary>Spec 027: subir, reemplazar o archivar una imagen (logo de empresa o imagen de plantilla); nunca el contenido.</summary>
+    public const string FileChange = "file.change";
+    /// <summary>Spec 027: PDF generado (catálogo, registro y plantilla; nunca el contenido).</summary>
+    public const string PrintPdf = "data.print";
 }
 
 public static class Audit

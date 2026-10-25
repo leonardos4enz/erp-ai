@@ -61,6 +61,8 @@ public static class AssistantContext
         Workflow = e.Workflow, Rules = e.Rules, Automations = e.Automations, Security = e.Security, Layout = e.Layout,
         Views = e.Views?.Select(v => v with { Filters = v.Filters?.Select(StripValue).ToList() }).ToList(),
         Reports = e.Reports, Webhooks = e.Webhooks,
+        // Spec 027: las claves de empresa de una plantilla son datos del entorno: no viajan al LLM.
+        PrintTemplates = e.PrintTemplates?.Select(t => t with { Companies = null }).ToList(),
     };
 
     private static Entity Summary(EntityDef e) => new()
@@ -110,6 +112,7 @@ public static class AssistantContext
         public IReadOnlyList<ViewDef>? Views { get; init; }
         public IReadOnlyList<ReportDef>? Reports { get; init; }
         public IReadOnlyList<WebhookDef>? Webhooks { get; init; }
+        public IReadOnlyList<PrintTemplate>? PrintTemplates { get; init; }
     }
 
     private sealed record Field

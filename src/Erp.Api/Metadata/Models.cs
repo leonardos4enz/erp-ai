@@ -629,6 +629,12 @@ public sealed record EntityDef
     public IReadOnlyList<ScheduleDef>? Schedules { get; init; }
     /// <summary>Spec 020: el documento es un libro de partida doble (cuadre y periodos los garantiza el motor).</summary>
     public LedgerDef? Ledger { get; init; }
+    /// <summary>
+    /// Spec 027: plantillas de impresión (solo se envían a modeladores; los usuarios eligen entre las que les aplican). Se
+    /// omite en nulo para que la forma canónica de los catálogos sin plantillas (paquetes de la 009) no cambie.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<PrintTemplate>? PrintTemplates { get; init; }
     /// <summary>Spec 010: cada registro pertenece a una empresa (columna de sistema <c>CompanyId</c>). Las partidas siguen a su documento.</summary>
     public bool PerCompany { get; init; }
 
@@ -688,6 +694,7 @@ public sealed record ChangePlan
 [JsonDerivedType(typeof(SetLedgerOp), "setLedger")]
 [JsonDerivedType(typeof(SetAppOp), "setApp")]
 [JsonDerivedType(typeof(ArchiveAppOp), "archiveApp")]
+[JsonDerivedType(typeof(SetPrintTemplatesOp), "setPrintTemplates")]
 public abstract record Operation;
 
 /// <summary>Spec 024. Crea o reemplaza la declaración de un módulo de navegación.</summary>
