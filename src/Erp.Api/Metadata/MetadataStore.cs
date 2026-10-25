@@ -70,7 +70,7 @@ public sealed class MetadataStore(Db db)
               FROM meta.Field
             """, transaction: tx)).ToLookup(f => f.EntityId);
 
-        return entities.ToDictionary(e => e.Name, e => new EntityDef
+        var model = entities.ToDictionary(e => e.Name, e => new EntityDef
         {
             Name = e.Name, Label = e.Label, LabelPlural = e.LabelPlural, Icon = e.Icon,
             Description = e.Description, DisplayField = e.DisplayField, IsArchived = e.IsArchived, Group = e.GroupName,
@@ -98,6 +98,9 @@ public sealed class MetadataStore(Db db)
                 LookupFilter = f.LookupFilterJson is null ? null : JsonSerializer.Deserialize<LookupFilter>(f.LookupFilterJson, Json),
             }).ToList(),
         }, StringComparer.OrdinalIgnoreCase);
+        // Spec 029: de qué depende cada fórmula, para ocultarla a quien no ve lo que lee.
+        Security.DerivedAccess.Annotate(model);
+        return model;
     }
 
     /// <summary>Mismas opciones al guardar y leer el JSON de procesos y reglas.</summary>

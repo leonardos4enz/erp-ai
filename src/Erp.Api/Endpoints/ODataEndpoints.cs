@@ -40,19 +40,19 @@ public static partial class ODataEndpoints
                 ["value"] = Csdl.EntitySets(model, http.CurrentUser())
                     .Select(e => new Dictionary<string, string> { ["name"] = e.Name, ["kind"] = "EntitySet", ["url"] = e.Name, ["title"] = e.LabelPlural }).ToList(),
             }, contentType: JsonType);
-        }));
+        })).Requires(Capability.Records);
         // OData:MaxPageSize (1..500) solo para que la suite E2E pruebe la paginación sin crear cientos de registros.
         var config = app.ServiceProvider.GetRequiredService<IConfiguration>();
         var pageSize = Math.Clamp(config.GetValue("OData:MaxPageSize", PageSize), 1, PageSize);
         // Spec 021 (H7 CA2): partidas expandidas por página; la suite lo baja para probarlo con pocos registros.
         var maxLines = Math.Clamp(config.GetValue("OData:MaxExpandedLines", ODataQuery.DefaultMaxExpandedLines), 1, ODataQuery.DefaultMaxExpandedLines);
         g.MapGet("/{segment}", (string segment, HttpContext http, MetadataStore store, RecordService records, CancellationToken ct) =>
-            Run(http, () => SegmentAsync(segment, http, store, records, pageSize, maxLines, ct)));
+            Run(http, () => SegmentAsync(segment, http, store, records, pageSize, maxLines, ct))).Requires(Capability.Records);
         g.MapMethods("/{**rest}", ["POST", "PUT", "PATCH", "DELETE", "MERGE"], (HttpContext http) =>
         {
             http.Response.Headers.Allow = "GET";
             return Error(405, "MethodNotAllowed", "La API OData es de solo lectura: usa GET.");
-        });
+        }).Requires(Capability.Records).ReadsOnly();
     }
 
     private static string Root(HttpContext http) => $"{http.Request.Scheme}://{http.Request.Host}{http.Request.PathBase}/odata";

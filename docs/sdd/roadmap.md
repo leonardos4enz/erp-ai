@@ -34,7 +34,7 @@ en orden, no en paralelo: casi todas tocan el núcleo del motor (`PlanCompiler`,
 | 026 Modelador por módulos y sin JSON | Implementado ([spec](specs/026-modelador-visual/spec.md)) |
 | 027 Documentos PDF con plantillas visuales | Implementado ([spec](specs/027-documentos-pdf/spec.md)) |
 | 028 Mejoras del proceso (retrospectiva 001) | Implementado ([spec](specs/028-mejoras-proceso/spec.md)) |
-| 029 Endurecimiento 3: capacidades declaradas y canario de fugas | Planeado |
+| 029 Endurecimiento 3: capacidades declaradas y canario de fugas | Implementado ([spec](specs/029-endurecimiento-3/spec.md)) |
 | 030 Integración y CI | Planeado |
 | 031 Módulo de Ventas | Planeado |
 | 032 CFDI 4.0 con PAC | Planeado |
@@ -383,14 +383,31 @@ ya marcados) y sus hallazgos se vuelven una spec de endurecimiento.
 | 2026-10-23 (origen de la 012) | 001–011 | 6 defectos |
 | 2026-10-23 (origen de la 014) | 012–013 | 7 defectos |
 | 2026-10-24 (origen de la 021) | 014–020 | 8 defectos |
-| **Próxima: al cerrar la 030** (antes, si la 029 o la 030 agregan un punto de entrada o un trabajo asíncrono) | 021–030 | — |
+| 2026-10-25, auditoría 4 (origen de la 029) | 021–028 | 9 defectos (1 alto: rutas de varios saltos fuera de alcance); ninguno de los 29 riesgos marcados estaba resuelto |
+| **Próxima: adelantada, antes de abrir la 031** (al cerrar la 030) | 029–030 | — |
 
-La 021–027 ya van 7 specs sin auditoría: la 029 (endurecimiento con inventario y canario) cubre parte de lo que buscaría y
-deja la herramienta que la auditoría usará; por eso la siguiente va al cerrar la 030 y no antes.
+La auditoría 4 cubrió 021–028. La siguiente **conviene adelantarla** (al cerrar la 030 y antes de la 031, sin esperar 5 specs):
+la 029 cambió la autorización de **todas** las rutas (capacidad como metadato, requisito de autorización en lugar de
+comprobaciones en cada handler) y la visibilidad de las fórmulas en todos los caminos. La auditoría ya tiene herramientas:
+[`rutas.md`](rutas.md) (qué pide cada ruta, generado y probado) y `web/e2e/canario.spec.ts` (fugas por cualquier ruta GET).
 
-## Specs planeadas (después de la 028)
+### 029 — Endurecimiento 3: capacidades declaradas y canario de fugas
+Origen: retrospectiva 001 (P1 y P2) y la auditoría 4 (2026-10-25), que el dueño pidió incluir.
+- **Estado:** implementado en la [spec 029](specs/029-endurecimiento-3/spec.md). **Capacidad como metadato de cada ruta**
+  (`.Requires`, `.Writes` con su compuerta, `.Costly`, `.AppliesReviewed`), exigida como requisito de autorización antes de
+  leer el cuerpo; **inventario** [`rutas.md`](rutas.md) generado y probado (`RouteInventoryTests`); **canario de fugas** que
+  recorre todas las GET del inventario. Auditoría 4: D-01 (alcance en cada salto de lo vivo; fórmulas guardadas que cruzan
+  un catálogo restringido se ocultan), D-02 (semáforo del PDF y 12 MP), D-03 (`WhyNotApprover` sin caso por omisión), D-04
+  (huella de módulos), D-05 (fórmulas que leen ocultos), D-08 (avisos de bloqueo), D-09 (límite de búsqueda); imágenes solo
+  a modeladores.
+- **Pendiente (diferido con razón):** D-06 tareas programadas que se saltan registros (R-029-4) y D-07 importación de
+  números y fechas (R-029-5) → spec propia o la 030; R-021-5 `ForwardedHeaders` y R-021-6 bloqueo de navegación en la SPA →
+  030 o spec propia; costos de Inventario copiados por automatizaciones (R-029-6) → decisión del dueño; aprobación de
+  seguridad para módulos y planes con `setSecurity` (R-029-8).
+
+## Specs planeadas (después de la 029)
 En este orden, por decisión del dueño (2026-10-25):
-1. **029 — Endurecimiento 3: capacidades declaradas y canario de fugas** (retrospectiva P1 y P2).
+1. ~~**029 — Endurecimiento 3: capacidades declaradas y canario de fugas** (retrospectiva P1 y P2).~~ Implementado (ver arriba).
    - *Problema:* la constitución II.2 pide que cada endpoint declare su permiso, pero los grupos solo piden autenticación y
      la capacidad se revisa dentro de cada handler (`RequireSuperuser(http)`, `RequireModeler`…): nadie puede listar qué
      pide cada una de las ~117 rutas, y así se escapó que asignar roles solo pedía *administrar usuarios* (021-1, desde la

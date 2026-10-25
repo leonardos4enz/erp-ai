@@ -168,7 +168,8 @@ public sealed class ReportService(Db db, MetadataStore store)
                 {
                     var target = model[p.Field.ReferenceEntity!];
                     var j = q.Join(col, target);
-                    var display = target.EffectiveDisplayField is { } d ? $"CAST({j}.{Quote(d)} AS nvarchar(400))" : "CAST(NULL AS nvarchar(400))";
+                    var display = target.EffectiveDisplayField is { } d && !FieldAccess.DisplayHidden(target, user) // spec 029 (F-B)
+                        ? $"CAST({j}.{Quote(d)} AS nvarchar(400))" : "CAST(NULL AS nvarchar(400))";
                     // Un registro referido que no se ve también es «sin acceso», aunque el principal sí se vea.
                     var hidden = $"CASE WHEN ({noAccess}) = 1 OR ({col} IS NOT NULL AND {j}.[Id] IS NULL) THEN 1 ELSE 0 END";
                     parts = [col, display, hidden];

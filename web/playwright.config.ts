@@ -56,6 +56,9 @@ export default defineConfig({
       Security__RequestsPerMinute: '5000',
       // Spec 027: la suite descarga más PDF por minuto que una persona.
       Security__PrintsPerMinute: '1000',
+      // Spec 029: exportar e importar como lo hace la suite; la búsqueda se deja baja para probar su 429 (capacidades.spec.ts).
+      Security__BulkPerMinute: '1000',
+      Security__SearchesPerMinute: '120',
       // Spec 008: el receptor de webhooks de la suite escucha en 127.0.0.1 por http; ninguna otra IP interna se permite.
       Webhooks__AllowHttp: 'true',
       Webhooks__AllowedInternalAddresses: '127.0.0.1',

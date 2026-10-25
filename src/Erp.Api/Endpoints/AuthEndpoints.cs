@@ -23,9 +23,9 @@ public static class AuthEndpoints
     public static void MapAuth(this IEndpointRouteBuilder app)
     {
         var g = app.MapGroup("/api/auth");
-        g.MapPost("/login", Login).AllowAnonymous().RequireRateLimiting("login");
-        g.MapPost("/logout", Logout).RequireAuthorization();
-        g.MapGet("/me", Me).RequireAuthorization();
+        g.MapPost("/login", Login).Requires(Capability.Anonymous).Writes(Effect.Session).Costly("contraseña con PBKDF2").RequireRateLimiting("login");
+        g.MapPost("/logout", Logout).Requires(Capability.Authenticated).Writes(Effect.Session);
+        g.MapGet("/me", Me).Requires(Capability.Authenticated);
     }
 
     private static async Task<IResult> Login(LoginRequest req, HttpContext http, Db db, PasswordService passwords,

@@ -148,7 +148,8 @@ public sealed partial class RecordService(Db db, MetadataStore store)
             CanWrite(o));
         Require(allowed);
 
-        var label = e.EffectiveDisplayField is { } d ? $"t.{Quote(d)}" : "CAST(t.[Id] AS nvarchar(20))";
+        // Spec 029 (F-B): un campo para mostrar que no ve no se ofrece ni se busca: queda el número del registro.
+        var label = e.EffectiveDisplayField is { } d && !FieldAccess.DisplayHidden(e, user) ? $"t.{Quote(d)}" : "CAST(t.[Id] AS nvarchar(20))";
         await using var cn = await db.OpenAsync(ct);
         await using var cmd = cn.CreateCommand();
         var where = "t.[IsDeleted] = 0";
@@ -353,7 +354,7 @@ public sealed partial class RecordService(Db db, MetadataStore store)
         Require(id is null ? user.Access(e.Name).Create : user.Access(e.Name).Update);
         await using var cn = await db.OpenAsync(ct);
         if (id is not null) await EnsureAccessAsync(cn, null, e, id.Value, user, write: true, ct);
-        var loader = new RelatedLoader(cn, null, model);
+        var loader = new RelatedLoader(cn, null, model, viewer: user); // spec 029: en vivo, con el alcance de quien calcula
         var draft = id is null ? new DocDraft { CreatorId = user.Id } : await LoadDraftAsync(cn, null, e, model, id.Value, ct) ?? throw new NotFound("El registro no existe.");
         if (id is null && e.Workflow is not null) draft.Header[Workflow.StateField] = e.Workflow.Initial;
         await ParseIntoAsync(draft, e, model, values, loader, lenient: true, ct,
@@ -1120,13 +1121,13 @@ public sealed partial class RecordService(Db db, MetadataStore store)
         if (HasConditions(e))
         {
             var draft = (await LoadDraftAsync(cn, tx, e, model, id, ct))!;
-            var loader = new RelatedLoader(cn, tx, model);
+            var loader = new RelatedLoader(cn, tx, model, viewer: user);
             row["_layout"] = LayoutOutput(EvaluateLayout(e, model, HeaderScope(draft, e, model, loader), Env(user, draft, loader), user));
         }
         if (warnings && HasWarningRules(e, model))
         {
             var draft = (await LoadDraftAsync(cn, tx, e, model, id, ct))!;
-            var loader = new RelatedLoader(cn, tx, model);
+            var loader = new RelatedLoader(cn, tx, model, viewer: user);
             var visible = VisibleWarnings(Warnings(draft, e, model, loader, Env(user, draft, loader)), model, user);
             if (visible.Count > 0) row["_warnings"] = WarningMap(visible);
         }
@@ -1162,7 +1163,7 @@ public sealed partial class RecordService(Db db, MetadataStore store)
             if (v is null) continue;
             if (f.Type == FieldTypes.Reference && model.TryGetValue(f.ReferenceEntity!, out var target))
                 // Spec 012 (H6): el mismo criterio que SelectClause.
-                row[f.Name + "__label"] = !loader.Visible(target.Name, Convert.ToInt64(v), user) ? ReportService.NoAccess
+                row[f.Name + "__label"] = !loader.Visible(target.Name, Convert.ToInt64(v), user) || FieldAccess.DisplayHidden(target, user) ? ReportService.NoAccess
                     : target.EffectiveDisplayField is { } d
                     ? Convert.ToString(loader.Row(target.Name, Convert.ToInt64(v))?.GetValueOrDefault(d), CultureInfo.InvariantCulture)
                     : $"#{v}";
@@ -1198,7 +1199,8 @@ public sealed partial class RecordService(Db db, MetadataStore store)
             var alias = $"r{j++}";
             if (f.Type == FieldTypes.Reference && model.TryGetValue(f.ReferenceEntity!, out var target))
             {
-                var label = target.EffectiveDisplayField is { } d ? $"CAST({alias}.{Quote(d)} AS nvarchar(400))" : $"CAST({alias}.[Id] AS nvarchar(20))";
+                var label = FieldAccess.DisplayHidden(target, user) ? $"CASE WHEN {alias}.[Id] IS NULL THEN NULL ELSE N'{ReportService.NoAccess}' END" // spec 029 (F-B)
+                    : target.EffectiveDisplayField is { } d ? $"CAST({alias}.{Quote(d)} AS nvarchar(400))" : $"CAST({alias}.[Id] AS nvarchar(20))";
                 // El alias t de la subconsulta es el destino (oculta al t de afuera), como espera el filtro.
                 if (RecordFilter.ForRecordOrParent(target, model, user) is { } scope)
                 {

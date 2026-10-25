@@ -37,6 +37,7 @@ se declaran como datos; el motor genera tablas, API y pantallas. Idioma del proy
 ## Comandos
 ```bash
 dotnet test                       # unitarias (núcleo de seguridad)
+ACTUALIZAR_RUTAS=1 dotnet test --filter RouteInventory   # regenera docs/sdd/rutas.md tras agregar o cambiar una ruta (029)
 npm --prefix web run e2e          # E2E Playwright sobre base desechable (ver abajo)
 npm --prefix web run e2e -- e2e/<archivo>.spec.ts --veces=3   # lo nuevo, 3 veces sobre base nueva
 npm --prefix web run e2e:regresion -- <commit> [e2e/<archivo>.spec.ts]   # pruebas nuevas contra el código anterior

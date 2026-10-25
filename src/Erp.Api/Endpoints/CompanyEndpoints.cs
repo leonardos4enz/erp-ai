@@ -30,29 +30,24 @@ public static class CompanyEndpoints
 
     public static void MapCompanies(this IEndpointRouteBuilder app)
     {
-        app.MapPost("/api/auth/company", Switch).RequireAuthorization();
+        app.MapPost("/api/auth/company", Switch).Requires(Capability.Authenticated).Writes(Effect.Session);
 
         var g = app.MapGroup("/api/admin").RequireAuthorization();
         g.MapGet("/companies", async (HttpContext http, Db db) =>
         {
-            var u = http.CurrentUser();
-            if (!u.IsSuperuser && !u.CanManageUsers) throw new Forbidden();
             await using var cn = await db.OpenAsync();
             return await LoadAsync(cn, null);
-        });
-        g.MapPost("/companies", (CompanyRequest req, HttpContext http, Db db, MetadataStore store) => Save(null, req, http, db, store));
-        g.MapPut("/companies/{id:int}", (int id, CompanyRequest req, HttpContext http, Db db, MetadataStore store) => Save(id, req, http, db, store));
+        }).Requires(Capability.Superuser, Capability.UserAdmin);
+        g.MapPost("/companies", (CompanyRequest req, HttpContext http, Db db, MetadataStore store) => Save(null, req, http, db, store))
+            .Requires(Capability.Superuser).Writes(Effect.Config, Gates.SuperuserOnly);
+        g.MapPut("/companies/{id:int}", (int id, CompanyRequest req, HttpContext http, Db db, MetadataStore store) => Save(id, req, http, db, store))
+            .Requires(Capability.Superuser).Writes(Effect.Config, Gates.SuperuserOnly);
         // Spec 027 (H1): logo de la empresa. El cuerpo es la imagen tal cual; la valida el servidor por su contenido.
-        g.MapPut("/companies/{id:int}/logo", SaveLogo);
-        g.MapDelete("/companies/{id:int}/logo", RemoveLogo);
-        g.MapGet("/exchange-rates", ListRates);
-        g.MapPut("/exchange-rates", SaveRate);
-        g.MapDelete("/exchange-rates/{id:int}", DeleteRate);
-    }
-
-    private static void RequireSuperuser(HttpContext http)
-    {
-        if (!http.CurrentUser().IsSuperuser) throw new Forbidden();
+        g.MapPut("/companies/{id:int}/logo", SaveLogo).Requires(Capability.Superuser).Writes(Effect.Config, Gates.SuperuserOnly);
+        g.MapDelete("/companies/{id:int}/logo", RemoveLogo).Requires(Capability.Superuser).Writes(Effect.Config, Gates.SuperuserOnly);
+        g.MapGet("/exchange-rates", ListRates).Requires(Capability.Superuser);
+        g.MapPut("/exchange-rates", SaveRate).Requires(Capability.Superuser).Writes(Effect.Config, Gates.SuperuserOnly);
+        g.MapDelete("/exchange-rates/{id:int}", DeleteRate).Requires(Capability.Superuser).Writes(Effect.Config, Gates.SuperuserOnly);
     }
 
     // ---------------- Empresa actual ----------------
@@ -78,7 +73,6 @@ public static class CompanyEndpoints
 
     private static async Task<CompanyDto> Save(int? id, CompanyRequest req, HttpContext http, Db db, MetadataStore store)
     {
-        RequireSuperuser(http);
         var errors = new Dictionary<string, string[]>();
         var code = req.Code?.Trim().ToUpperInvariant() ?? "";
         if (id is null && !Companies.IsCode(code)) errors["code"] = ["Usa de 2 a 20 letras sin acento, números, '_' o '-'."];
@@ -142,7 +136,6 @@ public static class CompanyEndpoints
 
     private static async Task<CompanyDto> SaveLogo(int id, HttpContext http, Db db, CancellationToken ct)
     {
-        RequireSuperuser(http);
         var data = await FileEndpoints.ReadBodyAsync(http, ct);
         await using var cn = await db.OpenAsync(ct);
         await using var tx = await cn.BeginTransactionAsync(ct);
@@ -161,7 +154,6 @@ public static class CompanyEndpoints
 
     private static async Task<CompanyDto> RemoveLogo(int id, HttpContext http, Db db, CancellationToken ct)
     {
-        RequireSuperuser(http);
         await using var cn = await db.OpenAsync(ct);
         await using var tx = await cn.BeginTransactionAsync(ct);
         var previous = await cn.QuerySingleOrDefaultAsync<LogoRow>(
@@ -183,7 +175,6 @@ public static class CompanyEndpoints
 
     private static async Task<IEnumerable<RateDto>> ListRates(string? from, string? to, HttpContext http, Db db)
     {
-        RequireSuperuser(http);
         string? Code(string? c) => string.IsNullOrWhiteSpace(c) ? null
             : c.Trim().ToUpperInvariant() is var x && Companies.IsCurrency(x) ? x : throw new AppException(400, "Moneda no válida.");
         await using var cn = await db.OpenAsync();
@@ -193,7 +184,6 @@ public static class CompanyEndpoints
 
     private static async Task<RateDto> SaveRate(RateRequest req, HttpContext http, Db db)
     {
-        RequireSuperuser(http);
         var errors = new Dictionary<string, string[]>();
         var from = req.From?.Trim().ToUpperInvariant() ?? "";
         var to = req.To?.Trim().ToUpperInvariant() ?? "";
@@ -228,7 +218,6 @@ public static class CompanyEndpoints
 
     private static async Task<IResult> DeleteRate(int id, HttpContext http, Db db)
     {
-        RequireSuperuser(http);
         await using var cn = await db.OpenAsync();
         await using var tx = await cn.BeginTransactionAsync();
         var before = (await QueryRatesAsync(cn, tx, "r.Id = @id", new { id })).FirstOrDefault() ?? throw new NotFound("El tipo de cambio no existe.");

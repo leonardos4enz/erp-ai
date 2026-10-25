@@ -493,3 +493,17 @@ test('H4 CA3: el almacenista no ve precios ni importes de la orden; el comprador
   await expect(page.getByText('Total en moneda base')).toHaveCount(0); // Compras 1.6.0: antes «Total MXN»
   await page.context().close();
 });
+
+// Regresión (spec 029 H4 CA2, auditoría 4 D-05): el costo de la partida de recepción (Inventario) se calcula con el precio
+// de la orden, que el almacenista no ve; la fórmula se le ocultaba igual que el precio solo si el modelador lo recordaba.
+test('Spec 029 H4 CA2: el almacenista tampoco ve el costo de la recepción, que sale del precio de la orden', async () => {
+  const fields = async (who: APIRequestContext) =>
+    ((await (await who.get('/api/model/entities/RecepcionPartida')).json()).fields as { name: string }[]).map((f) => f.name);
+  const admin = await apiAs(ADMIN.username, ADMIN.password);
+  test.skip(!(await fields(admin)).includes('CostoUnitario'), 'Inventario no está instalado');
+  const forWarehouse = await fields(await apiAs('e2e-almacen', COMPRAS_PWD));
+  expect(forWarehouse).toContain('Cantidad');
+  expect(forWarehouse).not.toContain('CostoUnitario');
+  expect(forWarehouse).not.toContain('Costo');
+  expect(await fields(await apiAs('e2e-comprador', COMPRAS_PWD))).toEqual(expect.arrayContaining(['CostoUnitario', 'Costo']));
+});

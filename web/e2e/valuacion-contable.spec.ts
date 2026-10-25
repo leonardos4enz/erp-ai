@@ -354,8 +354,12 @@ test('H3 · H5 CA1 · CA3: recepción en euros → entrada en moneda base con CO
 
   const rec = await post('almacen', '/api/data/Recepcion', { OrdenCompra: oc.id, Factura: 'F-COS-1', Partidas: [{ PartidaOrden: (oc.Partidas as Row[])[0].id }] });
   expect(rec.status, JSON.stringify(rec.body)).toBe(201);
-  expect(rec.body).toMatchObject({ Moneda: 'EUR', CostoTotal: 210 });
-  expect((rec.body.Partidas as Row[])[0]).toMatchObject({ CostoUnitario: 42, Costo: 210 });
+  // Spec 029 (D-05): el costo sale del precio de la orden, que el almacenista no ve; lo revisa el administrador.
+  expect(rec.body).toMatchObject({ Moneda: 'EUR' });
+  expect(rec.body).not.toHaveProperty('CostoTotal');
+  const costed = await get('admin', `/api/data/Recepcion/${rec.body.id}`);
+  expect(costed).toMatchObject({ Moneda: 'EUR', CostoTotal: 210 });
+  expect((costed.Partidas as Row[])[0]).toMatchObject({ CostoUnitario: 42, Costo: 210 });
   const confirmed = await transition('almacen', 'Recepcion', rec.body, 'confirmar');
   expect(confirmed.status, JSON.stringify(confirmed.body)).toBe(200);
 

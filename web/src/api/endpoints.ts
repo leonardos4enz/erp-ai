@@ -227,9 +227,9 @@ export const adminApi = {
   updateRole: (id: number, r: RoleInput) => api<Role | PendingChange>(`/admin/roles/${id}`, { method: 'PUT', body: r }),
   modules: () => api<ModuleInfo[]>('/admin/modules'),
   previewModule: (id: string) => api<ModulePreview>(`/admin/modules/${enc(id)}/preview`, { method: 'POST' }),
-  installModule: (id: string) => api<{ changeSetId: number }>(`/admin/modules/${enc(id)}/install`, { method: 'POST' }),
+  installModule: (id: string, baseHash?: string | null) => api<{ changeSetId: number }>(`/admin/modules/${enc(id)}/install`, { method: 'POST', body: { baseHash } }),
   previewUpgrade: (id: string) => api<ModulePreview>(`/admin/modules/${enc(id)}/upgrade/preview`, { method: 'POST' }),
-  upgradeModule: (id: string) => api<{ changeSetId: number }>(`/admin/modules/${enc(id)}/upgrade`, { method: 'POST' }),
+  upgradeModule: (id: string, baseHash?: string | null) => api<{ changeSetId: number }>(`/admin/modules/${enc(id)}/upgrade`, { method: 'POST', body: { baseHash } }),
 };
 
 export const integrationsApi = {

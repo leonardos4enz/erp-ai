@@ -65,6 +65,13 @@ public static class RecordFilter
         return p with { Sql = $"t.{Quote(e.ParentField!.Name)} IN (SELECT t.[Id] FROM {AppTable(parent.Name)} t WHERE t.[IsDeleted] = 0 AND {p.Sql})" };
     }
 
+    /// <summary>
+    /// Spec 029: ¿los permisos por registro (no la empresa) restringen la lectura de este catálogo para el usuario? Es lo
+    /// que hace que una fórmula que lo recorre se le oculte (<see cref="DerivedAccess"/>).
+    /// </summary>
+    public static bool HasGrants(EntityDef e, UserContext user) =>
+        !user.IsSuperuser && Grants(e, Of(user), write: false, new ParamBag()) is not null;
+
     internal static SqlPredicate? Build(EntityDef e, Who who, bool write, bool grants = true)
     {
         var bag = new ParamBag();
@@ -261,8 +268,18 @@ public static class RecordFilter
 
 public static class FieldAccess
 {
-    /// <summary>Acceso del usuario a un campo por sus roles (sin considerar el estado del registro).</summary>
+    /// <summary>
+    /// Acceso del usuario a un campo por sus roles (sin considerar el estado del registro). Spec 029: una fórmula se oculta
+    /// también si lee algo que el usuario no ve (<see cref="DerivedAccess"/>).
+    /// </summary>
     public static string ByRole(EntityDef e, FieldDef f, UserContext u)
+    {
+        var own = ByOwnRule(e, f, u);
+        return own != FieldAccessLevels.Hidden && DerivedAccess.Hides(f, u) ? FieldAccessLevels.Hidden : own;
+    }
+
+    /// <summary>Solo la regla declarada del campo (<see cref="SecurityPolicy.Fields"/>).</summary>
+    internal static string ByOwnRule(EntityDef e, FieldDef f, UserContext u)
     {
         if (u.IsSuperuser || e.Security?.For(f.Name) is not { } rule) return FieldAccessLevels.Edit;
         if (rule.Read is not null && !u.HasRole(rule.Read)) return FieldAccessLevels.Hidden;
@@ -283,6 +300,14 @@ public static class FieldAccess
         return editableIn is null || (state is not null && editableIn.Contains(state, StringComparer.OrdinalIgnoreCase));
     }
 
+    /// <summary>
+    /// Spec 029 (revisión adversarial F-B): ¿el campo para mostrar del catálogo se le oculta? Puede ser una fórmula
+    /// (<c>Almacen.Clave &amp; Producto.Clave</c>) que <see cref="DerivedAccess"/> oculta; entonces etiquetas, buscador y
+    /// agrupaciones no lo usan.
+    /// </summary>
+    public static bool DisplayHidden(EntityDef e, UserContext u) =>
+        e.EffectiveDisplayField is { } d && e.FindField(d) is { } f && !CanSee(e, f, u);
+
     /// <summary>Quita de una fila de salida los campos que el usuario no puede ver (y sus etiquetas).</summary>
     public static void Strip(EntityDef e, IDictionary<string, object?> row, UserContext u, IReadOnlyDictionary<string, EntityDef> model)
     {
@@ -294,8 +319,9 @@ public static class FieldAccess
                 row.Remove(f.Name + "__label");
                 continue;
             }
+            // Spec 029: también sin reglas propias, una fórmula de la partida puede leer algo oculto.
             if (f.Type == FieldTypes.Lines && row.TryGetValue(f.Name, out var lines) && lines is IEnumerable<Dictionary<string, object?>> list
-                && model.TryGetValue(f.ChildEntity ?? "", out var child) && child.Security?.Fields is { Count: > 0 })
+                && model.TryGetValue(f.ChildEntity ?? "", out var child))
                 foreach (var line in list) Strip(child, line, u, model);
         }
     }

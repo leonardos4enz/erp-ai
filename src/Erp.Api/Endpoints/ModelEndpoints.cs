@@ -26,7 +26,7 @@ public static class ModelEndpoints
                 .OrderBy(e => e.LabelPlural)
                 .Select(e => ForUser(e, u))
                 .ToList();
-        });
+        }).Requires(Capability.Authenticated);
 
         g.MapGet("/entities/{name}", async (string name, HttpContext http, MetadataStore store, CancellationToken ct) =>
         {
@@ -34,7 +34,7 @@ public static class ModelEndpoints
             var e = await store.GetActiveAsync(name, ct);
             if (!u.CanManageModel && !CanSee(u, e)) throw new Forbidden();
             return ForUser(e, u);
-        });
+        }).Requires(Capability.Authenticated);
 
         // Spec 024: módulos de navegación con al menos un catálogo que el usuario puede leer (filtrado aquí, no en el cliente).
         // `all` (solo modeladores): también los declarados sin catálogos o archivados, para el modelador.
@@ -48,35 +48,28 @@ public static class ModelEndpoints
                 return Apps.All(model, apps);
             }
             return Apps.Effective(model, apps, e => u.IsSuperuser || u.Access(e.Name).Read);
-        });
+        }).Requires(Capability.Authenticated);
 
         g.MapPost("/plan/preview", async (ChangePlan plan, HttpContext http, PlanService plans, CancellationToken ct) =>
         {
-            RequireModeler(http);
             return await plans.PreviewAsync(plan, ct);
-        });
+        }).Requires(Capability.Modeler).ReadsOnly();
 
-        g.MapPost("/plan/apply", async (ChangePlan plan, HttpContext http, PlanService plans, EnvironmentOptions env, CancellationToken ct) =>
-        {
-            RequireModeler(http);
-            env.RequireDirectChange("un plan del modelador");
-            return new { changeSetId = await plans.ApplyAsync(plan, http, ct) };
-        });
+        g.MapPost("/plan/apply", async (ChangePlan plan, HttpContext http, PlanService plans, CancellationToken ct) =>
+            new { changeSetId = await plans.ApplyAsync(plan, http, ct) }).Requires(Capability.Modeler).Writes(Effect.Model, Gates.DirectChange).AppliesReviewed("baseHash");
 
         g.MapGet("/changes", async (HttpContext http, Db db) =>
         {
-            RequireModeler(http);
             await using var cn = await db.OpenAsync();
             return await cn.QueryAsync<ChangeRow>("""
                 SELECT TOP 200 c.Id, c.Description, c.AppliedAt, u.DisplayName AS AppliedBy, c.OperationCount, c.SqlText AS Sql
                   FROM meta.ChangeSet c JOIN meta.[User] u ON u.Id = c.AppliedBy ORDER BY c.Id DESC
                 """);
-        });
+        }).Requires(Capability.Modeler);
 
         // Spec 026 (H2): de qué paquete viene cada parte del modelo (se reproduce de los paquetes del servidor instalados).
         g.MapGet("/provenance", async (HttpContext http, Db db, MetadataStore store, ModuleService modules, CancellationToken ct) =>
         {
-            RequireModeler(http);
             var model = await store.GetAsync(ct);
             await using var cn = await db.OpenAsync(ct);
             var installed = (await cn.QueryAsync<(string Id, string Version)>("SELECT Id, Version FROM meta.Module"))
@@ -84,13 +77,12 @@ public static class ModelEndpoints
             var roles = await PlanService.LoadRolesAsync(cn, null);
             var rep = Provenance.ReproduceCached(model, modules.Packages(), installed, roles);
             return new { entities = Provenance.Compute(model, rep) };
-        });
+        }).Requires(Capability.Modeler);
 
         // Spec 026 (H3 CA3): valida una expresión con el mismo analizador que el compilador, en el ámbito de un catálogo.
         // `fields` son los del borrador (campos nuevos aún sin aplicar); nada se guarda.
         g.MapPost("/expressions/check", async (ExpressionCheck req, HttpContext http, Db db, MetadataStore store, CancellationToken ct) =>
         {
-            RequireModeler(http);
             if (!Identifiers.IsValid(req.Entity, out _)) throw new AppException(400, "Indica un catálogo válido.");
             if ((req.Expression?.Length ?? 0) > MaxExpression) throw new AppException(400, $"La expresión excede {MaxExpression} caracteres.");
             if ((req.Fields?.Count ?? 0) > PlanCompiler.MaxFieldsPerEntity) throw new AppException(400, "Demasiados campos.");
@@ -107,24 +99,18 @@ public static class ModelEndpoints
             await using var cn = await db.OpenAsync(ct);
             var roles = await PlanService.LoadRolesAsync(cn, null);
             return new { errors = ExprAnalyzer.Analyze(req.Expression, scope, working, roles).Errors.ToArray() };
-        });
+        }).Requires(Capability.Modeler).ReadsOnly();
 
         g.MapGet("/expressions/functions", (HttpContext http) =>
         {
-            RequireModeler(http);
             return ExprAnalyzer.FunctionList;
-        });
+        }).Requires(Capability.Modeler);
     }
 
     private const int MaxExpression = 2000;
     private sealed record ExpressionCheck(string? Entity, string? Expression, IReadOnlyList<FieldDef>? Fields);
 
     private sealed record ChangeRow(int Id, string Description, DateTime AppliedAt, string AppliedBy, int OperationCount, string? Sql);
-
-    private static void RequireModeler(HttpContext http)
-    {
-        if (!http.CurrentUser().CanManageModel) throw new Forbidden();
-    }
 
     /// <summary>Las partidas heredan el permiso de su documento.</summary>
     private static bool CanSee(UserContext u, EntityDef e)

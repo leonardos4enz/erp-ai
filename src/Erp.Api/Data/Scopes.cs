@@ -34,9 +34,16 @@ public sealed class LineDraft
 /// <c>Producto.CostoUltimo</c>. Los nombres de tabla y columna salen de los metadatos. Spec 010: también los tipos de
 /// cambio de <c>RATE</c> y <c>CONVERT</c>.
 /// </summary>
-public sealed class RelatedLoader(SqlConnection cn, SqlTransaction? tx, IReadOnlyDictionary<string, EntityDef> model) : ICurrencyRates, ICostLayers
+/// <param name="viewer">
+/// Spec 029 (H3 CA1, auditoría 4 D-01): lo que se calcula en vivo para una persona (<c>/compute</c>, condiciones de layout,
+/// avisos) solo lee registros a su alcance, en cada salto de una ruta (también el primero); fuera de alcance, el salto vale
+/// vacío. Sin <paramref name="viewer"/> lee con la autoridad del motor (guardar, reglas, automatizaciones, pólizas).
+/// </param>
+public sealed class RelatedLoader(SqlConnection cn, SqlTransaction? tx, IReadOnlyDictionary<string, EntityDef> model,
+    Security.UserContext? viewer = null) : ICurrencyRates, ICostLayers
 {
     private readonly Dictionary<(string, long), Values?> _rows = new();
+    private readonly Dictionary<(string, long, int), bool> _visible = new();
     private readonly Dictionary<int, Values?> _users = new();
     private readonly Dictionary<int, (bool IsTeam, bool IsActive)?> _principals = new();
     private readonly Dictionary<(string, string, DateTime), decimal?> _rates = new();
@@ -45,12 +52,17 @@ public sealed class RelatedLoader(SqlConnection cn, SqlTransaction? tx, IReadOnl
     public SqlTransaction? Transaction => tx;
 
     /// <summary>Olvida lo leído: después de que una automatización escribe, la siguiente acción lee datos frescos.</summary>
-    public void Reset() => _rows.Clear();
+    public void Reset()
+    {
+        _rows.Clear();
+        _visible.Clear();
+    }
 
     public Values? Row(string entity, long id)
     {
         if (_rows.TryGetValue((entity, id), out var cached)) return cached;
         if (!model.TryGetValue(entity, out var e)) return null;
+        if (viewer is not null && !Visible(entity, id, viewer)) return _rows[(entity, id)] = null;
         var cols = e.StoredFields.Select(f => Quote(f.Name)).Prepend("[Id]");
         using var cmd = new SqlCommand($"SELECT {string.Join(", ", cols)} FROM {AppTable(e.Name)} WHERE [Id] = @id AND [IsDeleted] = 0", cn, tx);
         cmd.Parameters.Add(new SqlParameter("@id", id));
@@ -90,10 +102,11 @@ public sealed class RelatedLoader(SqlConnection cn, SqlTransaction? tx, IReadOnl
     public bool Visible(string entity, long id, Security.UserContext user)
     {
         if (!model.TryGetValue(entity, out var e) || Security.RecordFilter.ForRecordOrParent(e, model, user) is not { } p) return true;
+        if (_visible.TryGetValue((e.Name, id, user.Id), out var known)) return known;
         using var cmd = new SqlCommand($"SELECT 1 FROM {AppTable(e.Name)} t WHERE t.[Id] = @id AND t.[IsDeleted] = 0 AND {p.Sql}", cn, tx);
         cmd.Parameters.Add(new SqlParameter("@id", id));
         p.AddTo(cmd.Parameters);
-        return cmd.ExecuteScalar() is not null;
+        return _visible[(e.Name, id, user.Id)] = cmd.ExecuteScalar() is not null;
     }
 
     /// <summary>
@@ -127,6 +140,8 @@ public sealed class RelatedLoader(SqlConnection cn, SqlTransaction? tx, IReadOnl
     public decimal? UnitCost(string book, decimal quantity, IReadOnlyList<object?> key, string? company)
     {
         if (quantity <= 0 || key.Count == 0 || key.Any(k => k is null) || !model.TryGetValue(book, out var b)) return null;
+        // Spec 029 (F-C): en vivo, quien tiene restringido el catálogo de saldo no lee sus capas (la llave podría ser ajena).
+        if (viewer is not null && Security.RecordFilter.HasGrants(b, viewer)) return null;
         int? companyId = null;
         if (b.PerCompany)
         {

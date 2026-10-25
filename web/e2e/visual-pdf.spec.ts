@@ -122,10 +122,12 @@ test('H1 CA2 · CA3: se valida el contenido, no la extensión: SVG, polyglot, ot
 });
 
 test('H1 CA4: el archivo se sirve autenticado, con su tipo, nosniff, sandbox y caché por huella', async () => {
+  // Spec 029 (H1 CA5): solo a quien administra el modelo; los usuarios reciben las imágenes dentro del PDF.
   const company = (await json('admin', '/api/admin/companies')).find((c: { id: number }) => c.id === ids.company);
   const logoUrl = company.logoUrl as string;
   expect(logoUrl).toMatch(/^\/api\/files\/\d+\?v=[0-9a-f]{64}$/);
-  const r = await (await as('almacen')).get(logoUrl);
+  expect((await (await as('almacen')).get(logoUrl)).status()).toBe(403);
+  const r = await (await as('admin')).get(logoUrl);
   expect(r.status()).toBe(200);
   const h = r.headers();
   expect(h['content-type']).toBe('image/png');
@@ -133,7 +135,7 @@ test('H1 CA4: el archivo se sirve autenticado, con su tipo, nosniff, sandbox y c
   expect(h['content-security-policy']).toContain('sandbox');
   expect(h['cache-control']).toContain('immutable');
   expect(Buffer.compare(await r.body(), LOGO)).toBe(0);
-  const again = await (await as('almacen')).get(logoUrl, { headers: { 'If-None-Match': h['etag'] } });
+  const again = await (await as('admin')).get(logoUrl, { headers: { 'If-None-Match': h['etag'] } });
   expect(again.status()).toBe(304);
   const anon = await anonApi();
   expect((await anon.get(logoUrl)).status()).toBe(401);
@@ -243,8 +245,8 @@ test('H4 CA6: vista previa del borrador con un registro real (sin aplicarlo)', a
   expect(pdf.headers()['content-type']).toBe('application/pdf');
   expect(pdf.headers()['content-security-policy']).toBe("frame-ancestors 'self'");
   expect((await pdf.body()).subarray(0, 4).toString()).toBe('%PDF');
-  // La vista previa es de quien la generó.
-  expect((await (await as('comprador')).get(src!.split('#')[0])).status()).toBe(404);
+  // La vista previa es de quien la generó (y, spec 029, solo para quien modela).
+  expect((await (await as('comprador')).get(src!.split('#')[0])).status()).toBe(403);
   await expectAccessible(page);
 });
 

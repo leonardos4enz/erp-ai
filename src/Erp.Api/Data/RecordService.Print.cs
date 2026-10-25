@@ -20,8 +20,44 @@ public static class PrintLimits
     public const int MaxLines = 500;
     public const int MaxImages = 10;
     public const int MaxConcurrent = 4;
+    /// <summary>Spec 029 (H5 CA2): megapíxeles de imagen por documento (decodificadas ocupan ~4 bytes por píxel).</summary>
+    public const long MaxDocumentPixels = 12_000_000;
     public static readonly TimeSpan Timeout = TimeSpan.FromSeconds(20);
     internal static readonly SemaphoreSlim Gate = new(MaxConcurrent, MaxConcurrent);
+
+    /// <summary>
+    /// Spec 029 (H5 CA1, auditoría 4 D-02): el lugar del semáforo se libera cuando termina el render real. Si el cliente
+    /// cancela o se vence el tiempo, la respuesta sale pero el lugar sigue ocupado hasta que el render acaba: nunca hay más
+    /// de <see cref="MaxConcurrent"/> a la vez.
+    /// </summary>
+    internal static async Task<byte[]> RenderAsync(Func<byte[]> render, SemaphoreSlim gate, TimeSpan wait, TimeSpan timeout, CancellationToken ct)
+    {
+        if (!await gate.WaitAsync(wait, ct))
+            throw new AppException(StatusCodes.Status503ServiceUnavailable, "El servidor está generando otros PDF: inténtalo de nuevo en unos segundos.");
+        Task<byte[]> work;
+        try
+        {
+            // Sin token: una vez tomado el lugar, el render siempre corre y siempre lo libera.
+            work = Task.Run(() =>
+            {
+                try { return render(); }
+                finally { gate.Release(); }
+            }, CancellationToken.None);
+        }
+        catch
+        {
+            gate.Release();
+            throw;
+        }
+        try
+        {
+            return await work.WaitAsync(timeout, ct);
+        }
+        catch (TimeoutException)
+        {
+            throw new AppException(StatusCodes.Status503ServiceUnavailable, "El PDF tardó demasiado en generarse: reduce las partidas o las imágenes de la plantilla.");
+        }
+    }
 }
 
 /// <summary>Un salto de la ruta llega a un registro fuera del alcance de lectura del usuario.</summary>
@@ -100,21 +136,14 @@ public sealed partial class RecordService
 
         var company = await PrintCompanyAsync(cn, e.PerCompany ? draft.CompanyId : user.Company?.Id, ct);
         var imageKeys = template.Blocks.Where(b => b.Type == PrintBlockTypes.Image && b.File is not null).Select(b => b.File!).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var logoCompany = template.Blocks.Any(b => b.Logo) ? (e.PerCompany ? draft.CompanyId : user.Company?.Id) : null;
+        if (await FileStore.PixelsAsync(cn, imageKeys, logoCompany, ct) is var pixels && pixels > PrintLimits.MaxDocumentPixels)
+            throw new AppException(StatusCodes.Status422UnprocessableEntity,
+                $"Las imágenes de la plantilla suman {pixels / 1_000_000.0:0.#} megapíxeles; el máximo por documento es {PrintLimits.MaxDocumentPixels / 1_000_000}. Usa imágenes más pequeñas.");
         var images = await FileStore.ImagesByKeyAsync(cn, imageKeys, ct);
         var doc = ResolvePrint(e, template, draft, scope, env, ctx, company, images);
 
-        byte[] pdf;
-        if (!await PrintLimits.Gate.WaitAsync(TimeSpan.FromSeconds(2), ct))
-            throw new AppException(StatusCodes.Status503ServiceUnavailable, "El servidor está generando otros PDF: inténtalo de nuevo en unos segundos.");
-        try
-        {
-            pdf = await Task.Run(() => PdfRenderer.Render(doc), ct).WaitAsync(PrintLimits.Timeout, ct);
-        }
-        catch (TimeoutException)
-        {
-            throw new AppException(StatusCodes.Status503ServiceUnavailable, "El PDF tardó demasiado en generarse: reduce las partidas o las imágenes de la plantilla.");
-        }
-        finally { PrintLimits.Gate.Release(); }
+        var pdf = await PrintLimits.RenderAsync(() => PdfRenderer.Render(doc), PrintLimits.Gate, TimeSpan.FromSeconds(2), PrintLimits.Timeout, ct);
 
         var folio = e.EffectiveDisplayField is { } df ? Convert.ToString(draft.Header.GetValueOrDefault(df), PrintFormat.Culture) : null;
         var safe = UnsafeFileChars().Replace(string.IsNullOrWhiteSpace(folio) ? id.ToString(PrintFormat.Culture) : folio, "-").Trim('-');

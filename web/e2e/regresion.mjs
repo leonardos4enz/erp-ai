@@ -34,10 +34,11 @@ for (const viejo of readdirSync(tmpdir()).filter((d) => d.startsWith('erp-regres
   }
 }
 
-// Lo que se copia: lo de web/e2e que cambió desde el commit (o es nuevo) y la configuración de Playwright.
+// Lo que se copia: lo de web/e2e que cambió desde el commit (o es nuevo), la configuración de Playwright y (spec 029) el
+// inventario de rutas que recorren capacidades.spec.ts y canario.spec.ts.
 const cambiados = [...new Set([
-  ...git('diff', '--name-only', sha, '--', 'web/e2e', 'web/playwright.config.ts').split('\n'),
-  ...git('ls-files', '--others', '--exclude-standard', '--', 'web/e2e').split('\n'),
+  ...git('diff', '--name-only', sha, '--', 'web/e2e', 'web/playwright.config.ts', 'docs/sdd/rutas.md').split('\n'),
+  ...git('ls-files', '--others', '--exclude-standard', '--', 'web/e2e', 'docs/sdd/rutas.md').split('\n'),
 ])].filter((f) => f && existsSync(path.join(actual.raiz, f)));
 const pruebas = resto.length ? resto : cambiados.filter((f) => f.endsWith('.spec.ts')).map((f) => path.posix.relative('web', f));
 if (!pruebas.length) {

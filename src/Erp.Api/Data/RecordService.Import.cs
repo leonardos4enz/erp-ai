@@ -393,7 +393,8 @@ public sealed partial class RecordService
         var missing = $"No existe «{raw}» en {target.LabelPlural}.";
         await using var cmd = new SqlCommand { Connection = cn, Transaction = tx };
         var where = "t.[IsDeleted] = 0";
-        if (target.EffectiveDisplayField is { } display)
+        // Spec 029 (F-B): buscar por un campo para mostrar que no ve sería un oráculo; entonces solo por número.
+        if (target.EffectiveDisplayField is { } display && !FieldAccess.DisplayHidden(target, user))
         {
             where += $" AND t.{Quote(display)} = @v";
             cmd.Parameters.Add(new SqlParameter("@v", raw));

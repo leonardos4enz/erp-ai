@@ -17,19 +17,21 @@ public static class AnalyticsEndpoints
     public static void MapAnalytics(this IEndpointRouteBuilder app)
     {
         var views = app.MapGroup("/api/views/{entity}").RequireAuthorization();
-        views.MapGet("/", (string entity, HttpContext http, ViewService svc, CancellationToken ct) => svc.ListAsync(entity, http.CurrentUser(), ct));
-        views.MapPost("/", (string entity, SaveViewRequest req, HttpContext http, ViewService svc, CancellationToken ct) => svc.SaveAsync(entity, null, req, http, ct));
-        views.MapPut("/{id:int}", (string entity, int id, SaveViewRequest req, HttpContext http, ViewService svc, CancellationToken ct) => svc.SaveAsync(entity, id, req, http, ct));
+        views.MapGet("/", (string entity, HttpContext http, ViewService svc, CancellationToken ct) => svc.ListAsync(entity, http.CurrentUser(), ct)).Requires(Capability.Records);
+        views.MapPost("/", (string entity, SaveViewRequest req, HttpContext http, ViewService svc, CancellationToken ct) => svc.SaveAsync(entity, null, req, http, ct))
+            .Requires(Capability.Records).Writes(Effect.Session);
+        views.MapPut("/{id:int}", (string entity, int id, SaveViewRequest req, HttpContext http, ViewService svc, CancellationToken ct) => svc.SaveAsync(entity, id, req, http, ct))
+            .Requires(Capability.Records).Writes(Effect.Session);
         views.MapDelete("/{id:int}", async (string entity, int id, HttpContext http, ViewService svc, CancellationToken ct) =>
         {
             await svc.DeleteAsync(entity, id, http, ct);
             return Results.NoContent();
-        });
+        }).Requires(Capability.Records).Writes(Effect.Session);
 
         var reports = app.MapGroup("/api/reports").RequireAuthorization();
-        reports.MapGet("/", (HttpContext http, ReportService svc, CancellationToken ct) => svc.ListAsync(http.CurrentUser(), ct));
+        reports.MapGet("/", (HttpContext http, ReportService svc, CancellationToken ct) => svc.ListAsync(http.CurrentUser(), ct)).Requires(Capability.Records);
         reports.MapGet("/{entity}/{name}", (string entity, string name, string? filters, HttpContext http, ReportService svc, CancellationToken ct) =>
-            svc.RunAsync(entity, name, FilterSql.Parse(filters), http.CurrentUser(), ct));
+            svc.RunAsync(entity, name, FilterSql.Parse(filters), http.CurrentUser(), ct)).Requires(Capability.Records);
         reports.MapGet("/{entity}/{name}/export", async (string entity, string name, string? format, string? filters,
             HttpContext http, ReportService svc, CancellationToken ct) =>
         {
@@ -42,7 +44,7 @@ public static class AnalyticsEndpoints
                 "csv" or null => Results.File(ReportExport.Csv(r), "text/csv; charset=utf-8", file + ".csv"),
                 _ => throw new AppException(400, "Formato no válido (csv o xlsx)."),
             };
-        });
+        }).Requires(Capability.Records).Costly("hasta 1000 grupos en un archivo").RequireRateLimiting(RatePolicies.Bulk);
 
         var boards = app.MapGroup("/api/dashboards").RequireAuthorization();
         boards.MapGet("/", async (HttpContext http, MetadataStore store, CancellationToken ct) =>
@@ -54,7 +56,7 @@ public static class AnalyticsEndpoints
                 .OrderBy(d => d.Label, StringComparer.CurrentCulture)
                 .Select(d => new DashboardSummary(d.Name, d.Label, d.Icon ?? "layout-dashboard", d.Description, AppsOf(d, u, model)))
                 .ToList();
-        });
+        }).Requires(Capability.Records);
         boards.MapGet("/{name}", async (string name, HttpContext http, MetadataStore store, ReportService svc, CancellationToken ct) =>
         {
             var u = http.CurrentUser();
@@ -69,7 +71,7 @@ public static class AnalyticsEndpoints
                 widgets.Add(new WidgetResult(w.Type, w.Label ?? r.Label, w.Wide, e.Name, r.Name, w.Measure, result));
             }
             return new DashboardResult(d.Name, d.Label, d.Icon ?? "layout-dashboard", d.Description, widgets, u.CanManageModel ? d : null);
-        });
+        }).Requires(Capability.Records);
     }
 
     private static IReadOnlyList<string> AppsOf(DashboardDef d, UserContext u, IReadOnlyDictionary<string, EntityDef> model) =>

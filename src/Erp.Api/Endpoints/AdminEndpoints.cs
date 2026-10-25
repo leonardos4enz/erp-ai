@@ -39,51 +39,45 @@ public static partial class AdminEndpoints
     {
         var g = app.MapGroup("/api/admin").RequireAuthorization();
 
-        g.MapGet("/users", async (HttpContext http, Db db) =>
+        g.MapGet("/users", async (Db db) =>
         {
-            RequireUserAdmin(http);
             await using var cn = await db.OpenAsync();
             return await LoadUsersAsync(cn);
-        });
-        g.MapPost("/users", CreateUser);
-        g.MapPut("/users/{id:int}", UpdateUser);
+        }).Requires(Capability.UserAdmin);
+        g.MapPost("/users", CreateUser).Requires(Capability.UserAdmin).Writes(Effect.Security, Gates.SecurityApproval);
+        g.MapPut("/users/{id:int}", UpdateUser).Requires(Capability.UserAdmin).Writes(Effect.Security, Gates.SecurityApproval);
         MapOrg(g);
 
         // Los modeladores también leen los roles para configurar reglas "obligatorio para rol".
         g.MapGet("/roles", async (HttpContext http, Db db) =>
         {
-            var u = http.CurrentUser();
-            if (!u.CanManageUsers && !u.CanManageModel) throw new Forbidden();
             await using var cn = await db.OpenAsync();
             return await LoadRolesAsync(cn);
-        });
+        }).Requires(Capability.UserAdmin, Capability.Modeler);
         // Módulos (spec 002 H7): solo superusuario, porque instalan roles y permisos.
-        g.MapGet("/modules", async (HttpContext http, ModuleService modules) =>
-        {
-            if (!http.CurrentUser().IsSuperuser) throw new Forbidden();
-            return await modules.ListAsync();
-        });
-        g.MapPost("/modules/{id}/preview", async (string id, HttpContext http, ModuleService modules, CancellationToken ct) =>
-        {
-            if (!http.CurrentUser().IsSuperuser) throw new Forbidden();
-            return await modules.PreviewAsync(id, ct);
-        });
+        g.MapGet("/modules", async (ModuleService modules) => await modules.ListAsync()).Requires(Capability.Superuser);
+        g.MapPost("/modules/{id}/preview", async (string id, ModuleService modules, CancellationToken ct) => await modules.PreviewAsync(id, ct))
+            .Requires(Capability.Superuser).ReadsOnly();
+        // Spec 029 (H6 CA2): aplicar exige la huella de la vista previa (el cuerpo es opcional para responder 400 con su motivo).
         g.MapPost("/modules/{id}/install", async (string id, HttpContext http, ModuleService modules, CancellationToken ct) =>
-            new { changeSetId = await modules.InstallAsync(id, http, ct) });
-        g.MapPost("/modules/{id}/upgrade/preview", async (string id, HttpContext http, ModuleService modules, CancellationToken ct) =>
-        {
-            if (!http.CurrentUser().IsSuperuser) throw new Forbidden();
-            return await modules.UpgradePreviewAsync(id, ct);
-        });
+            new { changeSetId = await modules.InstallAsync(id, await ModuleApply.ReadAsync(http, ct), http, ct) })
+            .Requires(Capability.Superuser).Writes(Effect.Model, Gates.DirectChange).AppliesReviewed("baseHash");
+        g.MapPost("/modules/{id}/upgrade/preview", async (string id, ModuleService modules, CancellationToken ct) => await modules.UpgradePreviewAsync(id, ct))
+            .Requires(Capability.Superuser).ReadsOnly();
         g.MapPost("/modules/{id}/upgrade", async (string id, HttpContext http, ModuleService modules, CancellationToken ct) =>
-            new { changeSetId = await modules.UpgradeAsync(id, http, ct) });
+            new { changeSetId = await modules.UpgradeAsync(id, await ModuleApply.ReadAsync(http, ct), http, ct) })
+            .Requires(Capability.Superuser).Writes(Effect.Model, Gates.DirectChange).AppliesReviewed("baseHash");
 
         g.MapPost("/roles", (RoleRequest req, HttpContext http, Db db, MetadataStore store, SecurityApproval gate, CancellationToken ct) =>
-            SaveRole(null, req, http, db, store, gate, null, ct));
+            SaveRole(null, req, http, db, store, gate, null, ct)).Requires(Capability.UserAdmin).Writes(Effect.Security, Gates.SecurityApproval);
         g.MapPut("/roles/{id:int}", (int id, RoleRequest req, HttpContext http, Db db, MetadataStore store, SecurityApproval gate, CancellationToken ct) =>
-            SaveRole(id, req, http, db, store, gate, null, ct));
+            SaveRole(id, req, http, db, store, gate, null, ct)).Requires(Capability.UserAdmin).Writes(Effect.Security, Gates.SecurityApproval);
     }
 
+    /// <summary>
+    /// La capacidad de la ruta la exige su metadato (spec 029). Las operaciones que también reaplica una aprobación
+    /// (<see cref="SecurityChangeEndpoints"/>) la vuelven a comprobar con quien aprueba.
+    /// </summary>
     private static void RequireUserAdmin(HttpContext http)
     {
         if (!http.CurrentUser().CanManageUsers) throw new Forbidden();
@@ -93,7 +87,6 @@ public static partial class AdminEndpoints
 
     private static async Task<IResult> CreateUser(CreateUserRequest req, HttpContext http, Db db, PasswordService passwords, SecurityApproval gate)
     {
-        RequireUserAdmin(http);
         var errors = new Dictionary<string, string[]>();
         var username = req.Username?.Trim() ?? "";
         if (!UsernamePattern().IsMatch(username)) errors["username"] = ["Usa de 3 a 100 caracteres: letras, números, '.', '_' o '-'."];
@@ -143,7 +136,6 @@ public static partial class AdminEndpoints
 
     private static async Task<IResult> UpdateUser(int id, UpdateUserRequest req, HttpContext http, Db db, PasswordService passwords, SecurityApproval gate)
     {
-        RequireUserAdmin(http);
         var me = http.CurrentUser();
         var errors = new Dictionary<string, string[]>();
         var displayName = req.DisplayName?.Trim() ?? "";
@@ -462,7 +454,6 @@ public static class AuditEndpoints
         app.MapGet("/api/audit", async (string? entity, string? action, int? page, int? pageSize, HttpContext http, Db db, MetadataStore store) =>
         {
             var user = http.CurrentUser();
-            if (!user.CanViewAudit) throw new Forbidden();
             var size = Math.Clamp(pageSize ?? 50, 1, 200);
             var skip = (Math.Max(1, page ?? 1) - 1) * size;
             var model = await store.GetAsync();
@@ -488,7 +479,7 @@ public static class AuditEndpoints
                     AuditFilter.Redact(r.Action, r.EntityName, Parse(r.AfterJson), user, model), r.IpAddress)),
                 total,
             };
-        }).RequireAuthorization();
+        }).Requires(Capability.Audit);
     }
 
     private static string? Empty(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();

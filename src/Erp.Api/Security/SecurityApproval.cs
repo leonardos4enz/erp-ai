@@ -192,6 +192,7 @@ public sealed class SecurityApproval(Db db, EnvironmentOptions env)
              ORDER BY c.Id DESC
             """, new { id, status }, tx);
         var roles = await LoadRoleCapabilitiesAsync(cn, tx);
+        var units = await LoadUnitsAsync(cn, tx);
         static DateTime U(DateTime d) => DateTime.SpecifyKind(d, DateTimeKind.Utc);
         return rows.Where(r => id is not null || user.IsSuperuser || !SecurityChangeKinds.IsIntegration(r.Kind))
             .Select(r => new SecurityChangeDto(r.Id, r.Kind, r.TargetId, r.Summary, r.Status,
@@ -199,7 +200,7 @@ public sealed class SecurityApproval(Db db, EnvironmentOptions env)
                 JsonSerializer.SerializeToElement(Redacted(r.PayloadJson)), r.Hash, r.RequestedBy, U(r.RequestedAt), r.ReviewedBy,
                 r.ReviewedAt is { } at ? U(at) : null, r.ReviewComment,
                 CanApprove: r.Status == Pending && CanReview(user, r.Kind) && r.RequestedById != user.Id
-                            && WhyNotApprover(user, r.Kind, r.TargetId, r.PayloadJson, r.BeforeJson, roles) is null,
+                            && WhyNotApprover(user, r.Kind, r.TargetId, r.PayloadJson, r.BeforeJson, roles, units) is null,
                 CanReject: r.Status == Pending && (r.RequestedById == user.Id || CanReview(user, r.Kind)))).ToList();
     }
 
@@ -226,8 +227,12 @@ public sealed class SecurityApproval(Db db, EnvironmentOptions env)
     /// Spec 021 (H1 CA4–CA5): por qué <paramref name="user"/> no puede aprobar este cambio aunque revise solicitudes (null =
     /// puede): le faltan capacidades que el cambio otorga o quita, o es su beneficiario.
     /// </summary>
+    /// <remarks>
+    /// Spec 029 (H6 CA1, auditoría 4 D-03): sin caso por omisión. Cada tipo de cambio declara su regla; uno nuevo sin regla no
+    /// lo aprueba nadie (<see cref="NoRule"/>) y la prueba de tipos lo detecta.
+    /// </remarks>
     internal static string? WhyNotApprover(UserContext user, string kind, int? targetId, string payload, string? before,
-        IReadOnlyDictionary<int, (string Name, AdminCapabilities Caps)> roles)
+        IReadOnlyDictionary<int, (string Name, AdminCapabilities Caps)> roles, IReadOnlyList<UnitPath>? units = null)
     {
         AdminCapabilities needed;
         switch (kind)
@@ -249,11 +254,40 @@ public sealed class SecurityApproval(Db db, EnvironmentOptions env)
             case SecurityChangeKinds.TeamCreate or SecurityChangeKinds.TeamUpdate:
                 return Ints(payload, "memberIds").Contains(user.Id) && !Ints(before, "memberIds").Contains(user.Id)
                     ? "El cambio te agrega al equipo: lo aprueba otro administrador." : null;
-            default:
+            case SecurityChangeKinds.UnitMove:
+                // Con «unitTree», quien tiene la unidad nueva superior (o una de más arriba) gana lo que ve la unidad movida.
+                return GainsUnit(user, Int(before, "parentId"), Int(payload, "parentId"), units ?? [])
+                    ? "Mover la unidad bajo la tuya te deja ver sus registros: lo aprueba otro administrador." : null;
+            case SecurityChangeKinds.ApiKeyCreate or SecurityChangeKinds.ApiKeyUpdate
+                or SecurityChangeKinds.OAuthClientCreate or SecurityChangeKinds.OAuthClientUpdate:
+                // Las revisa solo el superusuario (CanReview), que ya tiene todo; la cuenta de servicio no es de quien aprueba.
                 return null;
+            default:
+                return NoRule;
         }
         return needed.MissingFor(user) is { } missing ? $"El cambio otorga o quita capacidades que no tienes ({missing}): lo aprueba quien las tenga." : null;
     }
+
+    internal const string NoRule = "Este tipo de cambio no tiene regla de aprobación: no se puede aprobar.";
+
+    /// <summary>Spec 029: ruta materializada de cada unidad (la de la 015, «/1/4/»).</summary>
+    public sealed record UnitPath(int Id, string Name, string Path);
+
+    private static int? Int(string? json, string property) =>
+        Prop(json, property) is { ValueKind: JsonValueKind.Number } v ? v.GetInt32() : null;
+
+    /// <summary>¿La unidad de <paramref name="user"/> queda por encima de la movida sin haberlo estado antes?</summary>
+    internal static bool GainsUnit(UserContext user, int? oldParent, int? newParent, IReadOnlyList<UnitPath> units)
+    {
+        if (string.IsNullOrWhiteSpace(user.Unit) || newParent is null) return false;
+        var mine = units.FirstOrDefault(u => string.Equals(u.Name, user.Unit, StringComparison.OrdinalIgnoreCase));
+        if (mine is null) return false;
+        bool Under(int? parent) => parent is { } id && units.FirstOrDefault(u => u.Id == id) is { } p && p.Path.StartsWith(mine.Path, StringComparison.Ordinal);
+        return Under(newParent) && !Under(oldParent);
+    }
+
+    private static async Task<IReadOnlyList<UnitPath>> LoadUnitsAsync(DbConnection cn, DbTransaction? tx) =>
+        (await cn.QueryAsync<UnitPath>("SELECT Id, Name, Path FROM meta.BusinessUnit", transaction: tx)).ToList();
 
     private static bool CanReview(UserContext user, string kind) =>
         SecurityChangeKinds.IsIntegration(kind) ? user.IsSuperuser : user.CanManageUsers;
@@ -288,7 +322,8 @@ public sealed class SecurityApproval(Db db, EnvironmentOptions env)
         if (!CanReview(user, row.Kind)) throw new Forbidden(SecurityChangeKinds.IsIntegration(row.Kind)
             ? "Una solicitud de clave de API o de cliente OAuth la aprueba otro administrador del sistema." : "No puedes aprobar cambios de seguridad.");
         if (row.RequestedById == user.Id) throw new Forbidden("La debe aprobar un administrador distinto de quien la solicitó.");
-        if (WhyNotApprover(user, row.Kind, row.TargetId, row.PayloadJson, row.BeforeJson, await LoadRoleCapabilitiesAsync(cn, null)) is { } why)
+        if (WhyNotApprover(user, row.Kind, row.TargetId, row.PayloadJson, row.BeforeJson, await LoadRoleCapabilitiesAsync(cn, null),
+                await LoadUnitsAsync(cn, null)) is { } why)
             throw new Forbidden(why);
         if (!string.Equals(req.Hash, row.Hash, StringComparison.OrdinalIgnoreCase))
             throw new Conflict("La solicitud no coincide con la que revisaste: vuelve a revisarla.");

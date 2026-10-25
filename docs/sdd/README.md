@@ -93,3 +93,4 @@ y cada sesión queda como registro de una sola entrega. Al cerrar la spec:
 | 026 | [Modelador por módulos y sin JSON](specs/026-modelador-visual/spec.md) | Implementado |
 | 027 | [Documentos PDF con plantillas visuales](specs/027-documentos-pdf/spec.md) | Implementado |
 | 028 | [Mejoras del proceso (retrospectiva 001)](specs/028-mejoras-proceso/spec.md) | Implementado |
+| 029 | [Endurecimiento 3: capacidades declaradas y canario de fugas](specs/029-endurecimiento-3/spec.md) | Implementado |

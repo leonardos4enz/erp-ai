@@ -24,7 +24,7 @@ public static class ExplorerEndpoints
         var g = app.MapGroup("/api/explorer").RequireAuthorization();
 
         g.MapGet("/database", async (HttpContext http, Db db, MetadataStore store, string? schema, string? app, string? q, CancellationToken ct) =>
-            await DatabaseAsync(http, db, store, schema, app, q, ct));
+            await DatabaseAsync(http, db, store, schema, app, q, ct)).Requires(Capability.Modeler);
 
         g.MapGet("/database/ddl", async (HttpContext http, Db db, MetadataStore store, string? schema, string? app, string? q, string? tables, CancellationToken ct) =>
         {
@@ -35,18 +35,16 @@ public static class ExplorerEndpoints
             var chosen = wanted.Count == 0 ? result.Tables : result.Tables.Where(t => wanted.Contains(t.Name)).ToList();
             var script = DdlScript.For(result.Schema, chosen, DateTime.UtcNow);
             return Results.File(Encoding.UTF8.GetBytes(script), "text/plain; charset=utf-8", $"esquema-{result.Schema}.sql");
-        });
+        }).Requires(Capability.Modeler);
 
         g.MapGet("/relations", async (HttpContext http, MetadataStore store, string? app, string? q, CancellationToken ct) =>
         {
-            RequireModeler(http);
             CheckQuery(q);
             return ModelExplorer.Relations(await store.GetAsync(ct), await store.GetAppsAsync(ct), Blank(app), q);
-        });
+        }).Requires(Capability.Modeler);
 
         g.MapGet("/entities/{name}", async (string name, HttpContext http, Db db, MetadataStore store, ModuleService modules, CancellationToken ct) =>
         {
-            RequireModeler(http);
             var model = await store.GetAsync(ct);
             if (!model.TryGetValue(name, out var e)) throw new NotFound("El catálogo no existe.");
             var apps = await store.GetAppsAsync(ct);
@@ -68,40 +66,36 @@ public static class ExplorerEndpoints
                     .OrderBy(d => d.Label).Select(d => new DashboardRef(d.Name, d.Label)).ToList(),
                 ModelExplorer.Relations(model, apps).Edges.Where(x => string.Equals(x.To, e.Name, StringComparison.OrdinalIgnoreCase)).ToList(),
                 security.Cells.Where(c => string.Equals(c.Entity, root, StringComparison.OrdinalIgnoreCase)).ToList());
-        });
+        }).Requires(Capability.Modeler);
 
         g.MapGet("/usages", async (HttpContext http, MetadataStore store, string? entity, string? field, CancellationToken ct) =>
         {
-            RequireModeler(http);
             var model = await store.GetAsync(ct);
             if (!model.TryGetValue(entity ?? "", out var e)) throw new NotFound("El catálogo no existe.");
             var f = Blank(field) is { } fn ? e.FindField(fn) ?? throw new NotFound("El campo no existe.") : null;
             return UsageIndex.For(model, await store.GetDashboardsAsync(ct)).Of(e.Name, f?.Name);
-        });
+        }).Requires(Capability.Modeler);
 
         g.MapGet("/automations", async (HttpContext http, MetadataStore store, CancellationToken ct) =>
         {
-            RequireModeler(http);
             return ModelExplorer.Flow(await store.GetAsync(ct), await store.GetAppsAsync(ct));
-        });
+        }).Requires(Capability.Modeler);
 
         g.MapGet("/security", async (HttpContext http, Db db, MetadataStore store, CancellationToken ct) =>
         {
-            RequireModeler(http);
             await using var cn = await db.OpenAsync(ct);
             return await SecurityAsync(cn, await store.GetAsync(ct), await store.GetAppsAsync(ct), ct);
-        });
+        }).Requires(Capability.Modeler);
 
         g.MapGet("/navigation", async (HttpContext http, MetadataStore store, CancellationToken ct) =>
         {
-            RequireModeler(http);
             return ModelExplorer.Navigation(await store.GetAsync(ct), await store.GetAppsAsync(ct));
-        });
+        }).Requires(Capability.Modeler);
     }
 
     private static async Task<DbSchema> DatabaseAsync(HttpContext http, Db db, MetadataStore store, string? schema, string? app, string? q, CancellationToken ct)
     {
-        var u = RequireModeler(http);
+        var u = http.CurrentUser();
         CheckQuery(q);
         // Constitución II.1: el esquema que llega a SQL es el de la lista blanca, nunca el texto de la petición.
         var allowed = DbCatalog.Allowed(Blank(schema), u.IsSuperuser);
@@ -130,13 +124,6 @@ public static class ExplorerEndpoints
     }
 
     private sealed record PermWithRole(int RoleId, string EntityName, bool CanRead, bool CanCreate, bool CanUpdate, bool CanDelete);
-
-    private static UserContext RequireModeler(HttpContext http)
-    {
-        var u = http.CurrentUser();
-        if (!u.CanManageModel) throw new Forbidden();
-        return u;
-    }
 
     private static void CheckQuery(string? q)
     {

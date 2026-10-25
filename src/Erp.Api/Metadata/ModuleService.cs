@@ -40,6 +40,13 @@ public sealed record ModulePackage(string Id, string Name, string Version, strin
     public IReadOnlyList<ModuleRole> AllRoles => [.. Roles, .. (Upgrades ?? []).SelectMany(u => u.Roles ?? [])];
 }
 
+/// <summary>Spec 029 (H6 CA2): lo que manda el cliente al instalar o actualizar: la huella de la vista previa que revisó.</summary>
+public sealed record ModuleApply(string? BaseHash)
+{
+    public static async Task<ModuleApply?> ReadAsync(HttpContext http, CancellationToken ct) =>
+        http.Request.HasJsonContentType() ? await http.Request.ReadFromJsonAsync<ModuleApply>(ct) : null;
+}
+
 public sealed record ModuleInfo(string Id, string Name, string Description, string Icon, string Version, bool Installed,
     IReadOnlyList<string> Entities, string? InstalledVersion, bool UpgradeAvailable, IReadOnlyList<string> PendingUpgrades,
     IReadOnlyList<string> Requires, IReadOnlyList<string> MissingRequirements);
@@ -104,10 +111,11 @@ public sealed partial class ModuleService(Db db, MetadataStore store, PlanServic
             preview.Steps,
             roles = p.AllRoles.Select(r => r.Name).Where(n => !existing.Contains(n)).ToList(),
             seedRecords = p.Seed.Sum(s => s.Records.Count),
+            baseHash = await BaseHashAsync(cn, null, p, null),
         };
     }
 
-    public async Task<int> InstallAsync(string id, HttpContext http, CancellationToken ct)
+    public async Task<int> InstallAsync(string id, ModuleApply? body, HttpContext http, CancellationToken ct)
     {
         var user = http.CurrentUser();
         if (!user.IsSuperuser) throw new Forbidden("Solo un administrador puede instalar módulos.");
@@ -116,11 +124,14 @@ public sealed partial class ModuleService(Db db, MetadataStore store, PlanServic
 
         await using var cn = await db.OpenAsync(ct);
         await using var tx = (SqlTransaction)await cn.BeginTransactionAsync(ct);
+        // Spec 029: el bloqueo serializa dos instalaciones del mismo módulo; la huella se compara ya bloqueada.
+        await cn.ExecuteAsync("SELECT COUNT(*) FROM meta.Module WITH (TABLOCKX, HOLDLOCK)", transaction: tx);
         if (await cn.ExecuteScalarAsync<int?>("SELECT 1 FROM meta.Module WHERE Id = @id", new { id }, tx) is not null)
             throw new Conflict("El módulo ya está instalado.");
         var installedIds = await cn.QueryAsync<string>("SELECT Id FROM meta.Module", transaction: tx);
         if (Missing(p, installedIds).Select(Name).ToList() is { Count: > 0 } missing)
             throw new Conflict($"Requiere el módulo {string.Join(" y ", missing)}. Instálalo primero.");
+        await CheckHashAsync(cn, tx, p, null, body);
 
         // 1) Roles primero: el plan los usa en reglas, transiciones y webhooks.
         var roleIds = await EnsureRolesAsync(cn, tx, p.AllRoles);
@@ -176,11 +187,12 @@ public sealed partial class ModuleService(Db db, MetadataStore store, PlanServic
         var rep = Provenance.ReproduceCached(model, Packages(), installed, existing);
         var conflicts = Provenance.Conflicts(model, rep, pending.Select(u => u.Plan), existing.Union(newRoles).ToHashSet(StringComparer.OrdinalIgnoreCase));
         return new { preview.Valid, preview.Errors, preview.Steps, roles = newRoles.Where(n => !existing.Contains(n)).ToList(), seedRecords = 0,
-            versions = pending.Select(u => new { u.Version, u.Description }), conflicts };
+            versions = pending.Select(u => new { u.Version, u.Description }), conflicts,
+            baseHash = await BaseHashAsync(cn, null, p, await InstalledVersionAsync(id)) };
     }
 
     /// <summary>Aplica en una transacción solo las versiones posteriores a la instalada; los datos se conservan.</summary>
-    public async Task<int> UpgradeAsync(string id, HttpContext http, CancellationToken ct)
+    public async Task<int> UpgradeAsync(string id, ModuleApply? body, HttpContext http, CancellationToken ct)
     {
         if (!http.CurrentUser().IsSuperuser) throw new Forbidden("Solo un administrador puede actualizar módulos.");
         environment.RequireDirectChange("actualizar un módulo"); // spec 012
@@ -191,6 +203,7 @@ public sealed partial class ModuleService(Db db, MetadataStore store, PlanServic
             ?? throw new Conflict("El módulo no está instalado.");
         var pending = p.PendingAfter(installed);
         if (pending.Count == 0) throw new Conflict("El módulo ya está en la versión más reciente.");
+        await CheckHashAsync(cn, tx, p, installed, body);
 
         // Spec 008: los roles nuevos de cada versión existen antes del plan (los usan sus webhooks) y reciben permisos después.
         var newRoles = pending.SelectMany(u => u.Roles ?? []).ToList();
@@ -237,6 +250,38 @@ public sealed partial class ModuleService(Db db, MetadataStore store, PlanServic
                     VALUES (@RoleId, @Entity, @CanRead, @CanCreate, @CanUpdate, @CanDelete);
                 """, new { RoleId = roleIds[r.Name], Entity = e.Name, perm.CanRead, perm.CanCreate, perm.CanUpdate, perm.CanDelete }, tx);
         }
+    }
+
+    /// <summary>
+    /// Spec 029 (H6 CA2, auditoría 4 D-04): huella de lo que se revisó: el módulo, la versión instalada, la del paquete y el
+    /// modelo completo (los conflictos con lo local dependen de todo el modelo). Si algo cambió, se vuelve a revisar.
+    /// </summary>
+    private static async Task<string> BaseHashAsync(System.Data.Common.DbConnection cn, System.Data.Common.DbTransaction? tx, ModulePackage p, string? installed)
+    {
+        var model = await MetadataStore.LoadAsync(cn, tx);
+        var boards = await MetadataStore.LoadDashboardsAsync(cn, tx);
+        var apps = await MetadataStore.LoadAppsAsync(cn, tx);
+        var names = (IEnumerable<string> keys) => keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        // Los roles cuentan: la vista previa dice cuáles crea; uno con el mismo nombre creado después recibiría sus permisos.
+        var roles = string.Join(",", (await PlanService.LoadRolesAsync(cn, tx)).Order(StringComparer.OrdinalIgnoreCase));
+        var basis = $"{p.Id}|{installed ?? "-"}|{p.Version}|{roles}|" +
+                    ModelVersion.Base(model, boards, names(model.Keys), names(boards.Keys), apps, names(apps.Keys));
+        return Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(basis)));
+    }
+
+    private static void RequireHash(ModuleApply? body)
+    {
+        if (string.IsNullOrWhiteSpace(body?.BaseHash))
+            throw new ValidationFailed(new Dictionary<string, string[]> { ["baseHash"] = ["Falta la huella de la vista previa: revisa los cambios antes de aplicarlos."] });
+    }
+
+    private static async Task CheckHashAsync(System.Data.Common.DbConnection cn, System.Data.Common.DbTransaction tx, ModulePackage p, string? installed, ModuleApply? body)
+    {
+        RequireHash(body);
+        // Revisión adversarial 029 (F-A): con el candado del modelo, un plan no puede aplicarse entre comparar y aplicar.
+        await PlanService.LockModelAsync(cn, tx);
+        if (!string.Equals(body!.BaseHash, await BaseHashAsync(cn, tx, p, installed), StringComparison.OrdinalIgnoreCase))
+            throw new Conflict("El modelo o el módulo cambiaron desde la vista previa: vuelve a revisarla.");
     }
 
     private async Task<string?> InstalledVersionAsync(string id)

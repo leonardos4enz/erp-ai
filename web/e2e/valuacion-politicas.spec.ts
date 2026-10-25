@@ -224,7 +224,7 @@ test('H3 CA1 · CA3: sin tipo de cambio a su fecha la recepción no se confirma;
   await withoutRule('Recepcion', 'TipoCambioDeLaRecepcion', async () => {
     const ok = await transition('almacen', 'Recepcion', await fresh('Recepcion', rec.id), 'confirmar');
     expect(ok.status, JSON.stringify(ok.body)).toBe(200);
-    expect(ok.body).toMatchObject({ CostoTotal: 180 });
+    expect(await get('admin', `/api/data/Recepcion/${rec.id}`)).toMatchObject({ CostoTotal: 180 }); // el almacenista no lo ve (029, D-05)
     expect(await movimientos(rec.Folio as string)).toEqual([expect.objectContaining({ CostoUnitario: 90, CostoTotal: 180 })]);
     const pol = ((await get('contador', '/api/data/Poliza', { search: rec.Folio as string })).items as Row[])[0];
     expect(pol).toMatchObject({ TotalCargos: 180, TotalAbonos: 180 }); // la póliza y el movimiento valen lo mismo (CA2)
@@ -335,7 +335,8 @@ test('H7 CA2: sin la regla, la recepción se confirma y queda como póliza pendi
   await withoutRule('Recepcion', 'PolizaConCuentas', async () => {
     const ok = await transition('almacen', 'Recepcion', await fresh('Recepcion', rec.id), 'confirmar');
     expect(ok.status, JSON.stringify(ok.body)).toBe(200);
-    expect(ok.body).toMatchObject({ Estado: 'Confirmada', PolizaPendiente: true, CostoTotal: 16 });
+    expect(ok.body).toMatchObject({ Estado: 'Confirmada', PolizaPendiente: true });
+    expect(await get('admin', `/api/data/Recepcion/${rec.id}`)).toMatchObject({ CostoTotal: 16 }); // el almacenista no lo ve (029, D-05)
     expect(await movimientos(rec.Folio as string)).toEqual([expect.objectContaining({ CostoTotal: 16 })]);
     expect((await get('contador', '/api/data/Poliza', { search: rec.Folio as string })).items).toHaveLength(0);
   });

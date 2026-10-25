@@ -20,7 +20,7 @@ public static class PrintEndpoints
     {
         var data = app.MapGroup("/api/data/{entity}/{id:long}").RequireAuthorization();
         data.MapGet("/print", (string entity, long id, HttpContext http, RecordService records, CancellationToken ct) =>
-            records.PrintChoicesAsync(entity, id, http.CurrentUser(), ct));
+            records.PrintChoicesAsync(entity, id, http.CurrentUser(), ct)).Requires(Capability.Records);
 
         data.MapGet("/pdf", async (string entity, long id, string? template, HttpContext http, RecordService records, Db db, CancellationToken ct) =>
         {
@@ -30,13 +30,12 @@ public static class PrintEndpoints
             PdfHeaders(http, frameable: false);
             // El nombre sale de los metadatos y del folio (caracteres seguros), nunca de la petición.
             return Results.File(r.Pdf, "application/pdf", r.FileName);
-        }).RequireRateLimiting(RatePolicy);
+        }).Requires(Capability.Records).Costly("genera un PDF").RequireRateLimiting(RatePolicy);
 
         var model = app.MapGroup("/api/model/print").RequireAuthorization();
         model.MapPost("/preview", async (PreviewRequest req, HttpContext http, RecordService records, MetadataStore store, Db db, CancellationToken ct) =>
         {
             var user = http.CurrentUser();
-            if (!user.CanManageModel) throw new Forbidden();
             if (req.Template is null || !Identifiers.IsValid(req.Entity, out _)) throw new AppException(400, "Indica el catálogo, el registro y la plantilla.");
             var e = await store.GetActiveAsync(req.Entity!, ct);
             var modelDefs = await store.GetAsync(ct);
@@ -49,14 +48,14 @@ public static class PrintEndpoints
             }
             var r = await records.PrintAsync(e.Name, req.Id, null, user, ct, req.Template);
             return new { token = Previews.Put(user.Id, r.Pdf), warnings = r.Warnings };
-        }).RequireRateLimiting(RatePolicy);
+        }).Requires(Capability.Modeler).ReadsOnly().Costly("genera un PDF").RequireRateLimiting(RatePolicy);
 
         model.MapGet("/preview/{token}", (string token, HttpContext http) =>
         {
             var pdf = Previews.Get(http.CurrentUser().Id, token) ?? throw new NotFound("La vista previa caducó: vuelve a generarla.");
             PdfHeaders(http, frameable: true);
             return Results.Bytes(pdf, "application/pdf");
-        });
+        }).Requires(Capability.Modeler);
     }
 
     /// <summary>

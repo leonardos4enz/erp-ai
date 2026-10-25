@@ -14,10 +14,13 @@ public static class SecurityChangeEndpoints
     public static void MapSecurityChanges(this IEndpointRouteBuilder app)
     {
         var g = app.MapGroup("/api/admin/security-changes").RequireAuthorization();
-        g.MapGet("/", (string? status, HttpContext http, SecurityApproval gate, CancellationToken ct) => gate.ListAsync(http.CurrentUser(), status, ct));
-        g.MapPost("/{id:int}/approve", Approve);
+        g.MapGet("/", (string? status, HttpContext http, SecurityApproval gate, CancellationToken ct) => gate.ListAsync(http.CurrentUser(), status, ct))
+            .Requires(Capability.UserAdmin, Capability.Superuser);
+        // La aprobación reaplica la operación con su propia regla (quién la revisa, beneficiario, huella).
+        g.MapPost("/{id:int}/approve", Approve).Requires(Capability.UserAdmin, Capability.Superuser).Writes(Effect.Security, Gates.SecurityApproval)
+            .AppliesReviewed("hash");
         g.MapPost("/{id:int}/reject", (int id, ReviewSecurityChangeRequest req, HttpContext http, SecurityApproval gate, CancellationToken ct) =>
-            gate.RejectAsync(id, req, http, ct));
+            gate.RejectAsync(id, req, http, ct)).Requires(Capability.UserAdmin, Capability.Superuser).Writes(Effect.Security, Gates.NoGrant);
     }
 
     private static async Task<SecurityChangeDto> Approve(int id, ReviewSecurityChangeRequest req, HttpContext http, SecurityApproval gate, Db db,

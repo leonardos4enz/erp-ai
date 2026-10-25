@@ -86,7 +86,7 @@ function ModuleDialog({ module: m, mode, onClose, onDone }: { module: ModuleInfo
   const toast = useToast();
   const { refresh } = useAuth();
   const upgrade = mode === 'upgrade';
-  const { data: preview, loading, error } = useAsync<ModulePreview | undefined>(
+  const { data: preview, loading, error, reload } = useAsync<ModulePreview | undefined>(
     () => (m ? (upgrade ? adminApi.previewUpgrade(m.id) : adminApi.previewModule(m.id)) : Promise.resolve(undefined)),
     [m?.id, mode],
   );
@@ -98,12 +98,15 @@ function ModuleDialog({ module: m, mode, onClose, onDone }: { module: ModuleInfo
     setBusy(true);
     setApplyError(null);
     try {
-      const r = upgrade ? await adminApi.upgradeModule(m.id) : await adminApi.installModule(m.id);
+      // Spec 029: se aplica lo que se revisó (la huella de la vista previa).
+      const r = upgrade ? await adminApi.upgradeModule(m.id, preview?.baseHash) : await adminApi.installModule(m.id, preview?.baseHash);
       toast.success(upgrade ? 'Módulo actualizado' : 'Módulo instalado', `${m.name} v${m.version} · conjunto de cambios #${r.changeSetId}`);
       await refresh();
       onDone();
     } catch (e) {
       setApplyError(e instanceof ApiError ? e : new ApiError(0, {}));
+      // Revisión exploratoria 029 (F-01): el modelo cambió desde la vista previa; se vuelve a calcular aquí mismo.
+      if (e instanceof ApiError && e.status === 409) reload();
     } finally {
       setBusy(false);
     }

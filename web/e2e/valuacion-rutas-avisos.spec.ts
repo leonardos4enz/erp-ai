@@ -266,11 +266,14 @@ test('H2 CA6: caso 7 de la 022 — con PolizaConCuentas en aviso, confirmar pide
     }
     const rec = (await post('/api/data/Recepcion', { OrdenCompra: oc.id, Factura: 'F-AVISO', Partidas: [{ PartidaOrden: (oc.Partidas as Row[])[0].id }] }, almacen)).body;
     expect(rec.id, JSON.stringify(rec)).toBeTruthy();
-    const asked = await transition('Recepcion', rec, 'confirmar', {}, almacen);
+    // Spec 029 (D-05): la regla lee el costo total de la recepción, que sale del precio de la orden y el almacenista no ve;
+    // a él no se le muestra el aviso (R-023-3, R-029-11). Confirma el gerente de compras, que sí ve el costo.
+    expect((await (await almacen.get(`/api/data/Recepcion/${rec.id}`)).json())).not.toHaveProperty('CostoTotal');
+    const asked = await transition('Recepcion', rec, 'confirmar', {}, gerente);
     expect(asked.status, JSON.stringify(asked.body)).toBe(428);
     const message = asked.body.errors!.Almacen[0];
     expect(message).toMatch(/cuenta de inventario/);
-    const ok = await transition('Recepcion', rec, 'confirmar', { acceptWarnings: [message] }, almacen);
+    const ok = await transition('Recepcion', rec, 'confirmar', { acceptWarnings: [message] }, gerente);
     expect(ok.status, JSON.stringify(ok.body)).toBe(200);
     expect(ok.body).toMatchObject({ Estado: 'Confirmada', PolizaPendiente: true });
     expect(ok.body._warnings).toEqual({ Almacen: [message] }); // el aviso sigue a la vista en el registro

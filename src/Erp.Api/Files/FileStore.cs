@@ -64,6 +64,17 @@ public static class FileStore
         return row;
     }
 
+    /// <summary>
+    /// Spec 029 (H5 CA2): megapíxeles que un PDF decodificaría: las imágenes de plantilla con esas claves y, si se usa, el
+    /// logo de la empresa. Sale de las dimensiones guardadas al validar, sin leer el contenido.
+    /// </summary>
+    public static async Task<long> PixelsAsync(DbConnection cn, IReadOnlyCollection<string> keys, int? logoCompanyId, CancellationToken ct) =>
+        await cn.ExecuteScalarAsync<long?>(new CommandDefinition("""
+            SELECT SUM(CAST(f.Width AS bigint) * f.Height) FROM meta.[File] f
+             WHERE f.IsArchived = 0 AND ((f.Purpose = @purpose AND f.FileKey IN @keys)
+                OR f.Id = (SELECT c.LogoFileId FROM meta.Company c WHERE c.Id = @logoCompanyId))
+            """, new { purpose = FilePurposes.Image, keys = keys.Count == 0 ? [""] : keys.ToArray(), logoCompanyId }, cancellationToken: ct)) ?? 0;
+
     /// <summary>Contenido de las imágenes de plantilla vigentes con esas claves (para un PDF).</summary>
     public static async Task<IReadOnlyDictionary<string, byte[]>> ImagesByKeyAsync(DbConnection cn, IReadOnlyCollection<string> keys, CancellationToken ct)
     {

@@ -18,18 +18,17 @@ public static class FileEndpoints
 
     public static void MapFiles(this IEndpointRouteBuilder app)
     {
-        app.MapGet("/api/files/{id:int}", Serve).RequireAuthorization();
+        // Spec 029 (H1 CA5): solo las pantallas de Imágenes y Empresas las muestran; el PDF las incrusta en el servidor.
+        app.MapGet("/api/files/{id:int}", Serve).Requires(Capability.Modeler);
 
         var g = app.MapGroup("/api/admin/images").RequireAuthorization();
         g.MapGet("/", async (HttpContext http, Db db) =>
         {
-            RequireModeler(http);
             await using var cn = await db.OpenAsync();
             return (await FileStore.ImagesAsync(cn)).Select(ToDto);
-        });
+        }).Requires(Capability.Modeler);
         g.MapPut("/{key}", async (string key, HttpContext http, Db db, CancellationToken ct) =>
         {
-            RequireModeler(http);
             if (!Identifiers.IsValid(key, out var err))
                 throw new ValidationFailed(new Dictionary<string, string[]> { ["key"] = [err ?? "Clave no válida."] });
             var data = await ReadBodyAsync(http, ct);
@@ -43,10 +42,9 @@ public static class FileEndpoints
                 before: previous is null ? null : Summary(previous), after: Summary(saved));
             await tx.CommitAsync(ct);
             return ToDto(saved);
-        });
+        }).Requires(Capability.Modeler).Writes(Effect.Config);
         g.MapDelete("/{key}", async (string key, HttpContext http, Db db, CancellationToken ct) =>
         {
-            RequireModeler(http);
             await using var cn = await db.OpenAsync(ct);
             await using var tx = await cn.BeginTransactionAsync(ct);
             var previous = (await FileStore.ImagesAsync(cn, tx)).FirstOrDefault(f => string.Equals(f.FileKey, key, StringComparison.OrdinalIgnoreCase))
@@ -55,12 +53,7 @@ public static class FileEndpoints
             await Audit.WriteAsync(cn, tx, http, AuditActions.FileChange, "Imagen", previous.FileKey, before: Summary(previous));
             await tx.CommitAsync(ct);
             return Results.NoContent();
-        });
-    }
-
-    private static void RequireModeler(HttpContext http)
-    {
-        if (!http.CurrentUser().CanManageModel) throw new Forbidden();
+        }).Requires(Capability.Modeler).Writes(Effect.Config);
     }
 
     internal static ImageDto ToDto(StoredFile f) =>

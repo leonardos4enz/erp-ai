@@ -22,25 +22,24 @@ public static partial class AdminEndpoints
 
     private static void MapOrg(RouteGroupBuilder g)
     {
-        g.MapGet("/units", async (HttpContext http, Db db) =>
+        g.MapGet("/units", async (Db db) =>
         {
-            RequireUserAdmin(http);
             await using var cn = await db.OpenAsync();
             return await LoadUnitsAsync(cn, null);
-        });
-        g.MapPost("/units", CreateUnit);
-        g.MapPut("/units/{id:int}", (int id, MoveUnitRequest req, HttpContext http, Db db, SecurityApproval gate) => MoveUnit(id, req, http, db, gate, null));
+        }).Requires(Capability.UserAdmin);
+        g.MapPost("/units", CreateUnit).Requires(Capability.UserAdmin).Writes(Effect.Security, Gates.NoGrant);
+        g.MapPut("/units/{id:int}", (int id, MoveUnitRequest req, HttpContext http, Db db, SecurityApproval gate) => MoveUnit(id, req, http, db, gate, null))
+            .Requires(Capability.UserAdmin).Writes(Effect.Security, Gates.SecurityApproval);
 
-        g.MapGet("/teams", async (HttpContext http, Db db) =>
+        g.MapGet("/teams", async (Db db) =>
         {
-            RequireUserAdmin(http);
             await using var cn = await db.OpenAsync();
             return await LoadTeamsAsync(cn, null);
-        });
+        }).Requires(Capability.UserAdmin);
         g.MapPost("/teams", (TeamRequest req, HttpContext http, Db db, PasswordService passwords, SecurityApproval gate) =>
-            SaveTeam(null, req, http, db, passwords, gate, null));
+            SaveTeam(null, req, http, db, passwords, gate, null)).Requires(Capability.UserAdmin).Writes(Effect.Security, Gates.SecurityApproval);
         g.MapPut("/teams/{id:int}", (int id, TeamRequest req, HttpContext http, Db db, PasswordService passwords, SecurityApproval gate) =>
-            SaveTeam(id, req, http, db, passwords, gate, null));
+            SaveTeam(id, req, http, db, passwords, gate, null)).Requires(Capability.UserAdmin).Writes(Effect.Security, Gates.SecurityApproval);
     }
 
     // ---------------- Unidades ----------------
@@ -77,7 +76,6 @@ public static partial class AdminEndpoints
 
     private static async Task<IResult> CreateUnit(CreateUnitRequest req, HttpContext http, Db db)
     {
-        RequireUserAdmin(http);
         var errors = new Dictionary<string, string[]>();
         var name = NormalizeUnit(req.Name, errors);
         if (name is null) errors["name"] = ["Escribe el nombre de la unidad."];

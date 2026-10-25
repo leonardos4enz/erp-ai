@@ -32,6 +32,8 @@ public sealed partial class RecordService
         }
     }
 
+    internal const string HiddenWarnings = "La acción no se puede ejecutar: el registro incumple una regla del catálogo. Pide ayuda a quien administra el proceso.";
+
     internal static Dictionary<string, string[]> WarningMap(IEnumerable<RuleWarning> warnings) =>
         warnings.GroupBy(w => w.Key, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(g => g.Key, g => g.Select(w => w.Message).Distinct().ToArray(), StringComparer.OrdinalIgnoreCase);
@@ -53,8 +55,13 @@ public sealed partial class RecordService
         if (warnings.Count == 0) return;
         switch (t.OnWarning ?? WarningPolicies.Confirm)
         {
-            case WarningPolicies.Block:
+            // Spec 029 (H4 CA3, auditoría 4 D-08): bloquea con todos, pero solo dice los que el usuario puede ver.
+            case WarningPolicies.Block when accepted is null:
                 throw new ValidationFailed(WarningMap(warnings));
+            case WarningPolicies.Block:
+                var shown = VisibleWarnings(warnings, model, user);
+                if (shown.Count > 0) throw new ValidationFailed(WarningMap(shown));
+                throw new AppException(StatusCodes.Status400BadRequest, HiddenWarnings);
             case WarningPolicies.Confirm when accepted is not null:
                 var visible = VisibleWarnings(warnings, model, user);
                 if (visible.Any(w => !accepted.Contains(w.Message)))

@@ -18,7 +18,7 @@ y tres se volvieron defectos reales (005 → 012-3, 020 → 022 F-04, 018 → 02
   se anota la spec y la prueba; la fila no se borra.
 
 
-**Resumen (2026-10-25):** 124 riesgos, 104 abiertos; 29 medios o altos sin prueba aceptados hace más de 5 specs, marcados para la próxima auditoría: R-001-1, R-006-1, R-006-4, R-007-1, R-007-2, R-008-2, R-008-4, R-009-1, R-009-3, R-010-3, R-011-1, R-011-2, R-011-3, R-012-2, R-012-3, R-014-1, R-014-2, R-015-3, R-016-2, R-016-3, R-016-4, R-018-3, R-018-4, R-021-4, R-021-5, R-021-6, R-021-7, R-022-1, R-022-3.
+**Resumen (2026-10-25, al cerrar la 029):** 138 riesgos, 116 abiertos. La 029 cerró R-006-1 y R-023-5 (auditoría 4 D-05 y D-01), dejó prueba a R-023-3 y R-024-3 y registró R-029-1…14. Siguen 28 medios o altos sin prueba aceptados hace más de 5 specs, marcados para la próxima auditoría: R-001-1, R-006-4, R-007-1, R-007-2, R-008-2, R-008-4, R-009-1, R-009-3, R-010-3, R-011-1, R-011-2, R-011-3, R-012-2, R-012-3, R-014-1, R-014-2, R-015-3, R-016-2, R-016-3, R-016-4, R-018-3, R-018-4, R-021-4, R-021-5, R-021-6, R-021-7, R-022-1, R-022-3.
 
 Migración (028): filas tomadas de las secciones de riesgos y pendientes de cada `verify.md`, de las «Decisiones y diferidos» de la 012, de los hallazgos que quedaron pendientes al cerrar (004 F-25, 005 F-04, 006 F-03) y, para la 027 (sin sección de riesgos), del roadmap. Cada cierre se comprobó en la spec posterior. Quedaron fuera las notas de migración de `Bootstrap` (016–018) y el estado de la base `ErpAi` del dueño (022). **Dudas** para la primera auditoría: severidades «Alta (est.)»; R-023-5 frente al cierre de R-006-2; R-009-3 (si un paquete normal puede archivar un catálogo); R-006-4 (si `PUT /admin/users/{id}` sigue quitando la unidad tras el árbol de la 015); R-006-5 (cierre tomado del roadmap, sin prueba localizada); R-012-3/5/6 son decisiones de la 012 registradas por su efecto en la seguridad.
 
@@ -56,7 +56,7 @@ Migración (028): filas tomadas de las secciones de riesgos y pendientes de cada
 
 | ID | Riesgo | Severidad | Decisión | Prueba | Estado | Revisado |
 |---|---|---|---|---|---|---|
-| R-006-1 | Una fórmula visible que depende de un campo oculto revela el dato derivado; depende de que el modelador oculte también los derivados. | Alta (est.) | Aceptado | sin prueba | Abierto · **auditoría** | 2026-10-25 |
+| R-006-1 | Una fórmula visible que depende de un campo oculto revela el dato derivado; depende de que el modelador oculte también los derivados. | Alta (est.) | Corregido en 029 | `Hardening3Tests › Una_formula_que_lee_un_campo_oculto_se_oculta`, `canario › H3 CA2` | Cerrado en 029 (auditoría 4 D-05: `DerivedAccess`, también en orden, filtros y reportes; el *Costo* de la recepción en Compras) | 2026-10-25 |
 | R-006-2 | La etiqueta `__label` de una referencia muestra el registro referido aunque el usuario no pueda abrirlo. | Alta (est.) | Aceptado | `endurecimiento › H6 CA1 · CA2` | Cerrado en 012 (fuera de alcance → «(sin acceso)») | 2026-10-25 |
 | R-006-3 | La auditoría muestra valores completos a quien tiene ese permiso. | Baja (est.) | Aceptado | sin prueba | Abierto | 2026-10-25 |
 | R-006-4 | `PUT /admin/users/{id}` sin `unit` borra la unidad (igual que `roleIds` vacío quita roles). | Media (est.) | Aceptado | sin prueba | Abierto · **auditoría** | 2026-10-25 |
@@ -79,7 +79,7 @@ Migración (028): filas tomadas de las secciones de riesgos y pendientes de cada
 | R-008-1 | Webhooks «al menos una vez» y sin orden: el receptor debe deduplicar por `X-ERP-Delivery`. | Baja (est.) | Aceptado | sin prueba | Abierto | 2026-10-25 |
 | R-008-2 | URL y secreto de webhooks dependen de las llaves de Data Protection; si se pierden, las entregas fallan hasta reconfigurar. | Media (est.) | Aceptado | sin prueba | Abierto · **auditoría** | 2026-10-25 |
 | R-008-3 | La carga del webhook es una foto del evento; un cambio posterior llega como otro evento. | Baja (est.) | Aceptado | sin prueba | Abierto | 2026-10-25 |
-| R-008-4 | La importación interpreta fechas-hora sin zona como UTC y números en formato es-MX. | Media (est.) | Aceptado | sin prueba | Abierto · **auditoría** | 2026-10-25 |
+| R-008-4 | La importación interpreta fechas-hora sin zona como UTC y números en formato es-MX. | Media (est.) | Diferido (ver R-029-5) | sin prueba | Abierto · **auditoría** (auditoría 4 D-07: «1,5» se toma como 15) | 2026-10-25 |
 | R-008-5 | La importación solo da de alta: no actualiza registros ni importa partidas. | Baja (est.) | Por decidir | sin prueba | Abierto | 2026-10-25 |
 
 ## 009
@@ -158,7 +158,7 @@ Migración (028): filas tomadas de las secciones de riesgos y pendientes de cada
 |---|---|---|---|---|---|---|
 | R-016-1 | Trabajo asíncrono «al menos una vez»: si tarda más que el lease (5 min) otra instancia puede repetirlo. | Media (est.) | Aceptado | `endurecimiento-2 › H3 CA1`, `H3 CA4` | Cerrado en 021 (éxito en la transacción, dueño y renovación del lease, tope de intentos); resta R-021-3 | 2026-10-25 |
 | R-016-2 | La tarea no recuerda qué procesó: si su `where` sigue cumpliéndose, reprocesa los mismos registros. | Media (est.) | Aceptado | sin prueba | Abierto · **auditoría** | 2026-10-25 |
-| R-016-3 | Un registro que siempre falla ocupa lugar del lote en cada ocurrencia; si todo el lote falla, los demás esperan. | Media (est.) | Aceptado | sin prueba | Abierto · **auditoría** | 2026-10-25 |
+| R-016-3 | Un registro que siempre falla ocupa lugar del lote en cada ocurrencia; si todo el lote falla, los demás esperan. | Media (est.) | Diferido (ver R-029-4) | sin prueba | Abierto · **auditoría** (la auditoría 4 encontró lo contrario también: registros que se saltan para siempre, D-06) | 2026-10-25 |
 | R-016-4 | La hora de las tareas es la local del servidor (en un servidor UTC, «07:00» es 07:00 UTC). | Media (est.) | Por decidir | sin prueba | Abierto · **auditoría** | 2026-10-25 |
 | R-016-5 | Una tarea en catálogo compartido corre con la empresa predeterminada. | Baja (est.) | Aceptado | sin prueba | Abierto | 2026-10-25 |
 
@@ -214,8 +214,8 @@ Migración (028): filas tomadas de las secciones de riesgos y pendientes de cada
 | R-021-2 | Un rol que gana capacidades después de solicitarse un cambio de usuario da al aprobar un mensaje distinto del de la lista. | Baja (est.) | Aceptado | sin prueba | Abierto | 2026-10-25 |
 | R-021-3 | Un trabajo asíncrono de más de 5 min que no puede renovar su lease (base caída) se reintenta completo. | Baja (est.) | Aceptado | sin prueba | Abierto | 2026-10-25 |
 | R-021-4 | Cambiar el calendario de una tarea activa la pausa; el superusuario debe reactivarla. | Media (est.) | Aceptado | sin prueba | Abierto · **auditoría** | 2026-10-25 |
-| R-021-5 | El límite de `/oauth/token` detrás de un proxy necesita `ForwardedHeaders` con los proxies conocidos. | Media (est.) | Por decidir | sin prueba | Abierto · **auditoría** | 2026-10-25 |
-| R-021-6 | El aviso de cambios sin aplicar no salta al navegar dentro de la SPA (requiere *data router*). | Media (est.) | Por decidir | sin prueba | Abierto · **auditoría** | 2026-10-25 |
+| R-021-5 | El límite de `/oauth/token` detrás de un proxy necesita `ForwardedHeaders` con los proxies conocidos. | Media (est.) | Diferido a 030 o spec propia (auditoría 4) | sin prueba | Abierto · **auditoría** | 2026-10-25 |
+| R-021-6 | El aviso de cambios sin aplicar no salta al navegar dentro de la SPA (requiere *data router*). | Media (est.) | Diferido a 030 o spec propia (auditoría 4) | sin prueba | Abierto · **auditoría** | 2026-10-25 |
 | R-021-7 | Los paquetes normales no listan ni piden confirmar los cambios de seguridad (solo las reversiones). | Media (est.) | Por decidir | sin prueba | Abierto · **auditoría** | 2026-10-25 |
 
 ## 022
@@ -235,9 +235,9 @@ Migración (028): filas tomadas de las secciones de riesgos y pendientes de cada
 |---|---|---|---|---|---|---|
 | R-023-1 | No se puede quitar un elemento con `merge`: requiere el reemplazo completo. | Baja (est.) | Por decidir | sin prueba | Abierto | 2026-10-25 |
 | R-023-2 | El dueño de un catálogo extendido debe usar `merge` (convención); la prueba de paquetes solo revisa catálogos ajenos. | Media (est.) | Aceptado | sin prueba | Abierto | 2026-10-25 |
-| R-023-3 | Un aviso cuya regla lee un campo oculto no se muestra ni se pide confirmar a ese usuario. | Baja (est.) | Aceptado | sin prueba | Abierto | 2026-10-25 |
+| R-023-3 | Un aviso cuya regla lee un campo oculto no se muestra ni se pide confirmar a ese usuario. | Baja (est.) | Aceptado | `canario › H4 CA3` | Abierto (029: con `block` tampoco se lista; el mensaje es genérico) | 2026-10-25 |
 | R-023-4 | `block` muestra los avisos como errores sin decir que son avisos. | Baja (est.) | Aceptado | sin prueba | Abierto | 2026-10-25 |
-| R-023-5 | Los saltos 2 y 3 de una ruta leen el registro apuntado sin revisar su alcance por registro (sí la seguridad por campo). | Alta (est.) | Por decidir (auditoría; ¿contradice el cierre de R-006-2?) | sin prueba | Abierto (027 revisa el alcance por salto solo en el PDF) | 2026-10-25 |
+| R-023-5 | Los saltos 2 y 3 de una ruta leen el registro apuntado sin revisar su alcance por registro (sí la seguridad por campo). | Alta | Corregido en 029 (decisión 2) | `canario › H2 CA2`, `› H3 CA1`, `› H3 CA2` | Cerrado en 029 (auditoría 4 D-01: lo vivo revisa cada salto; las fórmulas guardadas que cruzan un catálogo restringido se ocultan) | 2026-10-25 |
 
 ## 024
 
@@ -245,7 +245,7 @@ Migración (028): filas tomadas de las secciones de riesgos y pendientes de cada
 |---|---|---|---|---|---|---|
 | R-024-1 | El último módulo se recuerda en el navegador, no en el servidor. | Baja (est.) | Aceptado | sin prueba | Abierto | 2026-10-25 |
 | R-024-2 | Un error de dedo en `group` crea un módulo implícito nuevo. | Baja (est.) | Aceptado | sin prueba | Abierto | 2026-10-25 |
-| R-024-3 | La búsqueda de folios recorre hasta 30 catálogos por consulta; con muchos más habrá que indexarla. | Baja (est.) | Aceptado | sin prueba | Abierto | 2026-10-25 |
+| R-024-3 | La búsqueda de folios recorre hasta 30 catálogos por consulta; con muchos más habrá que indexarla. | Baja (est.) | Aceptado | `capacidades › H5 CA3` (límite) | Abierto (029, auditoría 4 D-09: 60 por minuto por usuario; sin índice) | 2026-10-25 |
 | R-024-4 | Un tablero que mezcla módulos aparece en todos ellos. | Baja (est.) | Aceptado | sin prueba | Abierto | 2026-10-25 |
 
 ## 025
@@ -281,3 +281,22 @@ Migración (028): filas tomadas de las secciones de riesgos y pendientes de cada
 | R-028-1 | Dos corridas de la suite en la **misma** carpeta no pueden ir a la vez: la segunda se detiene por el candado de la base (antes se borraban la base); solo carpetas distintas corren en paralelo. | Baja | Aceptado | sin prueba | Abierto | 2026-10-25 |
 | R-028-2 | La suite no se puede fragmentar (`--shard`): 13 archivos dependen de otros y las capturas dependen del menú que dejan los demás. | Media | Diferido a 030 | sin prueba (dependencias listadas en `verificacion.md`) | Abierto | 2026-10-25 |
 | R-028-3 | Con `E2E_INDEPENDENT=1`, tras una falla Playwright vuelve a correr `beforeAll`; 20 de los 23 archivos seriales no se adaptaron para tolerar datos que ya existen y pueden fallar en cascada (solo al verificar contra el código anterior). | Baja | Aceptado | sin prueba | Abierto | 2026-10-25 |
+
+## 029
+
+| ID | Riesgo | Severidad | Decisión | Prueba | Estado | Revisado |
+|---|---|---|---|---|---|---|
+| R-029-1 | Lo relacionado (`Ref.Campo`, plantillas de PDF, `UNITCOST`) de un registro al alcance se lee aunque el rol no pueda abrir ese catálogo (`RelatedLoader.Visible` no exige `Access(e).Read`, como `__label`); la seguridad por campo sí se revisa en cada salto. | Media | Aceptado (decisión 3 de la 029; auditoría 4, especulativo) | sin prueba | Abierto | 2026-10-25 |
+| R-029-2 | Un valor por defecto que lee un campo oculto escribe el dato en un campo capturable que el usuario ve. | Media | Aceptado (decisión 5: lo decide el modelador) | sin prueba | Abierto | 2026-10-25 |
+| R-029-3 | Las reglas de error y las condiciones de transición se evalúan con la autoridad del motor: su mensaje fijo o «permitida / no permitida» puede revelar un bit de un dato oculto o fuera de alcance. | Media | Aceptado (decisión 6) | sin prueba | Abierto | 2026-10-25 |
+| R-029-4 | Auditoría 4 D-06: una tarea programada se salta para siempre un registro que falla (`RecordService.Background.cs`). | Media | Diferido a 030 o spec propia | sin prueba | Abierto | 2026-10-25 |
+| R-029-5 | Auditoría 4 D-07: la importación toma «1,5» como 15 y las fechas con desfase mal (`RecordService.Import.cs`). | Media | Diferido a spec propia | sin prueba | Abierto | 2026-10-25 |
+| R-029-6 | En Inventario y Costeo los costos que copian las automatizaciones (`MovimientoInventario.CostoUnitario`, valor de `Existencia`, capas) salen del precio de la orden pero son campos guardados, no fórmulas: el almacenista los ve. | Media | Por decidir (seguridad por campo del módulo, decisión del dueño) | sin prueba | Abierto | 2026-10-25 |
+| R-029-7 | El tope de 12 MP de imágenes por PDF (422) solo tiene revisión de código: probarlo pide subir tres imágenes de 6 MP en la suite. | Baja | Aceptado | sin prueba | Abierto | 2026-10-25 |
+| R-029-8 | Instalar o actualizar un módulo (superusuario, paquetes del servidor) y un plan con `setSecurity` cambian roles, permisos y seguridad del catálogo sin la aprobación de seguridad de la 015; su compuerta es el cambio directo. | Media | Por decidir (ver R-021-7) | `RouteInventoryTests › Cambiar_el_modelo_o_la_seguridad_pasa_por_su_compuerta` (declara la compuerta, no la aprobación) | Abierto | 2026-10-25 |
+| R-029-9 | Una fórmula guardada que recorre un catálogo con alcance restringido se oculta entera a ese usuario, aunque el registro de esa fila sí lo vea (más estricto que Salesforce); para mostrarlo hay que copiarlo con una automatización. | Baja | Aceptado (decisión 2) | `Hardening3Tests › Una_formula_que_recorre_un_catalogo_con_alcance_restringido…` | Abierto | 2026-10-25 |
+| R-029-10 | `GET /api/users/lookup` lista usuarios y equipos (nombre) a cualquier sesión: los campos de tipo usuario lo necesitan. | Baja | Aceptado | `rutas.md` (capacidad «sesión») | Abierto | 2026-10-25 |
+| R-029-11 | Un aviso cuya regla lee una fórmula que el usuario ya no ve (029) deja de mostrársele y de pedirle confirmar: con `PolizaConCuentas` en aviso, el almacenista confirma la recepción sin aviso (lee `CostoTotal`, que sale del precio). La regla de error (lo predeterminado) sigue bloqueando a todos. | Media | Aceptado (R-023-3: mostrarlo revelaría el dato) | `valuacion-rutas-avisos › H2 CA6` (confirma quien ve el costo) | Abierto | 2026-10-25 |
+| R-029-12 | Revisión adversarial F-A: la huella del módulo se comparaba sin el candado del modelo; corregido (`PlanService.LockModelAsync` antes de comparar), pero la carrera entre un plan y la instalación no tiene prueba: necesita dos conexiones y una pausa entre comparar y aplicar. | Media | Diferido a 030 (integración con `Concurrently`) | sin prueba (revisión de código) | Abierto | 2026-10-25 |
+| R-029-13 | Revisión adversarial F-D: si un camino de lectura usara un modelo sin anotar (copia con `with` de un campo fórmula), `DerivedAccess` no ocultaría nada; hoy todos leen el de `MetadataStore.LoadAsync`. | Baja | Aceptado | `Hardening3Tests › Sin_anotar_el_modelo_las_reglas_son_las_de_antes` (documenta el comportamiento) | Abierto | 2026-10-25 |
+| R-029-14 | Revisión adversarial F-E: un render de PDF que se cuelga retiene su lugar del semáforo sin plazo; con 4 colgados no hay PDF hasta reiniciar, y no hay métrica de lugares ocupados. | Baja | Aceptado (mejor que rebasar el límite, D-02) | `Hardening3Tests › El_lugar_del_semaforo…` | Abierto | 2026-10-25 |

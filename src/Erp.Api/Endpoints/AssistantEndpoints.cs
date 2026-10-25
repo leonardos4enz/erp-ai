@@ -1,3 +1,4 @@
+using Erp.Api.Infrastructure;
 using Erp.Api.Assistant;
 using Erp.Api.Security;
 
@@ -9,14 +10,15 @@ public static class AssistantEndpoints
     public static void MapAssistant(this IEndpointRouteBuilder app)
     {
         var g = app.MapGroup("/api/assistant").RequireAuthorization();
-        g.MapGet("/", (HttpContext http, AssistantService svc, CancellationToken ct) => svc.StatusAsync(http.CurrentUser(), ct));
-        g.MapPut("/key", (AssistantKeyBody body, HttpContext http, AssistantService svc, CancellationToken ct) => svc.SetKeyAsync(body, http, ct));
-        g.MapDelete("/key", (HttpContext http, AssistantService svc, CancellationToken ct) => svc.ClearKeyAsync(http, ct));
-        g.MapGet("/conversations", (HttpContext http, AssistantService svc, CancellationToken ct) => svc.ConversationsAsync(http.CurrentUser(), ct));
+        g.MapGet("/", (HttpContext http, AssistantService svc, CancellationToken ct) => svc.StatusAsync(http.CurrentUser(), ct)).Requires(Capability.Modeler);
+        g.MapPut("/key", (AssistantKeyBody body, HttpContext http, AssistantService svc, CancellationToken ct) => svc.SetKeyAsync(body, http, ct)).Requires(Capability.Superuser).Writes(Effect.Config);
+        g.MapDelete("/key", (HttpContext http, AssistantService svc, CancellationToken ct) => svc.ClearKeyAsync(http, ct)).Requires(Capability.Superuser).Writes(Effect.Config);
+        g.MapGet("/conversations", (HttpContext http, AssistantService svc, CancellationToken ct) => svc.ConversationsAsync(http.CurrentUser(), ct)).Requires(Capability.Modeler);
         g.MapGet("/conversations/{id:int}", (int id, HttpContext http, AssistantService svc, CancellationToken ct) =>
-            svc.ConversationAsync(id, http.CurrentUser(), ct));
+            svc.ConversationAsync(id, http.CurrentUser(), ct)).Requires(Capability.Modeler);
         g.MapPost("/requests", (AssistantRequestBody body, HttpContext http, AssistantService svc, CancellationToken ct) =>
-            svc.RequestAsync(body, http, ct));
+            svc.RequestAsync(body, http, ct)).Requires(Capability.Modeler).Writes(Effect.Session)
+            .Costly("llama al modelo de lenguaje", ownLimit: "Assistant:RequestsPerHour por usuario");
         g.MapPost("/requests/{id:int}/apply", async (int id, HttpContext http, AssistantService svc, CancellationToken ct) =>
         {
             // Spec 012: la huella viaja en el cuerpo, pero el cuerpo es opcional para responder 400/409 con su motivo (como
@@ -24,8 +26,8 @@ public static class AssistantEndpoints
             var body = http.Request.HasJsonContentType() ? await http.Request.ReadFromJsonAsync<AssistantApplyBody>(ct) : null;
             var (changeSetId, proposal) = await svc.ApplyAsync(id, body, http, ct);
             return new { changeSetId, proposal };
-        });
+        }).Requires(Capability.Modeler).Writes(Effect.Model, Gates.DirectChange).AppliesReviewed("reviewHash");
         g.MapPost("/requests/{id:int}/discard", (int id, HttpContext http, AssistantService svc, CancellationToken ct) =>
-            svc.DiscardAsync(id, http, ct));
+            svc.DiscardAsync(id, http, ct)).Requires(Capability.Modeler).Writes(Effect.Session);
     }
 }
