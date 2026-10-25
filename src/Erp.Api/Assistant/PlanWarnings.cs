@@ -55,23 +55,28 @@ public static class PlanWarnings
                         list.Add($"Las automatizaciones de «{Label(a.Entity)}» modifican o crean otros registros al ocurrir un evento.");
                     break;
                 case SetSchedulesOp s:
-                    Removed(s.Entity, Current(s.Entity)?.Schedules, s.Schedules, x => x.Name, "tareas programadas existentes");
+                    if (!s.Merge) Removed(s.Entity, Current(s.Entity)?.Schedules, s.Schedules, x => x.Name, "tareas programadas existentes");
                     if (s.Schedules.Count > 0)
                         list.Add($"Las tareas programadas de «{Label(s.Entity)}» modifican registros solas, con su rol de servicio, cuando el administrador las activa.");
                     break;
                 case SetWebhooksOp w:
-                    Removed(w.Entity, Current(w.Entity)?.Webhooks, w.Webhooks, x => x.Name, "webhooks existentes");
+                    if (!w.Merge) Removed(w.Entity, Current(w.Entity)?.Webhooks, w.Webhooks, x => x.Name, "webhooks existentes");
                     if (w.Webhooks.Count > 0)
                         list.Add($"Los webhooks de «{Label(w.Entity)}» envían datos a sistemas externos (el destino se configura en Integraciones).");
                     break;
                 case SetRulesOp r:
-                    Removed(r.Entity, Current(r.Entity)?.Rules, r.Rules, x => x.Name, "reglas existentes");
+                    // Regresión (spec 023): con merge las reglas que el plan no nombra se conservan.
+                    if (!r.Merge) Removed(r.Entity, Current(r.Entity)?.Rules, r.Rules, x => x.Name, "reglas existentes");
+                    // Spec 023: una regla que pasa de error a aviso relaja un control.
+                    foreach (var rule in r.Rules.Where(x => x.IsWarning))
+                        if (Current(r.Entity)?.Rules?.FirstOrDefault(x => string.Equals(x.Name, rule.Name, StringComparison.OrdinalIgnoreCase)) is { IsWarning: false })
+                            list.Add($"La regla «{rule.Name}» de «{Label(r.Entity)}» pasa a aviso: ya no impide guardar ni ejecutar acciones.");
                     break;
                 case SetViewsOp v:
-                    Removed(v.Entity, Current(v.Entity)?.Views, v.Views, x => x.Name, "vistas existentes");
+                    if (!v.Merge) Removed(v.Entity, Current(v.Entity)?.Views, v.Views, x => x.Name, "vistas existentes");
                     break;
                 case SetReportsOp r:
-                    Removed(r.Entity, Current(r.Entity)?.Reports, r.Reports, x => x.Name, "reportes existentes");
+                    if (!r.Merge) Removed(r.Entity, Current(r.Entity)?.Reports, r.Reports, x => x.Name, "reportes existentes");
                     break;
                 case SetLayoutOp l when l.Layout is null && Current(l.Entity)?.Layout is not null:
                     list.Add($"Quita el layout de «{Label(l.Entity)}»: el formulario vuelve a mostrar los campos en orden.");

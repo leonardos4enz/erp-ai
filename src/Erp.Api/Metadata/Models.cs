@@ -115,6 +115,9 @@ public sealed record WorkflowTransition
     public string? Variant { get; init; }
     /// <summary>Spec 005: solo la ejecuta una automatización; no se ofrece ni se acepta de personas.</summary>
     public bool System { get; init; }
+    /// <summary>Spec 023: qué hacer si al ejecutarla quedan avisos (<see cref="WarningPolicies"/>). Omitido = <c>confirm</c>.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? OnWarning { get; init; }
 }
 
 public sealed record Workflow
@@ -135,6 +138,32 @@ public sealed record BusinessRule
     public required string Assert { get; init; }
     public string? When { get; init; }
     public string? Field { get; init; }
+    /// <summary>Spec 023: <c>error</c> (omitido) bloquea; <c>warning</c> avisa sin impedir guardar (<see cref="RuleSeverities"/>).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Severity { get; init; }
+
+    [JsonIgnore]
+    public bool IsWarning => Severity == RuleSeverities.Warning;
+}
+
+/// <summary>Spec 023: gravedad de una regla de negocio.</summary>
+public static class RuleSeverities
+{
+    public const string Error = "error";
+    public const string Warning = "warning";
+    public static readonly IReadOnlySet<string> All = new HashSet<string> { Error, Warning };
+}
+
+/// <summary>Spec 023: qué hace una transición si al ejecutarla quedan avisos.</summary>
+public static class WarningPolicies
+{
+    /// <summary>Una persona los confirma explícitamente (una automatización sigue).</summary>
+    public const string Confirm = "confirm";
+    /// <summary>No se ejecuta, como con un error.</summary>
+    public const string Block = "block";
+    /// <summary>Se ejecuta sin preguntar.</summary>
+    public const string Allow = "allow";
+    public static readonly IReadOnlySet<string> All = new HashSet<string> { Confirm, Block, Allow };
 }
 
 // ---------- Spec 005: automatizaciones entre registros ----------
@@ -652,18 +681,24 @@ public sealed record SetLedgerOp : Operation
     public LedgerDef? Ledger { get; init; }
 }
 
-/// <summary>Spec 016. Reemplaza las tareas programadas del catálogo.</summary>
+/// <summary>Spec 016. Reemplaza las tareas programadas del catálogo; spec 023: con <c>Merge</c> agrega o reemplaza por nombre.</summary>
 public sealed record SetSchedulesOp : Operation
 {
     public required string Entity { get; init; }
     public IReadOnlyList<ScheduleDef> Schedules { get; init; } = [];
+    /// <summary>Spec 023. Se omite en falso: la forma canónica de los paquetes ya firmados (009) no cambia.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool Merge { get; init; }
 }
 
-/// <summary>Spec 008. Reemplaza los webhooks del catálogo.</summary>
+/// <summary>Spec 008. Reemplaza los webhooks del catálogo; spec 023: con <c>Merge</c> agrega o reemplaza por nombre.</summary>
 public sealed record SetWebhooksOp : Operation
 {
     public required string Entity { get; init; }
     public IReadOnlyList<WebhookDef> Webhooks { get; init; } = [];
+    /// <summary>Spec 023. Se omite en falso: la forma canónica de los paquetes ya firmados (009) no cambia.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool Merge { get; init; }
 }
 
 /// <summary>Spec 007. <c>null</c> elimina el layout (formulario derivado del orden de los campos).</summary>
@@ -673,18 +708,24 @@ public sealed record SetLayoutOp : Operation
     public Layout? Layout { get; init; }
 }
 
-/// <summary>Spec 007. Reemplaza las vistas compartidas del catálogo.</summary>
+/// <summary>Spec 007. Reemplaza las vistas compartidas del catálogo; spec 023: con <c>Merge</c> agrega o reemplaza por nombre.</summary>
 public sealed record SetViewsOp : Operation
 {
     public required string Entity { get; init; }
     public IReadOnlyList<ViewDef> Views { get; init; } = [];
+    /// <summary>Spec 023. Se omite en falso: la forma canónica de los paquetes ya firmados (009) no cambia.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool Merge { get; init; }
 }
 
-/// <summary>Spec 007. Reemplaza los reportes del catálogo.</summary>
+/// <summary>Spec 007. Reemplaza los reportes del catálogo; spec 023: con <c>Merge</c> agrega o reemplaza por nombre.</summary>
 public sealed record SetReportsOp : Operation
 {
     public required string Entity { get; init; }
     public IReadOnlyList<ReportDef> Reports { get; init; } = [];
+    /// <summary>Spec 023. Se omite en falso: la forma canónica de los paquetes ya firmados (009) no cambia.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool Merge { get; init; }
 }
 
 /// <summary>Spec 007. Crea o reemplaza un tablero.</summary>

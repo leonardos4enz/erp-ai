@@ -9,6 +9,11 @@ public interface IExprScope
     object? Field(string name);
     /// <summary>Campo de un registro relacionado por un campo referencia, padre o usuario.</summary>
     object? Related(string refField, string field);
+    /// <summary>
+    /// Spec 023: ruta de varios saltos (<c>Recepcion.OrdenCompra.Moneda.Clave</c>): <paramref name="path"/> son los segmentos
+    /// después de <paramref name="refField"/>. Los ámbitos que solo conocen un nivel no leen más.
+    /// </summary>
+    object? RelatedPath(string refField, IReadOnlyList<string> path) => path.Count == 1 ? Related(refField, path[0]) : null;
     IReadOnlyList<IExprScope> Lines(string linesField);
 }
 
@@ -60,7 +65,7 @@ public static partial class ExprEvaluator
     private static object? Eval(Node n, IExprScope s, ExprEnv env) => n switch
     {
         Literal l => l.Value,
-        PathRef p => Normalize(p.Tail is null ? s.Field(p.Head) : s.Related(p.Head, p.Tail)),
+        PathRef p => Normalize(p.IsOwn ? s.Field(p.Head) : s.RelatedPath(p.Head, p.Rest)),
         Unary { Op: "-" } u => -Num(Eval(u.Operand, s, env)),
         Unary { Op: "NOT" } u => Bool(Eval(u.Operand, s, env)) is { } b ? !b : null,
         Binary b => EvalBinary(b, s, env),
@@ -172,7 +177,8 @@ public static partial class ExprEvaluator
             case "SUM":
             {
                 var p = (PathRef)c.Args[0];
-                return s.Lines(p.Head).Sum(line => Num(Normalize(line.Field(p.Tail!))));
+                var field = p.Single ?? throw new ExprException("SUM suma un campo de la partida, p. ej. SUM(Partidas.Importe).");
+                return s.Lines(p.Head).Sum(line => Num(Normalize(line.Field(field))));
             }
             case "COUNT":
             {

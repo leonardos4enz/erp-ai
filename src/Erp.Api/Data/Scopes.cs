@@ -64,6 +64,28 @@ public sealed class RelatedLoader(SqlConnection cn, SqlTransaction? tx, IReadOnl
         return _rows[(entity, id)] = row;
     }
 
+    /// <summary>
+    /// Spec 023: sigue una ruta desde el registro <paramref name="id"/> de <paramref name="entity"/>: cada segmento menos el
+    /// último es una referencia (o el padre, o un usuario como penúltimo) que lleva al siguiente registro, leído por
+    /// <see cref="Row"/> (con caché). Nulo si un salto está vacío, borrado o no es una referencia. Los nombres son de los
+    /// metadatos: el analizador ya validó la ruta; aquí solo se buscan en el modelo.
+    /// </summary>
+    public object? Walk(string entity, long id, IReadOnlyList<string> path)
+    {
+        for (var i = 0; ; i++)
+        {
+            var row = Row(entity, id);
+            if (row is null || !model.TryGetValue(entity, out var e) || e.FindField(path[i]) is not { } f) return null;
+            var value = row.GetValueOrDefault(f.Name);
+            if (i == path.Count - 1) return value;
+            if (value is null) return null;
+            if (f.Type == FieldTypes.User)
+                return i == path.Count - 2 ? User(Convert.ToInt32(value))?.GetValueOrDefault(path[i + 1]) : null;
+            if (f.Type is not (FieldTypes.Reference or FieldTypes.Parent) || f.ReferenceEntity is null) return null;
+            (entity, id) = (f.ReferenceEntity, Convert.ToInt64(value));
+        }
+    }
+
     /// <summary>Spec 006: ¿el registro está dentro del alcance de lectura del usuario?</summary>
     public bool Visible(string entity, long id, Security.UserContext user)
     {
@@ -162,6 +184,18 @@ public sealed class DocScope(EntityDef entity, Values values, RelatedLoader load
         var id = Convert.ToInt64(raw);
         var row = f.Type == FieldTypes.User ? loader.User((int)id) : loader.Row(f.ReferenceEntity!, id);
         return row?.GetValueOrDefault(field);
+    }
+
+    /// <summary>Spec 023: ruta de varios saltos; el primero puede ser el documento en memoria (desde una partida).</summary>
+    public object? RelatedPath(string refField, IReadOnlyList<string> path)
+    {
+        if (path.Count == 1) return Related(refField, path[0]);
+        var f = entity.FindField(refField);
+        if (f is null) return null;
+        if (f.Type == FieldTypes.Parent && parent is not null) return parent.RelatedPath(path[0], path.Skip(1).ToList());
+        var raw = values.GetValueOrDefault(f.Name);
+        return raw is null || f.Type is not (FieldTypes.Reference or FieldTypes.Parent) ? null
+            : loader.Walk(f.ReferenceEntity!, Convert.ToInt64(raw), path);
     }
 
     public IReadOnlyList<IExprScope> Lines(string linesField) =>

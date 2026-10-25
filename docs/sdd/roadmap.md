@@ -28,6 +28,9 @@ en orden, no en paralelo: casi todas tocan el núcleo del motor (`PlanCompiler`,
 | 020 Contabilidad y costeo | Implementado ([spec](specs/020-contabilidad-costeo/spec.md)) |
 | 021 Endurecimiento 2 | Implementado ([spec](specs/021-endurecimiento-2/spec.md)) |
 | 022 Costeo 2: políticas de valuación | Implementado ([spec](specs/022-costeo-2/spec.md)) |
+| 023 Capacidades del motor (merge, avisos, rutas) | Implementado ([spec](specs/023-capacidades-motor/spec.md)) |
+| 024 Módulo de Ventas | Planeado |
+| 025 CFDI 4.0 con PAC | Planeado |
 
 ## Diagnóstico
 | Brecha señalada | Situación actual | Spec |
@@ -261,9 +264,33 @@ reglas de negocio** (constitución I.1), configurables por metadatos con valores
 - **Corrección posterior:** Inventario 1.6.1 (sin tipo de cambio ni respaldo el costo queda vacío, no en cero: en expresiones
   `ROUND` de un vacío da 0) y foco y anuncio del error en el diálogo de confirmación de una acción (ver `verify.md`, F-03/F-04).
 - **Pendiente:** decidir si el motor debe propagar el vacío en la aritmética y en `ROUND` (hoy vale 0: cada fórmula se
-  protege con `IF(ISBLANK(...))`); reglas de advertencia (avisar sin bloquear); generar la póliza de una recepción pendiente cuando el almacén
+  protege con `IF(ISBLANK(...))`); ~~reglas de advertencia (avisar sin bloquear)~~ (resuelto en la 023); generar la póliza de una recepción pendiente cuando el almacén
   ya tenga cuentas; dar al rol *Contador* lectura de recepciones (dato del entorno, ADR-0004); póliza de salidas (costo de
   ventas) y revaluación, que siguen de la 020.
+
+### 023 — Capacidades del motor: listas que se fusionan, reglas de aviso y rutas de tres niveles
+Origen: pendientes de la 022 que limitan a los módulos y que Ventas (024) necesitará; plan del dueño (2026-10-24).
+- **Estado:** implementado en la [spec 023](specs/023-capacidades-motor/spec.md). `merge` en las seis listas del catálogo
+  (reglas, automatizaciones, vistas, reportes, webhooks, tareas): agrega o reemplaza por nombre en su lugar; la vista previa
+  ya no dice que quita lo que un `merge` conserva, y un paquete de Entornos que extiende un catálogo que no crea llega al
+  destino y se revierte (antes se descartaba en silencio). Reglas con `severity: warning`: no impiden guardar, se ven en el
+  formulario en vivo, en la API (`_warnings`, `/compute`), en la importación y en la auditoría; cada transición declara
+  `onWarning` (`confirm`: la persona acepta los avisos concretos, 428 en la API; `block`; `allow`). Política 7 de la 022:
+  «avisar» = `PolizaConCuentas` en `warning`. Rutas de hasta tres saltos (`Recepcion.OrdenCompra.Moneda.Clave`) en todas
+  las expresiones y en los filtros traducidos a SQL, con la seguridad por campo revisada en cada salto. Inventario 1.7.0
+  usa la moneda de la orden en el costo de la recepción. Costeo 1.1.0 instala su vista con `merge`.
+- **Pendiente:** quitar un elemento con `merge` (hoy, reemplazo completo); rutas en reportes agrupados y en reglas de
+  acceso; avisos en listados.
+
+## Specs planeadas (después de la 023)
+En este orden, por decisión del dueño (2026-10-24):
+1. **024 — Módulo de Ventas:** clientes, cotización, pedido, salida de almacén con costo de ventas (póliza de salidas),
+   factura y cobranza. Usa `merge` para extender Producto e Inventario, avisos (límite de crédito) y rutas de tres niveles.
+2. **025 — CFDI 4.0 con PAC:** timbrado de la factura de Ventas con un proveedor autorizado, cancelación y complemento de
+   pago; el secreto del PAC fuera del código (constitución II.7).
+3. **Pólizas en moneda extranjera** (pendiente de la 020).
+4. **Revaluación de existencias** (pendiente de la 020).
+5. **Reversa de pólizas con otra póliza** (pendiente de la 020).
 
 ## Decisión: ¿extensión con código?
 La auditoría tiene razón en el costo: cada necesidad nueva exige una capacidad del motor. Se mantiene

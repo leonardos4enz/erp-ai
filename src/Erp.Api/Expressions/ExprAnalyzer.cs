@@ -114,49 +114,62 @@ public static class ExprAnalyzer
             own.Add(lines.Name);
             if (c.Name == "COUNT")
             {
-                if (p.Tail is not null) errors.Add("COUNT se usa con el campo de partidas, p. ej. COUNT(Partidas).");
+                if (!p.IsOwn) errors.Add("COUNT se usa con el campo de partidas, p. ej. COUNT(Partidas).");
                 return;
             }
-            if (p.Tail is null) { errors.Add("SUM necesita el campo a sumar, p. ej. SUM(Partidas.Importe)."); return; }
+            if (p.IsOwn) { errors.Add("SUM necesita el campo a sumar, p. ej. SUM(Partidas.Importe)."); return; }
+            if (p.Single is not { } name) { errors.Add($"SUM suma un campo de la partida (un nivel), p. ej. SUM({p.Head}.Importe); '{p}' no lo es."); return; }
             if (!model.TryGetValue(lines.ChildEntity ?? "", out var child)) return; // se reporta en la validación del campo
-            var f = child.FindField(p.Tail);
-            if (f is null || f.IsArchived) errors.Add($"'{p.Tail}' no existe en {child.Name}.");
-            else if (!IsNumeric(f)) errors.Add($"SUM necesita un campo numérico; '{p.Tail}' no lo es.");
+            var f = child.FindField(name);
+            if (f is null || f.IsArchived) errors.Add($"'{name}' no existe en {child.Name}.");
+            else if (!IsNumeric(f)) errors.Add($"SUM necesita un campo numérico; '{name}' no lo es.");
         }
 
         void CheckPath(PathRef p)
         {
             var f = entity.FindField(p.Head);
             if (f is null || f.IsArchived) { errors.Add($"El campo '{p.Head}' no existe en {entity.Name}."); return; }
-            if (p.Tail is null)
+            if (p.IsOwn)
             {
                 if (f.Type == FieldTypes.Lines) errors.Add($"'{p.Head}' son partidas: usa SUM({p.Head}.Campo) o COUNT({p.Head}).");
                 own.Add(f.Name);
                 return;
             }
-            switch (f.Type)
+            if (f.Type == FieldTypes.Lines) { errors.Add($"Para usar las partidas '{p.Head}' usa SUM o COUNT."); return; }
+            if (f.Type is not (FieldTypes.Reference or FieldTypes.Parent or FieldTypes.User))
             {
-                case FieldTypes.Reference or FieldTypes.Parent:
-                    own.Add(f.Name);
-                    if (model.TryGetValue(f.ReferenceEntity ?? "", out var target))
-                    {
-                        var tf = target.FindField(p.Tail);
-                        if (tf is null || tf.IsArchived || tf.Type == FieldTypes.Lines)
-                            errors.Add($"'{p.Tail}' no existe en {target.Name}.");
-                    }
-                    break;
-                case FieldTypes.User:
-                    own.Add(f.Name);
-                    if (!UserFields.Contains(p.Tail)) errors.Add($"De un usuario solo se puede leer {string.Join(" o ", UserFields)}.");
-                    break;
-                case FieldTypes.Lines:
-                    errors.Add($"Para usar las partidas '{p.Head}' usa SUM o COUNT.");
-                    break;
-                default:
-                    errors.Add($"'{p.Head}' no es una referencia; no se puede usar '{p}'.");
-                    break;
+                errors.Add($"'{p.Head}' no es una referencia; no se puede usar '{p}'.");
+                return;
             }
+            own.Add(f.Name);
+            if (PathError(f, p.Rest, model, p.ToString()) is { } error) errors.Add(error);
         }
+    }
+
+    /// <summary>
+    /// Spec 023: valida los saltos de una ruta desde el campo <paramref name="hop"/> (referencia, padre o usuario) contra los
+    /// metadatos. Intermedios: referencia o padre (o usuario como penúltimo); final: un campo existente que no sean partidas.
+    /// </summary>
+    public static string? PathError(FieldDef hop, IReadOnlyList<string> rest, IReadOnlyDictionary<string, EntityDef> model, string path)
+    {
+        // Un nivel conserva los mensajes de siempre; con más, se agrega la ruta para ubicar el salto.
+        var where = rest.Count > 1 ? $" ('{path}')" : "";
+        for (var i = 0; i < rest.Count; i++)
+        {
+            var last = i == rest.Count - 1;
+            if (hop.Type == FieldTypes.User)
+                return last && UserFields.Contains(rest[i]) ? null
+                    : $"De un usuario solo se puede leer {string.Join(" o ", UserFields)}{where}.";
+            if (!model.TryGetValue(hop.ReferenceEntity ?? "", out var target)) return null; // se reporta en la validación del campo
+            var next = target.FindField(rest[i]);
+            if (next is null || next.IsArchived || next.Type == FieldTypes.Lines)
+                return $"'{rest[i]}' no existe en {target.Name}{where}.";
+            if (last) return null;
+            if (next.Type is not (FieldTypes.Reference or FieldTypes.Parent or FieldTypes.User))
+                return $"'{rest[i]}' de {target.Name} no es una referencia; no se puede seguir la ruta '{path}'.";
+            hop = next;
+        }
+        return null;
     }
 
     public static bool IsNumeric(FieldDef f) =>

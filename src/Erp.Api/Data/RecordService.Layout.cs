@@ -60,14 +60,20 @@ public sealed partial class RecordService
 
     private static bool PathHidden(PathRef p, EntityDef e, IReadOnlyDictionary<string, EntityDef> model, UserContext user)
     {
-        var head = e.FindField(p.Head);
-        if (head is null) return false;
-        if (!FieldAccess.CanSee(e, head, user)) return true;
-        if (p.Tail is null) return false;
-        var targetName = head.Type == FieldTypes.Lines ? head.ChildEntity : head.ReferenceEntity;
-        // Los campos del usuario relacionado (nombre, usuario) no tienen seguridad por campo.
-        if (targetName is null || !model.TryGetValue(targetName, out var target)) return false;
-        return target.FindField(p.Tail) is { } tf && !FieldAccess.CanSee(target, tf, user);
+        var hop = e.FindField(p.Head);
+        if (hop is null) return false;
+        if (!FieldAccess.CanSee(e, hop, user)) return true;
+        // Spec 023: la seguridad por campo se revisa en cada salto de la ruta (campo de referencia y campo final).
+        foreach (var segment in p.Rest)
+        {
+            var targetName = hop.Type == FieldTypes.Lines ? hop.ChildEntity : hop.ReferenceEntity;
+            // Los campos del usuario relacionado (nombre, usuario) no tienen seguridad por campo.
+            if (targetName is null || !model.TryGetValue(targetName, out var target)) return false;
+            hop = target.FindField(segment);
+            if (hop is null) return false;
+            if (!FieldAccess.CanSee(target, hop, user)) return true;
+        }
+        return false;
     }
 
     private static object? LayoutOutput(LayoutState s) =>

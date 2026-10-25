@@ -13,8 +13,9 @@ namespace Erp.Api.Data;
 
 public sealed record ImportColumn(string Column, string? Field, string? Label, string Status, string? Message);
 public sealed record ImportError(int Row, string? Column, string? Field, string Message);
+/// <param name="Warnings">Spec 023: avisos por fila (la fila se importa igual).</param>
 public sealed record ImportResult(bool DryRun, string Format, int Total, int Imported, bool Valid,
-    IReadOnlyList<ImportColumn> Columns, IReadOnlyList<ImportError> Errors, bool TruncatedErrors);
+    IReadOnlyList<ImportColumn> Columns, IReadOnlyList<ImportError> Errors, bool TruncatedErrors, IReadOnlyList<ImportError>? Warnings = null);
 
 /// <summary>
 /// Spec 008 · importación masiva y exportación de listados. Cada fila importada pasa por el mismo alta que la captura
@@ -37,6 +38,7 @@ public sealed partial class RecordService
         var (columns, map) = MapColumns(e, table.Headers, writer, table.Rows);
 
         var errors = new List<ImportError>();
+        var warnings = new List<ImportError>();
         var truncated = false;
         void Add(ImportError err)
         {
@@ -77,10 +79,13 @@ public sealed partial class RecordService
                     try
                     {
                         using var doc = JsonDocument.Parse(body.ToJsonString());
-                        var id = await CreateInTransactionAsync(cn, tx, e, model, doc.RootElement, user, http, ct, folios);
+                        var sink = new WarningSink();
+                        var id = await CreateInTransactionAsync(cn, tx, e, model, doc.RootElement, user, http, ct, folios, sink);
                         if (RecordFilter.For(e, user, write: true) is { } scope && !await MatchesAsync(cn, tx, e, id, scope, ct))
                             throw new Forbidden("Quedaría fuera de los registros que tu rol puede modificar.");
                         imported++;
+                        foreach (var w in VisibleWarnings(sink.Items, model, user).Take(MaxImportErrors - warnings.Count))
+                            warnings.Add(new(rowNumber, colOf.GetValueOrDefault(w.Key), e.FindField(w.Key)?.Name, w.Message));
                     }
                     catch (ValidationFailed vf)
                     {
@@ -109,7 +114,7 @@ public sealed partial class RecordService
             if (!valid || dryRun)
             {
                 await tx.RollbackAsync(ct);
-                var result = new ImportResult(dryRun, table.Format, table.Rows.Count, 0, valid, columns, errors, truncated);
+                var result = new ImportResult(dryRun, table.Format, table.Rows.Count, 0, valid, columns, errors, truncated, warnings);
                 if (!dryRun)
                     throw new ValidationFailed(
                         (structural ? columns.Where(c => c.Status == "error").Select(c => ($"Columna «{c.Column}»", c.Message!)) : [])
@@ -122,7 +127,7 @@ public sealed partial class RecordService
                 after: new { table.Format, rows = table.Rows.Count, imported, columns = columns.Where(c => c.Status == "ok").Select(c => c.Field) });
             await tx.CommitAsync(ct);
             committed = true;
-            return new ImportResult(false, table.Format, table.Rows.Count, imported, true, columns, [], false);
+            return new ImportResult(false, table.Format, table.Rows.Count, imported, true, columns, [], false, warnings);
         }
         finally
         {

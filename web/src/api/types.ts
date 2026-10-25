@@ -250,6 +250,8 @@ export interface ImportResult {
   columns: ImportColumn[];
   errors: { row: number; column?: string | null; field?: string | null; message: string }[];
   truncatedErrors: boolean;
+  /** Spec 023: avisos por fila (la fila se importa igual). */
+  warnings?: { row: number; column?: string | null; field?: string | null; message: string }[];
 }
 
 export interface ReportSummary { entity: string; entityLabel: string; group?: string | null; name: string; label: string; description?: string | null; chart?: string | null }
@@ -296,6 +298,8 @@ export interface WorkflowTransitionDef {
   variant?: 'primary' | 'secondary' | 'danger';
   /** Spec 005: solo la ejecuta una automatización (no aparece como botón). */
   system?: boolean;
+  /** Spec 023: si al ejecutarla quedan avisos: confirmar (omitido), bloquear o continuar. */
+  onWarning?: 'confirm' | 'block' | 'allow';
 }
 
 export interface Workflow { initial: string; states: WorkflowState[]; transitions: WorkflowTransitionDef[] }
@@ -356,7 +360,8 @@ export interface Automation {
   mode?: 'sync' | 'async';
 }
 
-export interface Rule { name: string; message: string; assert: string; when?: string; field?: string }
+/** Spec 023: severity 'warning' = aviso (no impide guardar); omitido = error. */
+export interface Rule { name: string; message: string; assert: string; when?: string; field?: string; severity?: 'error' | 'warning' }
 
 export interface EntityDef {
   /** Spec 021: versión de la definición (solo para modeladores); el editor la manda con su plan. */
@@ -432,10 +437,10 @@ export type Operation =
   | { op: 'setAutomations'; entity: string; automations: Automation[]; merge?: boolean }
   | { op: 'setSecurity'; entity: string; security: SecurityPolicy | null }
   | { op: 'setLayout'; entity: string; layout: Layout | null }
-  | { op: 'setViews'; entity: string; views: ViewDef[] }
-  | { op: 'setReports'; entity: string; reports: ReportDef[] }
-  | { op: 'setWebhooks'; entity: string; webhooks: WebhookDef[] }
-  | { op: 'setSchedules'; entity: string; schedules: ScheduleDef[] }
+  | { op: 'setViews'; entity: string; views: ViewDef[]; merge?: boolean }
+  | { op: 'setReports'; entity: string; reports: ReportDef[]; merge?: boolean }
+  | { op: 'setWebhooks'; entity: string; webhooks: WebhookDef[]; merge?: boolean }
+  | { op: 'setSchedules'; entity: string; schedules: ScheduleDef[]; merge?: boolean }
   | { op: 'setLedger'; entity: string; ledger: LedgerDef | null }
   | { op: 'setDashboard'; dashboard: DashboardDef }
   | { op: 'archiveDashboard'; name: string };

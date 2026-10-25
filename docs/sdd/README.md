@@ -66,3 +66,4 @@ y cada sesión queda como registro de una sola entrega. Al cerrar la spec:
 | 020 | [Contabilidad y costeo (promedio y FIFO)](specs/020-contabilidad-costeo/spec.md) | Implementado |
 | 021 | [Endurecimiento 2](specs/021-endurecimiento-2/spec.md) | Implementado |
 | 022 | [Costeo 2: políticas de valuación configurables](specs/022-costeo-2/spec.md) | Implementado |
+| 023 | [Capacidades del motor: listas que se fusionan, reglas de aviso y rutas de tres niveles](specs/023-capacidades-motor/spec.md) | Implementado |

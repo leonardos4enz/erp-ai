@@ -123,7 +123,7 @@ async function pageAs(browser: Browser, w: keyof typeof users): Promise<Page> {
 
 test('H8: Inventario 1.6.0 y Costeo 1.1.0 están instalados con las políticas por defecto', async () => {
   const mods = (await get('admin', '/api/admin/modules')) as { id: string; installedVersion?: string; version: string }[];
-  expect(mods.find((m) => m.id === 'inventario')).toMatchObject({ installedVersion: '1.6.1' });
+  expect(mods.find((m) => m.id === 'inventario')).toMatchObject({ installedVersion: '1.7.0' }); // 1.7.0: spec 023
   expect(mods.find((m) => m.id === 'costeo')).toMatchObject({ installedVersion: '1.1.0' });
   const valuar = (await model('MovimientoInventario')).automations!.find((a) => a.name === 'Valuar')!.actions[0];
   expect(valuar).toMatchObject({ uncostedEntry: 'fallback', methodChange: 'merge', totalCost: 'CostoTotal', quantityField: 'CantidadCosteada' });

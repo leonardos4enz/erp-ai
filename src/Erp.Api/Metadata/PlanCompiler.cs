@@ -481,6 +481,8 @@ public static partial class PlanCompiler
             if (t.WhenMessage?.Length > 300) ctx.Error($"{where}: el mensaje es demasiado largo.");
             if (t.Icon is not null) ValidateIcon(ctx, t.Icon);
             if (t.Variant is not null && !Variants.Contains(t.Variant)) ctx.Error($"{where}: variante '{t.Variant}' no válida.");
+            if (t.OnWarning is not null && !WarningPolicies.All.Contains(t.OnWarning))
+                ctx.Error($"{where}: «si hay avisos» debe ser confirm, block o allow.");
             foreach (var rf in t.RequiredFields ?? [])
                 if (e.FindField(rf) is not { IsArchived: false } fd || fd.ClientLocked || fd.Type == FieldTypes.Lines)
                     ctx.Error($"{where}: '{rf}' no es un campo capturable de {e.Name}.");
@@ -510,9 +512,7 @@ public static partial class PlanCompiler
         var start = ctx.ErrorCount;
         // Spec 022: con merge se conservan las reglas que el plan no nombra (como setAutomations).
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        IReadOnlyList<BusinessRule> rules = op.Merge
-            ? [.. (e.Rules ?? []).Where(r => !op.Rules.Any(n => string.Equals(n.Name, r.Name, StringComparison.OrdinalIgnoreCase))), .. op.Rules]
-            : op.Rules;
+        var rules = op.Merge ? MergeByName(e.Rules, op.Rules, r => r.Name) : op.Rules;
         if (rules.Count > MaxRules) ctx.Error($"Máximo {MaxRules} reglas por catálogo.");
         foreach (var r in op.Rules)
         {
@@ -522,6 +522,8 @@ public static partial class PlanCompiler
             if (string.IsNullOrWhiteSpace(r.Assert)) ctx.Error($"La regla '{r.Name}' necesita una condición.");
             if (r.Field is not null && e.FindField(r.Field) is not { IsArchived: false })
                 ctx.Error($"La regla '{r.Name}' apunta al campo '{r.Field}', que no existe.");
+            if (r.Severity is not null && !RuleSeverities.All.Contains(r.Severity))
+                ctx.Error($"La regla '{r.Name}': la gravedad '{r.Severity}' no es válida (error o warning).");
         }
         if (ctx.ErrorCount > start) return null;
         return new(e with { Rules = rules }, op.Merge
@@ -561,13 +563,7 @@ public static partial class PlanCompiler
         }
         if (ctx.ErrorCount > start) return null;
 
-        IReadOnlyList<Automation> list = op.Automations;
-        if (op.Merge)
-        {
-            var incoming = op.Automations.ToDictionary(a => a.Name, StringComparer.OrdinalIgnoreCase);
-            var kept = (e.Automations ?? []).Select(a => incoming.Remove(a.Name, out var repl) ? repl : a).ToList();
-            list = [.. kept, .. op.Automations.Where(a => incoming.ContainsKey(a.Name))];
-        }
+        var list = op.Merge ? MergeByName(e.Automations, op.Automations, a => a.Name) : op.Automations;
         if (list.Count > AutomationRules.MaxAutomations) return ctx.Fail($"Máximo {AutomationRules.MaxAutomations} automatizaciones por catálogo.");
         var verb = op.Merge ? "Agregar o actualizar" : "Definir";
         return new(e with { Automations = list.Count == 0 ? null : list },
@@ -591,18 +587,38 @@ public static partial class PlanCompiler
     {
         var e = ctx.Active(op.Entity);
         if (e is null) return null;
-        var text = op.Views.Count == 0 ? $"Quitar las vistas compartidas de '{e.Label}'"
+        var views = op.Merge ? MergeByName(e.Views, op.Views, v => v.Name) : op.Views;
+        var text = op.Merge ? $"Agregar o actualizar {op.Views.Count} vista(s) compartida(s) en '{e.Label}': {string.Join(", ", op.Views.Select(v => v.Label))}"
+            : op.Views.Count == 0 ? $"Quitar las vistas compartidas de '{e.Label}'"
             : $"Definir {op.Views.Count} vista(s) compartida(s) en '{e.Label}': {string.Join(", ", op.Views.Select(v => v.Label))}";
-        return new(e with { Views = op.Views.Count == 0 ? null : op.Views }, text, []);
+        return new(e with { Views = views.Count == 0 ? null : views }, text, []);
     }
 
     private static OpResult? SetReports(Ctx ctx, SetReportsOp op)
     {
         var e = ctx.Active(op.Entity);
         if (e is null) return null;
-        var text = op.Reports.Count == 0 ? $"Quitar los reportes de '{e.Label}'"
+        var reports = op.Merge ? MergeByName(e.Reports, op.Reports, r => r.Name) : op.Reports;
+        var text = op.Merge ? $"Agregar o actualizar {op.Reports.Count} reporte(s) en '{e.Label}': {string.Join(", ", op.Reports.Select(r => r.Label))}"
+            : op.Reports.Count == 0 ? $"Quitar los reportes de '{e.Label}'"
             : $"Definir {op.Reports.Count} reporte(s) en '{e.Label}': {string.Join(", ", op.Reports.Select(r => r.Label))}";
-        return new(e with { Reports = op.Reports.Count == 0 ? null : op.Reports }, text, []);
+        return new(e with { Reports = reports.Count == 0 ? null : reports }, text, []);
+    }
+
+    /// <summary>
+    /// Spec 023: <c>merge</c> de una lista del catálogo. Lo que el plan nombra reemplaza al actual en su lugar (el orden de
+    /// vistas y automatizaciones importa); lo nuevo va al final. Un nombre repetido en el plan se conserva repetido para que
+    /// la validación de la lista lo reporte.
+    /// </summary>
+    internal static IReadOnlyList<T> MergeByName<T>(IReadOnlyList<T>? current, IReadOnlyList<T> incoming, Func<T, string?> name)
+    {
+        var first = new Dictionary<string, T>(StringComparer.OrdinalIgnoreCase);
+        foreach (var item in incoming) first.TryAdd(name(item) ?? "", item);
+        var replaced = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var list = (current ?? []).Select(c => first.TryGetValue(name(c) ?? "", out var r) && replaced.Add(name(c) ?? "") ? r : c).ToList();
+        var placed = new HashSet<string>(replaced, StringComparer.OrdinalIgnoreCase);
+        list.AddRange(incoming.Where(i => !(replaced.Contains(name(i) ?? "") && placed.Remove(name(i) ?? ""))));
+        return list;
     }
 
     // ---------------- Spec 016: tareas programadas ----------------
@@ -612,9 +628,11 @@ public static partial class PlanCompiler
     {
         var e = ctx.Active(op.Entity);
         if (e is null) return null;
-        var text = op.Schedules.Count == 0 ? $"Quitar las tareas programadas de '{e.Label}'"
+        var schedules = op.Merge ? MergeByName(e.Schedules, op.Schedules, s => s.Name) : op.Schedules;
+        var text = op.Merge ? $"Agregar o actualizar {op.Schedules.Count} tarea(s) programada(s) en '{e.Label}': {string.Join(", ", op.Schedules.Select(s => s.Label))}"
+            : op.Schedules.Count == 0 ? $"Quitar las tareas programadas de '{e.Label}'"
             : $"Definir {op.Schedules.Count} tarea(s) programada(s) en '{e.Label}': {string.Join(", ", op.Schedules.Select(s => s.Label))}";
-        return new(e with { Schedules = op.Schedules.Count == 0 ? null : op.Schedules }, text, []);
+        return new(e with { Schedules = schedules.Count == 0 ? null : schedules }, text, []);
     }
 
     // ---------------- Spec 020: libro de partida doble ----------------
@@ -636,10 +654,11 @@ public static partial class PlanCompiler
     {
         var e = ctx.Active(op.Entity);
         if (e is null) return null;
-        var text = op.Webhooks.Count == 0 ? $"Quitar los webhooks de '{e.Label}'"
-            : $"Definir {op.Webhooks.Count} webhook(s) en '{e.Label}': {string.Join(", ", op.Webhooks.Select(w => w.Label))} " +
+        var webhooks = op.Merge ? MergeByName(e.Webhooks, op.Webhooks, w => w.Name) : op.Webhooks;
+        var text = !op.Merge && op.Webhooks.Count == 0 ? $"Quitar los webhooks de '{e.Label}'"
+            : $"{(op.Merge ? "Agregar o actualizar" : "Definir")} {op.Webhooks.Count} webhook(s) en '{e.Label}': {string.Join(", ", op.Webhooks.Select(w => w.Label))} " +
               "(el destino se configura en Integraciones)";
-        return new(e with { Webhooks = op.Webhooks.Count == 0 ? null : op.Webhooks }, text, []);
+        return new(e with { Webhooks = webhooks.Count == 0 ? null : webhooks }, text, []);
     }
 
     private sealed record BoardResult(DashboardDef Def, string Description);

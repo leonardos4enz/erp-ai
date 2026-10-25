@@ -131,7 +131,7 @@ public class CostingPolicyTests
                 model = c.ResultingModel;
             }
         }
-        Assert.Equal(["1.6.1", "1.1.0"], new[] { Package("inventario.json").Version, Package("costeo.json").Version });
+        Assert.Equal(["1.7.0", "1.1.0"], new[] { Package("inventario.json").Version, Package("costeo.json").Version }); // 1.7.0: spec 023
         // 1.6.1: sin fuente de costo la fórmula queda vacía (ROUND de un vacío da 0 y CostoCalculado no lo detendría).
         Assert.StartsWith("IF(ISBLANK(COALESCE(", model["RecepcionPartida"].FindField("CostoUnitario")!.Formula);
 

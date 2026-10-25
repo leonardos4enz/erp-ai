@@ -10,9 +10,19 @@ public sealed class ExprException(string message) : Exception(message);
 
 public abstract record Node;
 public sealed record Literal(object? Value) : Node;
-public sealed record PathRef(string Head, string? Tail) : Node
+/// <summary>
+/// Campo propio (<c>Rest</c> vacío) o ruta por referencias: <c>Recepcion.OrdenCompra.Moneda.Clave</c> (spec 023: hasta
+/// <see cref="ExprParser.MaxPathSegments"/> segmentos).
+/// </summary>
+public sealed record PathRef(string Head, IReadOnlyList<string> Rest) : Node
 {
-    public override string ToString() => Tail is null ? Head : $"{Head}.{Tail}";
+    public PathRef(string head) : this(head, []) { }
+
+    /// <summary>El campo del registro relacionado cuando la ruta es de un solo salto; null si es propio o más larga.</summary>
+    public string? Single => Rest.Count == 1 ? Rest[0] : null;
+    public bool IsOwn => Rest.Count == 0;
+
+    public override string ToString() => Rest.Count == 0 ? Head : $"{Head}.{string.Join(".", Rest)}";
 }
 public sealed record Unary(string Op, Node Operand) : Node;
 public sealed record Binary(string Op, Node Left, Node Right) : Node;
@@ -27,6 +37,8 @@ public static class ExprParser
 {
     public const int MaxLength = 1000;
     public const int MaxDepth = 50;
+    /// <summary>Spec 023: segmentos de una ruta (3 saltos: documento → documento → catálogo → campo).</summary>
+    public const int MaxPathSegments = 4;
 
     private static readonly Dictionary<string, Node> Cache = new();
     private static readonly object CacheLock = new();
@@ -226,13 +238,18 @@ public static class ExprParser
                         Expect(T.RParen, "')'");
                         return new Call(upper, args);
                     }
-                    if (Current.Kind == T.Dot)
+                    var rest = new List<string>();
+                    while (Current.Kind == T.Dot)
                     {
                         Next();
-                        if (Current.Kind != T.Ident) throw new ExprException($"Se esperaba un campo después de '{t.Text}.'.");
-                        return new PathRef(t.Text, Next().Text);
+                        if (Current.Kind != T.Ident)
+                            throw new ExprException($"Se esperaba un campo después de '{string.Join(".", rest.Prepend(t.Text))}.'.");
+                        rest.Add(Next().Text);
+                        // Spec 023: tope fijo de la ruta (cada salto es una lectura por Id).
+                        if (rest.Count >= MaxPathSegments)
+                            throw new ExprException($"Una ruta llega a máximo {MaxPathSegments - 1} niveles, p. ej. Recepcion.OrdenCompra.Moneda.Clave.");
                     }
-                    return new PathRef(t.Text, null);
+                    return new PathRef(t.Text, rest);
                 default:
                     throw new ExprException(AtEnd ? "La expresión está incompleta." : $"Inesperado: '{t.Text}'.");
             }

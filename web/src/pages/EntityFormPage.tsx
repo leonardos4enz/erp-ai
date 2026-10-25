@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type
 import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, RefreshCw, Save, Trash2 } from 'lucide-react';
 import { ApiError, fieldError } from '../api/client';
-import { dataApi } from '../api/endpoints';
+import { dataApi, type Warnings } from '../api/endpoints';
 import type { EntityDef, FieldDef, LayoutState, RecordAccess, RecordTransition, RecordWorkflow, Row } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { ConfirmDialog } from '../components/Dialog';
@@ -10,6 +10,7 @@ import { resolveIcon } from '../components/DynamicIcon';
 import { FieldInput } from '../components/FieldInput';
 import { LinesEditor } from '../components/LinesEditor';
 import { useToast } from '../components/Toast';
+import { WarningsAlert } from '../components/Warnings';
 import { HistoryPanel, stateLabel, TransitionDialog, WorkflowBar } from '../components/Workflow';
 import { Alert, Button, LoadingBlock, PageHeader, Tabs } from '../components/ui';
 import { formSections, formTabs, hasLayoutConditions, placedFields, type FormSection } from '../lib/layout';
@@ -29,7 +30,9 @@ function needsCompute(def: EntityDef, children: Record<string, EntityDef>): bool
   return activeFields(def).some((f) => calc(f) || f.type === 'lines')
     || Object.values(children).some((c) => activeFields(c).some(calc))
     // Spec 007: el servidor dice qué secciones y campos ocultar mientras se captura.
-    || hasLayoutConditions(def);
+    || hasLayoutConditions(def)
+    // Spec 023: y qué avisos de reglas quedan con lo capturado.
+    || [def, ...Object.values(children)].some((d) => d.rules?.some((r) => r.severity === 'warning'));
 }
 
 /** Validación local: obligatorios (incluye "obligatorio para rol"), números y longitudes. */
@@ -78,6 +81,8 @@ export function EntityFormPage() {
   const [editTick, setEditTick] = useState(0);
   // Spec 007: visibilidad condicional del layout (la calcula el servidor) y pestaña activa.
   const [layoutState, setLayoutState] = useState<LayoutState | null>(null);
+  // Spec 023: avisos de reglas (los calcula el servidor al abrir, al guardar y mientras se captura).
+  const [warnings, setWarnings] = useState<Warnings | null>(null);
   const [tab, setTab] = useState('');
 
   const draftRef = useRef(draft);
@@ -99,6 +104,7 @@ export function EntityFormPage() {
       if (seq !== computeSeq.current || !r?.values) return;
       setDraft((d) => mergeComputed(def, children, d, r.values));
       if (r.layout !== undefined) setLayoutState(r.layout ?? null);
+      if (r.warnings !== undefined) setWarnings(r.warnings ?? null);
     } catch {
       /* el cálculo en vivo es opcional: el servidor recalcula al guardar */
     }
@@ -109,6 +115,7 @@ export function EntityFormPage() {
     setRow(r);
     setDraft(draftFromRow(def, children, r));
     setLayoutState((r._layout as LayoutState | undefined) ?? null);
+    setWarnings((r._warnings as Warnings | undefined) ?? null);
     setDirty(false);
     setConflict(false);
     setError(null);
@@ -133,6 +140,7 @@ export function EntityFormPage() {
     if (isNew) {
       setRow(undefined);
       setLayoutState(null);
+      setWarnings(null);
       setDraft(draftFromRow(def!, children));
       setDirty(false);
       setLoading(false);
@@ -371,6 +379,7 @@ export function EntityFormPage() {
         </Alert>
       )}
       {generalError && <Alert tone="danger" title={generalError.title}>{generalError.detail}</Alert>}
+      <WarningsAlert warnings={warnings} def={def} childDefs={children} />
       {error && Object.keys(error.fieldErrors).length > 0 && (
         <Alert tone="danger" title="Revisa los campos marcados" />
       )}
@@ -389,8 +398,9 @@ export function EntityFormPage() {
 
   const actions = !readOnly && (
     <div className="dialog-footer">
+      {/* Regresión (revisión 023, F-01): --danger sobre el pie gris no llega a AA (4.3:1); --danger-text sí. */}
       {canDelete && (
-        <Button variant="ghost" icon={Trash2} onClick={() => setConfirmDelete(true)} style={{ marginRight: 'auto', color: 'var(--danger)' }}>Eliminar</Button>
+        <Button variant="ghost" icon={Trash2} onClick={() => setConfirmDelete(true)} style={{ marginRight: 'auto', color: 'var(--danger-text)' }}>Eliminar</Button>
       )}
       <Button onClick={() => navigate(listPath)} disabled={saving}>Cancelar</Button>
       <Button type="submit" variant="primary" icon={Save} loading={saving}>{isNew ? 'Crear' : 'Guardar cambios'}</Button>

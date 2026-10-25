@@ -522,7 +522,7 @@ public sealed class EnvironmentService(Db db, MetadataStore store, PlanService p
             var afterModel = await MetadataStore.LoadAsync(cn, tx);
             await ModuleService.GrantAsync(cn, tx, grants, roleIds, afterModel);
             // Spec 017 (H1): cómo estaba y cómo quedó lo que el paquete puede tocar, en la misma transacción.
-            var (scope, scopeBoards) = ModelDiff.Scope(p);
+            var (scope, scopeBoards) = ModelDiff.SnapshotScope(p); // spec 023: también lo que extiende
             var snapshot = await SaveSnapshotsAsync(cn, tx, id, ModelSnapshot.Take(scope, scopeBoards, model, boards),
                 ModelSnapshot.Take(scope, scopeBoards, afterModel, await MetadataStore.LoadDashboardsAsync(cn, tx)));
 

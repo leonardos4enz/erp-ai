@@ -717,7 +717,7 @@ export function EntityEditor({ original, entities, onCancel, onReview }: EntityE
             rows={8}
             spellCheck={false}
             placeholder={'[\n  { "name": "FechaValida", "assert": "FechaEntrega >= Fecha", "message": "La entrega no puede ser antes de la fecha", "field": "FechaEntrega" }\n]'}
-            hint="Lista de reglas: name, assert, message y opcionalmente when y field. Se validan en la vista previa."
+            hint="Lista de reglas: name, assert, message y opcionalmente when, field y severity («warning»: avisa sin impedir guardar). Se validan en la vista previa."
             error={visibleErrors.rulesJson ?? (d.rulesJson ? parseJsonError(d.rulesJson, 'array') : undefined)}
             value={d.rulesJson}
             onChange={(e) => setD((s) => ({ ...s, rulesJson: e.target.value }))}

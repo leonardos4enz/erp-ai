@@ -44,7 +44,12 @@ export interface TransitionInput {
   comment?: string;
   values?: Record<string, unknown>;
   _rowVersion?: string;
+  /** Spec 023: avisos que la persona vio y acepta (los mensajes que devolvió el 428). */
+  acceptWarnings?: string[];
 }
+
+/** Spec 023: avisos por clave (campo, Partidas[i].Campo o «registro»). */
+export type Warnings = Record<string, string[]>;
 
 export const dataApi = {
   list: (entity: string, q: ListQuery, signal?: AbortSignal) =>
@@ -62,7 +67,7 @@ export const dataApi = {
     api<void>(`/data/${enc(entity)}/${enc(String(id))}`, { method: 'DELETE' }),
   /** Calcula valores por defecto y fórmulas de un borrador sin guardarlo. */
   compute: (entity: string, values: Record<string, unknown>, id?: number | string, signal?: AbortSignal) =>
-    api<{ values: Record<string, unknown>; layout?: LayoutState | null }>(`/data/${enc(entity)}/compute`, {
+    api<{ values: Record<string, unknown>; layout?: LayoutState | null; warnings?: Warnings | null }>(`/data/${enc(entity)}/compute`, {
       method: 'POST', body: { id: id != null ? Number(id) : undefined, values }, signal,
     }),
   transition: (entity: string, id: number | string, input: TransitionInput) =>

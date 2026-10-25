@@ -19,11 +19,11 @@ public static class DataEndpoints
         g.MapGet("/lookup", (string entity, string? search, string? filterField, string? filterValue, HttpContext http, RecordService records, CancellationToken ct) =>
             records.LookupAsync(entity, search, http.CurrentUser(), ct, filterField, filterValue));
 
-        // Contrato (plan 002): la respuesta envuelve los valores en { values }; spec 007 agrega { layout }.
+        // Contrato (plan 002): la respuesta envuelve los valores en { values }; spec 007 agrega { layout } y spec 023 { warnings }.
         g.MapPost("/compute", async (string entity, ComputeRequest req, HttpContext http, RecordService records, CancellationToken ct) =>
         {
-            var (values, layout) = await records.ComputeAsync(entity, req.Id, req.Values, http.CurrentUser(), ct);
-            return new { values, layout };
+            var (values, layout, warnings) = await records.ComputeAsync(entity, req.Id, req.Values, http.CurrentUser(), ct);
+            return new { values, layout, warnings };
         });
 
         // Spec 008: exportar el listado como se ve (mismos parámetros que el listado + columnas visibles).

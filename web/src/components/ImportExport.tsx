@@ -219,6 +219,24 @@ export function ImportDialog({ open, def, onClose, onImported }: { open: boolean
                 {preview.truncatedErrors && <p className="muted">Se muestran los primeros {preview.errors.length} errores.</p>}
               </div>
             )}
+
+            {/* Spec 023: los avisos no impiden importar la fila; se listan para revisarlos. */}
+            {(preview.warnings?.length ?? 0) > 0 && (
+              <div>
+                <h3 className="section-title">Avisos por fila</h3>
+                <p className="muted">Estas filas se importan; revisa los avisos antes de confirmar.</p>
+                <div className="table-scroll">
+                  <table className="table">
+                    <thead><tr><th>Fila</th><th>Columna</th><th>Aviso</th></tr></thead>
+                    <tbody>
+                      {preview.warnings!.map((w, i) => (
+                        <tr key={i}><td className="mono">{w.row}</td><td>{w.column ?? '—'}</td><td>{w.message}</td></tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </>
         )}
       </div>

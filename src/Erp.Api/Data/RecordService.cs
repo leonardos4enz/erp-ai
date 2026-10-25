@@ -15,8 +15,10 @@ public sealed record ListQuery(int Page = 1, int PageSize = 25, string? Search =
 public sealed record StateCount(string State, string Label, string Color, int Count);
 public sealed record ListResult(IReadOnlyList<Dictionary<string, object?>> Items, int Total, IReadOnlyList<StateCount>? StateCounts = null);
 public sealed record LookupItem(long Id, string Label);
+/// <param name="AcceptWarnings">Spec 023: avisos que la persona vio y acepta (los mensajes, tal como los devolvió el 428).</param>
 public sealed record TransitionRequest(string? Transition, string? Comment, JsonElement? Values,
-    [property: System.Text.Json.Serialization.JsonPropertyName("_rowVersion")] string? RowVersion);
+    [property: System.Text.Json.Serialization.JsonPropertyName("_rowVersion")] string? RowVersion,
+    IReadOnlyList<string>? AcceptWarnings = null);
 public sealed record HistoryItem(DateTime At, string User, string? From, string? FromLabel, string To, string ToLabel,
     string? Transition, string? TransitionLabel, string? Comment);
 
@@ -128,7 +130,7 @@ public sealed partial class RecordService(Db db, MetadataStore store)
         Require(user.Access(e.Name).Read);
         await using var cn = await db.OpenAsync(ct);
         await EnsureAccessAsync(cn, null, e, id, user, write: false, ct);
-        return await LoadOutputAsync(cn, null, e, model, id, user, ct) ?? throw new NotFound("El registro no existe.");
+        return await LoadOutputAsync(cn, null, e, model, id, user, ct, warnings: true) ?? throw new NotFound("El registro no existe.");
     }
 
     public async Task<IReadOnlyList<LookupItem>> LookupAsync(string entityName, string? search, UserContext user, CancellationToken ct,
@@ -248,7 +250,7 @@ public sealed partial class RecordService(Db db, MetadataStore store)
         // Spec 006: no se crea un registro fuera del propio alcance de escritura (sin commit, todo se revierte).
         if (RecordFilter.For(e, user, write: true) is { } scope && !await MatchesAsync(cn, tx, e, id, scope, ct))
             throw new Forbidden("No puedes crear este registro: quedaría fuera de los registros que tu rol puede modificar.");
-        var row = (await LoadOutputAsync(cn, tx, e, model, id, user, ct))!;
+        var row = (await LoadOutputAsync(cn, tx, e, model, id, user, ct, warnings: true))!;
         await tx.CommitAsync(ct);
         return row;
     }
@@ -257,12 +259,12 @@ public sealed partial class RecordService(Db db, MetadataStore store)
     /// <param name="folios">Spec 014: folios de una importación (provisionales o de un bloque ya reservado).</param>
     internal async Task<long> CreateInTransactionAsync(SqlConnection cn, SqlTransaction tx, EntityDef e,
         IReadOnlyDictionary<string, EntityDef> model, JsonElement body, UserContext user, HttpContext http, CancellationToken ct,
-        FolioSource? folios = null)
+        FolioSource? folios = null, WarningSink? warnings = null)
     {
         var loader = new RelatedLoader(cn, tx, model);
         var draft = new DocDraft { CreatorId = user.Id };
         await ParseIntoAsync(draft, e, model, body, loader, lenient: false, ct, new Writer(user, e.Workflow?.Initial));
-        return await InsertDraftAsync(new AutoCtx(cn, tx, model, user, http, 0, [], ct, folios), e, draft, AuditActions.Create);
+        return await InsertDraftAsync(new AutoCtx(cn, tx, model, user, http, 0, [], ct, folios, Sink: warnings), e, draft, AuditActions.Create);
     }
 
     /// <summary>
@@ -286,7 +288,8 @@ public sealed partial class RecordService(Db db, MetadataStore store)
             loader.Reset();
             Compute(draft, e, model, loader, env);
         }
-        Validate(draft, e, model, loader, env, user);
+        var warnings = Validate(draft, e, model, loader, env, user);
+        if (c.Depth == 0) c.Sink?.Items.AddRange(warnings); // spec 023: avisos de la fila importada
         await CheckLedgerAsync(cn, tx, e, model, draft, company, before: null, id: null, ct);
 
         await AssignFoliosAsync(cn, tx, e, draft, c.Folios, ct);
@@ -294,7 +297,7 @@ public sealed partial class RecordService(Db db, MetadataStore store)
         await SaveLinesAsync(cn, tx, e, model, id, draft, existing: null, user.Id, ct);
         if (e.Workflow is not null)
             await WriteHistoryAsync(cn, tx, e, id, null, e.Workflow.Initial, null, null, user.Id, ct);
-        await Audit.WriteAsync(cn, tx, c.Http, auditAction, e.Name, id.ToString(), after: Snapshot(draft));
+        await Audit.WriteAsync(cn, tx, c.Http, auditAction, e.Name, id.ToString(), after: AuditAfter(draft, warnings));
         await FireAsync(c, e, id, AutomationEvents.Create, null);
         return id;
     }
@@ -326,24 +329,25 @@ public sealed partial class RecordService(Db db, MetadataStore store)
             loader.Reset();
             Compute(draft, e, model, loader, env);
         }
-        Validate(draft, e, model, loader, env, user);
+        var warnings = Validate(draft, e, model, loader, env, user);
         await CheckLedgerAsync(cn, tx, e, model, draft, draft.CompanyId, LedgerSnapshot(e, before), id, ct);
 
         await UpdateHeaderAsync(cn, tx, e, id, draft.Header, rowVersion, user.Id, ct);
         var existingLines = await LoadDraftAsync(cn, tx, e, model, id, ct);
         await SaveLinesAsync(cn, tx, e, model, id, draft, existingLines, user.Id, ct);
-        await Audit.WriteAsync(cn, tx, http, AuditActions.Update, e.Name, id.ToString(), before, Snapshot(draft));
+        await Audit.WriteAsync(cn, tx, http, AuditActions.Update, e.Name, id.ToString(), before, AuditAfter(draft, warnings));
         await FireAsync(new AutoCtx(cn, tx, model, user, http, 0, [], ct), e, id, AutomationEvents.Update, null);
         // Spec 006: no se puede sacar un registro del propio alcance (p. ej. cambiarlo a otro departamento).
         if (RecordFilter.For(e, user, write: true) is { } scope && !await MatchesAsync(cn, tx, e, id, scope, ct))
             throw new Forbidden("No se guardó: el registro quedaría fuera de los que tu rol puede modificar.");
-        var row = (await LoadOutputAsync(cn, tx, e, model, id, user, ct))!;
+        var row = (await LoadOutputAsync(cn, tx, e, model, id, user, ct, warnings: true))!;
         await tx.CommitAsync(ct);
         return row;
     }
 
     /// <summary>Calcula valores por defecto y fórmulas sin guardar (totales en vivo en la UI).</summary>
-    public async Task<(Dictionary<string, object?> Values, object? Layout)> ComputeAsync(string entityName, long? id, JsonElement values, UserContext user, CancellationToken ct)
+    /// <returns>Spec 023: también los avisos visibles del borrador (null si no hay).</returns>
+    public async Task<(Dictionary<string, object?> Values, object? Layout, Dictionary<string, string[]>? Warnings)> ComputeAsync(string entityName, long? id, JsonElement values, UserContext user, CancellationToken ct)
     {
         var (e, model) = await RootEntityAsync(entityName, ct);
         Require(id is null ? user.Access(e.Name).Create : user.Access(e.Name).Update);
@@ -360,7 +364,8 @@ public sealed partial class RecordService(Db db, MetadataStore store)
         FieldAccess.Strip(e, row, user, model);
         // Spec 007: qué oculta el layout con los valores capturados hasta ahora.
         var layout = HasConditions(e) ? LayoutOutput(EvaluateLayout(e, model, HeaderScope(draft, e, model, loader), env, user)) : null;
-        return (row, layout);
+        var warnings = VisibleWarnings(Warnings(draft, e, model, loader, env), model, user);
+        return (row, layout, warnings.Count > 0 ? WarningMap(warnings) : null);
     }
 
     public async Task<Dictionary<string, object?>> TransitionAsync(string entityName, long id, TransitionRequest req, HttpContext http, CancellationToken ct)
@@ -413,8 +418,9 @@ public sealed partial class RecordService(Db db, MetadataStore store)
                 errors[f.Name] = [$"{f.Label} es obligatorio para «{t.Label}»."];
         if (errors.Count > 0) throw new ValidationFailed(errors);
 
-        await ApplyTransitionAsync(new AutoCtx(cn, tx, model, user, http, 0, [], ct), e, id, draft, before, t, comment, rowVersion);
-        var row = (await LoadOutputAsync(cn, tx, e, model, id, user, ct))!;
+        await ApplyTransitionAsync(new AutoCtx(cn, tx, model, user, http, 0, [], ct), e, id, draft, before, t, comment, rowVersion,
+            req.AcceptWarnings ?? []);
+        var row = (await LoadOutputAsync(cn, tx, e, model, id, user, ct, warnings: true))!;
         await tx.CommitAsync(ct);
         return row;
     }
@@ -424,7 +430,7 @@ public sealed partial class RecordService(Db db, MetadataStore store)
     /// fórmulas, reglas, historial, auditoría y automatizaciones «al ejecutar» y «al entrar al estado».
     /// </summary>
     private async Task ApplyTransitionAsync(AutoCtx c, EntityDef e, long id, DocDraft draft, Dictionary<string, object?> before,
-        WorkflowTransition t, string? comment, byte[]? rowVersion)
+        WorkflowTransition t, string? comment, byte[]? rowVersion, IReadOnlyCollection<string>? acceptedWarnings = null)
     {
         var loader = new RelatedLoader(c.Cn, c.Tx, c.Model);
         var env = Env(c.User, draft, loader);
@@ -435,12 +441,14 @@ public sealed partial class RecordService(Db db, MetadataStore store)
             if (e.FindField(s.Field) is { } f)
                 draft.Header[f.Name] = Coerce(f, ExprEvaluator.Evaluate(s.Value, scope, env));
         Compute(draft, e, c.Model, loader, env);
-        Validate(draft, e, c.Model, loader, env, c.User, checkRequired: false);
+        var warnings = Validate(draft, e, c.Model, loader, env, c.User, checkRequired: false);
+        // Spec 023: confirm / block / allow. Una automatización (sin lista de aceptados) no tiene a quién preguntar.
+        CheckWarnings(t, warnings, acceptedWarnings, c.Model, c.User);
         await CheckLedgerAsync(c.Cn, c.Tx, e, c.Model, draft, draft.CompanyId, LedgerSnapshot(e, before), id, c.Ct);
 
         await UpdateHeaderAsync(c.Cn, c.Tx, e, id, draft.Header, rowVersion, c.User.Id, c.Ct);
         await WriteHistoryAsync(c.Cn, c.Tx, e, id, from, t.To, t.Name, comment, c.User.Id, c.Ct);
-        await Audit.WriteAsync(c.Cn, c.Tx, c.Http, $"workflow.{t.Name}", e.Name, id.ToString(), before, Snapshot(draft));
+        await Audit.WriteAsync(c.Cn, c.Tx, c.Http, $"workflow.{t.Name}", e.Name, id.ToString(), before, AuditAfter(draft, warnings));
         await FireAsync(c, e, id, AutomationEvents.Transition, t.Name);
         await FireAsync(c, e, id, AutomationEvents.EnterState, t.To);
     }
@@ -544,16 +552,18 @@ public sealed partial class RecordService(Db db, MetadataStore store)
                 values[f.Name] = Coerce(f, ExprEvaluator.Evaluate(f.DefaultValue!, scope, env), lenient: true);
     }
 
-    private static void Validate(DocDraft d, EntityDef e, IReadOnlyDictionary<string, EntityDef> model, RelatedLoader loader, ExprEnv env,
+    /// <summary>Errores (lanza <see cref="ValidationFailed"/>) y, spec 023, los avisos incumplidos, que no detienen.</summary>
+    private static List<RuleWarning> Validate(DocDraft d, EntityDef e, IReadOnlyDictionary<string, EntityDef> model, RelatedLoader loader, ExprEnv env,
         UserContext user, bool checkRequired = true)
     {
         var errors = new Dictionary<string, string[]>();
+        var warnings = new List<RuleWarning>();
         var lineScopes = new Dictionary<string, List<DocScope>>(StringComparer.OrdinalIgnoreCase);
         var header = HeaderScope(d, e, model, loader, lineScopes);
 
         // Spec 007: un campo que el layout oculta por condición no se exige (la persona no lo ve).
         if (checkRequired) RequiredErrors(e, d.Header, user, "", errors, EvaluateLayout(e, model, header, env, user).HiddenFields);
-        RuleErrors(e, header, env, "", errors);
+        RuleErrors(e, header, env, "", errors, warnings);
 
         foreach (var (field, list) in d.Lines)
         {
@@ -563,11 +573,30 @@ public sealed partial class RecordService(Db db, MetadataStore store)
             {
                 var prefix = $"{field}[{i}].";
                 if (checkRequired) RequiredErrors(child, list[i].Values, user, prefix, errors);
-                RuleErrors(child, lineScopes[field][i], env, prefix, errors);
+                RuleErrors(child, lineScopes[field][i], env, prefix, errors, warnings);
             }
         }
         if (errors.Count > 0) throw new ValidationFailed(errors);
+        return warnings;
     }
+
+    /// <summary>Spec 023: solo los avisos del borrador (para <c>/compute</c> y la salida del registro); nunca lanza por reglas.</summary>
+    private static List<RuleWarning> Warnings(DocDraft d, EntityDef e, IReadOnlyDictionary<string, EntityDef> model, RelatedLoader loader, ExprEnv env)
+    {
+        var warnings = new List<RuleWarning>();
+        if (!HasWarningRules(e, model)) return warnings;
+        var lineScopes = new Dictionary<string, List<DocScope>>(StringComparer.OrdinalIgnoreCase);
+        var header = HeaderScope(d, e, model, loader, lineScopes);
+        RuleErrors(e, header, env, "", null, warnings);
+        foreach (var (field, scopes) in lineScopes)
+            if (e.FindField(field) is { ChildEntity: { } childName } && model.TryGetValue(childName, out var child))
+                for (var i = 0; i < scopes.Count; i++) RuleErrors(child, scopes[i], env, $"{field}[{i}].", null, warnings);
+        return warnings;
+    }
+
+    internal static bool HasWarningRules(EntityDef e, IReadOnlyDictionary<string, EntityDef> model) =>
+        e.Rules?.Any(r => r.IsWarning) == true ||
+        e.ActiveFields.Any(f => f.Type == FieldTypes.Lines && model.TryGetValue(f.ChildEntity ?? "", out var c) && c.Rules?.Any(r => r.IsWarning) == true);
 
     private static void RequiredErrors(EntityDef e, Values values, UserContext user, string prefix, Dictionary<string, string[]> errors,
         IReadOnlyList<string>? hidden = null)
@@ -577,14 +606,19 @@ public sealed partial class RecordService(Db db, MetadataStore store)
                 errors[prefix + f.Name] = [$"{f.Label} es obligatorio."];
     }
 
-    private static void RuleErrors(EntityDef e, IExprScope scope, ExprEnv env, string prefix, Dictionary<string, string[]> errors)
+    /// <param name="errors">Null: solo se evalúan los avisos (las reglas de error se saltan).</param>
+    /// <param name="warnings">Spec 023: recibe las reglas <c>warning</c> incumplidas; null = no se evalúan (nunca bloquean).</param>
+    private static void RuleErrors(EntityDef e, IExprScope scope, ExprEnv env, string prefix, Dictionary<string, string[]>? errors,
+        List<RuleWarning>? warnings = null)
     {
         foreach (var r in e.Rules ?? [])
         {
+            if (r.IsWarning ? warnings is null : errors is null) continue;
             if (r.When is not null && !ExprEvaluator.Test(r.When, scope, env, whenNull: false)) continue;
             if (ExprEvaluator.Test(r.Assert, scope, env, whenNull: true)) continue;
             var key = prefix + (r.Field ?? "registro");
-            errors[key] = errors.TryGetValue(key, out var prev) ? [.. prev, r.Message] : [r.Message];
+            if (r.IsWarning) { warnings!.Add(new RuleWarning(key, r.Message, e, r)); continue; }
+            errors![key] = errors.TryGetValue(key, out var prev) ? [.. prev, r.Message] : [r.Message];
         }
     }
 
@@ -1028,8 +1062,9 @@ public sealed partial class RecordService(Db db, MetadataStore store)
     }
 
     /// <summary>Registro listo para el cliente: etiquetas de referencias, partidas y estado del proceso.</summary>
+    /// <param name="warnings">Spec 023: agrega <c>_warnings</c> (avisos visibles del registro guardado); no en webhooks.</param>
     private async Task<Dictionary<string, object?>?> LoadOutputAsync(SqlConnection cn, SqlTransaction? tx, EntityDef e,
-        IReadOnlyDictionary<string, EntityDef> model, long id, UserContext user, CancellationToken ct)
+        IReadOnlyDictionary<string, EntityDef> model, long id, UserContext user, CancellationToken ct, bool warnings = false)
     {
         var (select, from, labelParams) = SelectClause(e, model, user);
         Dictionary<string, object?>? row;
@@ -1087,6 +1122,13 @@ public sealed partial class RecordService(Db db, MetadataStore store)
             var draft = (await LoadDraftAsync(cn, tx, e, model, id, ct))!;
             var loader = new RelatedLoader(cn, tx, model);
             row["_layout"] = LayoutOutput(EvaluateLayout(e, model, HeaderScope(draft, e, model, loader), Env(user, draft, loader), user));
+        }
+        if (warnings && HasWarningRules(e, model))
+        {
+            var draft = (await LoadDraftAsync(cn, tx, e, model, id, ct))!;
+            var loader = new RelatedLoader(cn, tx, model);
+            var visible = VisibleWarnings(Warnings(draft, e, model, loader, Env(user, draft, loader)), model, user);
+            if (visible.Count > 0) row["_warnings"] = WarningMap(visible);
         }
         FieldAccess.Strip(e, row, user, model);
         return row;

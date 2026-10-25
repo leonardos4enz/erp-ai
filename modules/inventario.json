@@ -1,7 +1,7 @@
 {
   "id": "inventario",
   "name": "Inventario",
-  "version": "1.6.1",
+  "version": "1.7.0",
   "icon": "boxes",
   "description": "Existencias por almacén y producto, y movimientos de entrada, salida, ajuste y traspaso. Las recepciones confirmadas de Compras generan sus entradas solas.",
   "requires": ["compras"],
@@ -246,6 +246,12 @@
       "plan": { "description": "Inventario 1.6.1: costo vacío sin tipo de cambio", "operations": [
         { "op": "updateField", "entity": "RecepcionPartida", "field": "CostoUnitario",
           "formula": "IF(ISBLANK(COALESCE(CONVERT(PartidaOrden.PrecioUnitario * (1 - PartidaOrden.DescuentoPct / 100), Recepcion.Moneda, BASECURRENCY(), Recepcion.Fecha), IF(BASECURRENCY() = 'MXN', PartidaOrden.CostoMXN, NULL))), NULL, ROUND(COALESCE(CONVERT(PartidaOrden.PrecioUnitario * (1 - PartidaOrden.DescuentoPct / 100), Recepcion.Moneda, BASECURRENCY(), Recepcion.Fecha), IF(BASECURRENCY() = 'MXN', PartidaOrden.CostoMXN, NULL)), 4))" }
+      ] } },
+    { "version": "1.7.0",
+      "description": "Rutas de tres niveles (spec 023): el costo de una partida de recepción usa la moneda de la orden (Recepcion.OrdenCompra.Moneda.Clave) cuando la recepción no la tiene, como las recepciones en borrador creadas antes de la 1.5.0; antes, con una moneda base distinta de MXN quedaban sin costo.",
+      "plan": { "description": "Inventario 1.7.0: moneda de la orden en el costo de la recepción", "operations": [
+        { "op": "updateField", "entity": "RecepcionPartida", "field": "CostoUnitario",
+          "formula": "IF(ISBLANK(COALESCE(CONVERT(PartidaOrden.PrecioUnitario * (1 - PartidaOrden.DescuentoPct / 100), COALESCE(Recepcion.Moneda, Recepcion.OrdenCompra.Moneda.Clave), BASECURRENCY(), Recepcion.Fecha), IF(BASECURRENCY() = 'MXN', PartidaOrden.CostoMXN, NULL))), NULL, ROUND(COALESCE(CONVERT(PartidaOrden.PrecioUnitario * (1 - PartidaOrden.DescuentoPct / 100), COALESCE(Recepcion.Moneda, Recepcion.OrdenCompra.Moneda.Clave), BASECURRENCY(), Recepcion.Fecha), IF(BASECURRENCY() = 'MXN', PartidaOrden.CostoMXN, NULL)), 4))" }
       ] } }
   ],
   "roles": [

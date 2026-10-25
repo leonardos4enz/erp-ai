@@ -49,11 +49,13 @@ public static class AssistantPrompt
         - restoreEntity { entity } / restoreField { entity, field }   (reactivan lo archivado con los datos que conservó)
         - setWorkflow { entity, workflow: { initial, states: [{ name, label, color?, editable? }],
           transitions: [{ name, label, from: string[], to, roles?, when?, whenMessage?, requireComment?, requiredFields?,
-          set?: [{ field, value }], icon?, variant?, system? }] } }
+          set?: [{ field, value }], icon?, variant?, system?, onWarning?: confirm|block|allow }] } }
+          onWarning: qué hacer si al ejecutarla quedan avisos (confirm = la persona los confirma; block = no se ejecuta).
           color: neutral | accent | success | warning | danger. variant: primary | secondary | danger. editable: false
           bloquea la edición en ese estado. value de set es una expresión. system: solo la ejecuta una automatización.
           Crea el campo Estado; los nombres de estado van en PascalCase (PorAutorizar).
-        - setRules { entity, merge?, rules: [{ name, message, assert, when?, field? }] }   (reemplaza todas; con merge agrega o
+        - setRules { entity, merge?, rules: [{ name, message, assert, when?, field?, severity?: error|warning }] }
+          (severity warning = aviso: no impide guardar; se muestra y queda en la auditoría. Reemplaza todas; con merge agrega o
           reemplaza por nombre y conserva las demás; assert debe ser verdadero)
         - setAutomations { entity, merge?, automations: [{ name, label, on: create|update|enterState|transition, state?,
           transition?, when?, actions: [{ type: update|transition|create|rollup|cost, lines?, when?, target?, set?,
@@ -79,19 +81,19 @@ public static class AssistantPrompt
           usuario y las que cuelgan de ella; teamOwners (requiere owner) = el dueño puede ser un equipo.
         - setLayout { entity, layout: { sections: [{ name, label, description?, tab?, columns?, visibleWhen?,
           fields: (string | { field, visibleWhen?, wide? })[] }] } }   (o layout: null)
-        - setViews { entity, views: [{ name, label, roles?, columns?, filters?: [{ field, op, value? }], sort?, dir?,
+        - setViews { entity, merge?, views: [{ name, label, roles?, columns?, filters?: [{ field, op, value? }], sort?, dir?,
           state?, default? }] }   op: eq ne gt gte lt lte contains in blank notBlank; value admite "$me" y "$today".
-        - setReports { entity, reports: [{ name, label, description?, roles?, groupBy?: [{ field, period?: day|month|year (obligatorio al
+        - setReports { entity, merge?, reports: [{ name, label, description?, roles?, groupBy?: [{ field, period?: day|month|year (obligatorio al
           agrupar por fecha), label? }], measures: [{ fn: count|sum|avg|min|max, field?, label? }], filter?, orderBy?, dir?,
           limit?, chart?: bar|line|pie }] }
         - setDashboard { dashboard: { name, label, icon?, description?, roles?, widgets: [{ type: kpi|chart|table,
           entity, report, label?, measure?, wide? }] } }   - archiveDashboard { name }
-        - setWebhooks { entity, webhooks: [{ name, label, description?, events: [{ on, state?, transition? }], when?,
+        - setWebhooks { entity, merge?, webhooks: [{ name, label, description?, events: [{ on, state?, transition? }], when?,
           role, fields? }] }   role: rol existente con el que se arma la carga.
-        - setSchedules { entity, schedules: [{ name, label, description?, every: minutes|hour|day|week|month, interval?
+        - setSchedules { entity, merge?, schedules: [{ name, label, description?, every: minutes|hour|day|week|month, interval?
           (minutes: 5, 10, 12, 15, 20, 30 o 60), minute? (hour), at?: "HH:mm" (day|week|month), weekdays?: 1-7 (week, 1 =
           lunes), day?: 1-31 (month), where, role, batchSize?: 1-1000, actions: (las de setAutomations) }] }
-          where: qué registros procesa; solo campos del catálogo o de un nivel (Orden.Estado), =, <>, <, >, IN, AND/OR/NOT,
+          where: qué registros procesa; solo campos del catálogo o de referencias (Orden.Estado, hasta tres saltos), =, <>, <, >, IN, AND/OR/NOT,
           ISBLANK, TODAY() y ADDDAYS(TODAY(), n). Debe dejar de cumplirse cuando la acción termina (p. ej. cambia el estado).
           role: rol de servicio existente. Llega pausada: el administrador la activa en Configuración › Automatizaciones.
 
@@ -108,7 +110,8 @@ public static class AssistantPrompt
 
         Expresiones (fórmulas, valores por defecto, reglas, condiciones, visibleWhen, where, filter): operadores
         = <> < <= > >= IN (...), AND OR NOT, + - * /, & concatena texto; literales 'texto', números, TRUE, FALSE, NULL;
-        rutas Campo o Referencia.Campo. Funciones: IF(c,a,b), COALESCE(a,b,…), ISBLANK(x), ROUND(x,n), ABS(x),
+        rutas Campo, Referencia.Campo o hasta tres saltos (Recepcion.OrdenCompra.Moneda.Clave: cada salto intermedio es
+        una referencia o el documento). Funciones: IF(c,a,b), COALESCE(a,b,…), ISBLANK(x), ROUND(x,n), ABS(x),
         MIN(a,b), MAX(a,b), LEN(s), UPPER(s), ISEMAIL(s), TODAY(), NOW(), ADDDAYS(fecha,n), DAYS(desde,hasta),
         CURRENTUSER(), CURRENTUNIT(), HASROLE('Rol'), ISCREATOR(), SUM(Partidas.Campo), COUNT(Partidas),
         BASECURRENCY(), CURRENTCOMPANY(), RATE(de,a[,fecha]), CONVERT(importe,de,a[,fecha]), UNITCOST('CatálogoSaldo', cantidad, llave…). Las monedas son códigos

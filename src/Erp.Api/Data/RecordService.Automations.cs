@@ -32,7 +32,7 @@ public sealed partial class RecordService
     /// <param name="Generation">Spec 016: cuántos trabajos asíncronos encadenados llevaron hasta aquí (0 = una persona).</param>
     private sealed record AutoCtx(SqlConnection Cn, SqlTransaction Tx, IReadOnlyDictionary<string, EntityDef> Model,
         UserContext User, HttpContext Http, int Depth, IReadOnlyList<string> Chain, CancellationToken Ct, FolioSource? Folios = null,
-        int Generation = 0);
+        int Generation = 0, WarningSink? Sink = null);
 
     /// <summary>Corre las automatizaciones de <paramref name="e"/> para el evento (y estado o transición, si aplica).</summary>
     private async Task FireAsync(AutoCtx c, EntityDef e, long id, string ev, string? key)
@@ -317,14 +317,15 @@ public sealed partial class RecordService
         var errors = new Dictionary<string, string[]>();
         var lineScopes = new Dictionary<string, List<DocScope>>(StringComparer.OrdinalIgnoreCase);
         var header = HeaderScope(draft, root, c.Model, loader, lineScopes);
-        if (linesField is null) RuleErrors(root, header, env, "", errors);
-        else RuleErrors(target, lineScopes[linesField][lineIndex], env, "", errors);
+        var warnings = new List<RuleWarning>(); // spec 023: no detienen al motor; quedan en la auditoría
+        if (linesField is null) RuleErrors(root, header, env, "", errors, warnings);
+        else RuleErrors(target, lineScopes[linesField][lineIndex], env, "", errors, warnings);
         if (errors.Count > 0) throw new ValidationFailed(errors);
         await CheckLedgerAsync(c.Cn, c.Tx, root, c.Model, draft, draft.CompanyId, LedgerSnapshot(root, before), rootId, c.Ct);
 
         await UpdateHeaderAsync(c.Cn, c.Tx, root, rootId, draft.Header, rowVersion: null, c.User.Id, c.Ct);
         await SaveLinesAsync(c.Cn, c.Tx, root, c.Model, rootId, draft, draft, c.User.Id, c.Ct);
-        await Audit.WriteAsync(c.Cn, c.Tx, c.Http, "automation.update", root.Name, rootId.ToString(CultureInfo.InvariantCulture), before, Snapshot(draft));
+        await Audit.WriteAsync(c.Cn, c.Tx, c.Http, "automation.update", root.Name, rootId.ToString(CultureInfo.InvariantCulture), before, AuditAfter(draft, warnings));
         await FireAsync(c, root, rootId, AutomationEvents.Update, null);
     }
 

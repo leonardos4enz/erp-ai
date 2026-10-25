@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ArrowRight, History, Lock } from 'lucide-react';
 import { ApiError, fieldError } from '../api/client';
-import { dataApi } from '../api/endpoints';
+import { dataApi, type Warnings } from '../api/endpoints';
 import type { EntityDef, FieldDef, HistoryEntry, RecordTransition, RecordWorkflow, Row } from '../api/types';
 import { formatDateTime } from '../lib/format';
 import { StateBadge } from '../lib/entity';
@@ -11,6 +11,7 @@ import { DynamicIcon } from './DynamicIcon';
 import { FieldInput } from './FieldInput';
 import { Alert, Button, EmptyState, Field, LoadingBlock, Textarea } from './ui';
 import { useToast } from './Toast';
+import { WarningsAlert } from './Warnings';
 
 export function stateLabel(def: EntityDef, state: string): string {
   return def.workflow?.states.find((s) => s.name === state)?.label ?? state;
@@ -74,6 +75,8 @@ export function TransitionDialog({ def, row, transition: t, onClose, onDone, onC
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
   const [clientErrors, setClientErrors] = useState<Record<string, string>>({});
+  // Spec 023: avisos que el servidor pidió confirmar (428); se reenvían como aceptados.
+  const [pending, setPending] = useState<Warnings | null>(null);
 
   const fields: FieldDef[] = t ? t.requiredFields.map((n) => def.fields.find((f) => f.name === n)).filter((f): f is FieldDef => !!f) : [];
   const needsInput = !!t && (t.requireComment || fields.length > 0);
@@ -84,6 +87,7 @@ export function TransitionDialog({ def, row, transition: t, onClose, onDone, onC
     setComment('');
     setError(null);
     setClientErrors({});
+    setPending(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [t?.name, row._rowVersion]);
 
@@ -122,12 +126,15 @@ export function TransitionDialog({ def, row, transition: t, onClose, onDone, onC
         comment: comment.trim() || undefined,
         values: fields.length ? payload : undefined,
         _rowVersion: row._rowVersion,
+        acceptWarnings: pending ? Object.values(pending).flat() : undefined,
       });
       const wf = updated._workflow as RecordWorkflow | undefined;
       toast.success(`Estado: ${wf?.stateLabel ?? toLabel}`);
       onDone(updated);
     } catch (e) {
       if (e instanceof ApiError && e.status === 409) { onConflict(); onClose(); }
+      // Spec 023: la acción tiene avisos: se muestran y el botón pasa a «Continuar con avisos».
+      else if (e instanceof ApiError && e.status === 428) setPending(e.fieldErrors);
       else if (e instanceof ApiError && e.status === 400) setError(e);
       else { toast.fromError(e); onClose(); }
     } finally {
@@ -145,8 +152,9 @@ export function TransitionDialog({ def, row, transition: t, onClose, onDone, onC
         message={<>El documento pasará al estado <strong>{toLabel}</strong>. El cambio queda registrado en el historial.{error && (
           <span role="alert">{otherMessages.length
             ? otherMessages.map((m) => <span key={m}><br /><span className="field-error">{m}</span></span>)
-            : <><br /><span className="field-error">{error.title}</span></>}</span>)}</>}
-        confirmLabel={t.label}
+            : <><br /><span className="field-error">{error.title}</span></>}</span>)}
+          {pending && <span className="dialog-warnings"><WarningsAlert warnings={pending} def={def} announce title="Confirma los avisos para continuar" /></span>}</>}
+        confirmLabel={pending ? 'Continuar con avisos' : t.label}
         loading={busy}
         onConfirm={run}
         onCancel={onClose}
@@ -165,11 +173,12 @@ export function TransitionDialog({ def, row, transition: t, onClose, onDone, onC
       footer={
         <>
           <Button onClick={onClose} disabled={busy}>Cancelar</Button>
-          <Button variant={t.variant === 'danger' ? 'danger' : 'primary'} loading={busy} onClick={run}>{t.label}</Button>
+          <Button variant={t.variant === 'danger' ? 'danger' : 'primary'} loading={busy} onClick={run}>{pending ? 'Continuar con avisos' : t.label}</Button>
         </>
       }
     >
       <div className="stack">
+        <WarningsAlert warnings={pending} def={def} announce title="Confirma los avisos para continuar" />
         {generalError && (
           <Alert tone="danger" title={otherMessages.length ? otherMessages[0] : generalError.title}>
             {otherMessages.length > 1 ? otherMessages.slice(1).join(' ') : otherMessages.length ? undefined : generalError.detail}

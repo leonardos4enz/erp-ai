@@ -102,7 +102,8 @@ public class ExpressionEvaluatorTests
     [InlineData("'sin cerrar")]
     [InlineData("Campo; DROP TABLE x")]
     [InlineData("System.IO.File.Delete('x')")]
-    [InlineData("a.b.c")]
+    // Spec 023: una ruta admite hasta 4 segmentos (a.b.c.d); con 5 es error de sintaxis.
+    [InlineData("a.b.c.d.e")]
     [InlineData("$x")]
     public void Rejects_invalid_or_malicious_syntax(string expr) =>
         Assert.Throws<ExprException>(() => ExprParser.Parse(expr));

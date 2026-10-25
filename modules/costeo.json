@@ -96,7 +96,7 @@
               "when": "CostoTotal > 0 AND (ISBLANK(Almacen.CuentaInventario) OR ISBLANK(Almacen.CuentaEntradas))",
               "actions": [ { "type": "update", "set": [ { "field": "PolizaPendiente", "value": "TRUE" } ] } ] }
           ] },
-        { "op": "setViews", "entity": "Recepcion", "views": [
+        { "op": "setViews", "entity": "Recepcion", "merge": true, "views": [
             { "name": "PolizasPendientes", "label": "Pólizas pendientes", "filters": [ { "field": "PolizaPendiente", "op": "eq", "value": true } ], "sort": "Fecha", "dir": "asc" }
           ] }
       ] } }

@@ -256,8 +256,38 @@ public static class ModelDiff
     }
 
     /// <summary>
+    /// Spec 023: catálogos que el paquete modifica sin crearlos (un campo, una regla o una automatización en un catálogo de
+    /// otro módulo). Entran al estado deseado y a la instantánea de la reversión; no a los permisos del paquete.
+    /// </summary>
+    public static IReadOnlySet<string> Extended(ModulePackage p)
+    {
+        var created = Scope(p).Entities;
+        return p.FullChain.SelectMany(c => c.Plan.Operations).Select(EntityOf).OfType<string>()
+            .Where(e => !created.Contains(e)).ToHashSet(Ci);
+    }
+
+    /// <summary>Spec 023: lo que la instantánea de la 017 guarda de un paquete: lo que crea y lo que extiende.</summary>
+    public static (IReadOnlySet<string> Entities, IReadOnlySet<string> Dashboards) SnapshotScope(ModulePackage p)
+    {
+        var (entities, dashboards) = Scope(p);
+        return (entities.Union(Extended(p), Ci).ToHashSet(Ci), dashboards);
+    }
+
+    /// <summary>Catálogo existente que toca una operación (null si crea uno o no toca ninguno).</summary>
+    private static string? EntityOf(Operation op) => op switch
+    {
+        UpdateEntityOp o => o.Entity, ArchiveEntityOp o => o.Entity, RestoreEntityOp o => o.Entity,
+        AddFieldOp o => o.Entity, UpdateFieldOp o => o.Entity, ArchiveFieldOp o => o.Entity, RestoreFieldOp o => o.Entity,
+        SetWorkflowOp o => o.Entity, SetRulesOp o => o.Entity, SetAutomationsOp o => o.Entity, SetSecurityOp o => o.Entity,
+        SetLayoutOp o => o.Entity, SetViewsOp o => o.Entity, SetReportsOp o => o.Entity, SetWebhooksOp o => o.Entity,
+        SetSchedulesOp o => o.Entity, SetLedgerOp o => o.Entity,
+        _ => null,
+    };
+
+    /// <summary>
     /// Estado deseado: el plan del paquete compilado sobre el destino sin los catálogos y tableros que el paquete crea.
-    /// Los errores (p. ej. un catálogo del que depende y que este entorno no tiene) invalidan el paquete aquí.
+    /// Los errores (p. ej. un catálogo del que depende y que este entorno no tiene) invalidan el paquete aquí. Spec 023:
+    /// incluye los catálogos que el paquete extiende, con su estado completo (lo del destino más lo del paquete).
     /// </summary>
     public static (IReadOnlyDictionary<string, EntityDef> Entities, IReadOnlyDictionary<string, DashboardDef> Dashboards, IReadOnlyList<PlanError> Errors,
         IReadOnlyList<PlanStep> Steps) Desired(ModulePackage p, IReadOnlyDictionary<string, EntityDef> target, IReadOnlyDictionary<string, DashboardDef> targetBoards, IReadOnlySet<string> roles)
@@ -276,7 +306,8 @@ public static class ModelDiff
             steps.AddRange(c.Preview.Steps.Select(s => s with { Description = prefix + s.Description }));
             (model, boards) = (c.ResultingModel, c.Dashboards!);
         }
-        return (model.Where(kv => entities.Contains(kv.Key)).ToDictionary(kv => kv.Key, kv => kv.Value, Ci),
+        var extended = Extended(p);
+        return (model.Where(kv => entities.Contains(kv.Key) || extended.Contains(kv.Key)).ToDictionary(kv => kv.Key, kv => kv.Value, Ci),
                 boards.Where(kv => dashboards.Contains(kv.Key)).ToDictionary(kv => kv.Key, kv => kv.Value, Ci),
                 errors, steps);
     }

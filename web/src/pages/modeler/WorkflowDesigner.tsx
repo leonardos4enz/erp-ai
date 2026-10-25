@@ -232,6 +232,13 @@ export function WorkflowDesigner({ workflow, onChange, savedStates, savedTransit
         <Input label="Condición" className="mono" maxLength={1000} placeholder="Siempre disponible" value={t.when ?? ''}
           hint="Expresión, p. ej. Total > 0. Si no se cumple, el botón se muestra bloqueado." onChange={(e) => patchTransition(t.name, { when: e.target.value })} />
         <Input label="Mensaje si no se cumple" maxLength={300} value={t.whenMessage ?? ''} disabled={!t.when} onChange={(e) => patchTransition(t.name, { whenMessage: e.target.value })} />
+        {/* Spec 023: qué hace la acción si al ejecutarla quedan avisos de reglas (severity «warning»). */}
+        <Select label="Si hay avisos" hint="Avisos: reglas que no impiden guardar." value={t.onWarning ?? 'confirm'}
+          onChange={(e) => patchTransition(t.name, { onWarning: e.target.value === 'confirm' ? undefined : e.target.value as WorkflowTransitionDef['onWarning'] })}>
+          <option value="confirm">Pedir confirmación</option>
+          <option value="block">No ejecutarla</option>
+          <option value="allow">Continuar sin preguntar</option>
+        </Select>
         <Field label="Asignaciones al ejecutarla" hint="Campo = expresión, p. ej. FechaAutorizacion = TODAY().">
           <div className="stack" style={{ gap: 'var(--space-2)' }}>
             {(t.set ?? []).map((a, i) => (
