@@ -1,0 +1,125 @@
+/* Spec 032: inicio de sesión. Dos paneles (marca e ilustración | formulario) desde 1024 px; abajo, solo el formulario.
+   Las animaciones solo existen con `prefers-reduced-motion: no-preference`, animan solo `transform`/`opacity` y ninguna
+   arranca con un retraso positivo: sin animación, la composición está completa (también en las capturas). */
+
+.brand-logo { display: inline-flex; align-items: center; gap: 10px; }
+.brand-logo-mark { display: block; flex-shrink: 0; }
+.brand-logo-name { font-size: var(--text-lg); font-weight: 600; letter-spacing: -0.01em; white-space: nowrap; }
+
+.login-shell {
+  min-height: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  background: var(--surface);
+}
+
+/* ---------- Panel de marca ---------- */
+.login-aside {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  padding: var(--space-10) 48px;
+  color: var(--brand-text);
+  background:
+    radial-gradient(760px 480px at 15% -5%, var(--brand-glow), transparent 65%),
+    linear-gradient(155deg, var(--brand-from) 0%, var(--brand-to) 100%);
+}
+.login-aside-art { flex: 1; min-height: 0; display: grid; place-items: center; }
+.login-illustration { display: block; width: 100%; max-width: 540px; height: auto; max-height: 52vh; }
+.login-tagline { margin: 0 0 var(--space-4); max-width: 18ch; font-size: var(--text-2xl); font-weight: 600; line-height: 1.2; letter-spacing: -0.02em; }
+.login-features { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; color: var(--brand-muted); font-size: var(--text-base); }
+.login-features li { display: flex; align-items: center; gap: 10px; }
+.login-features svg { flex-shrink: 0; color: #a5b4fc; }
+
+/* ---------- Formulario ---------- */
+.login-main {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 72px var(--space-6) var(--space-10);
+}
+.login-topbar { position: absolute; top: var(--space-4); right: var(--space-4); }
+.login-panel { width: 100%; max-width: 380px; display: flex; flex-direction: column; gap: var(--space-6); }
+.login-compact-logo { display: none; justify-content: center; }
+.login-header h1 { margin: 0 0 6px; font-size: var(--text-2xl); font-weight: 600; letter-spacing: -0.02em; }
+.login-header p { margin: 0; }
+.login-form { display: flex; flex-direction: column; gap: var(--space-4); }
+.login-password > .input { padding-right: 42px; }
+.login-reveal {
+  position: absolute; right: 3px; top: 50%; transform: translateY(-50%);
+  width: 32px; height: 32px; display: grid; place-items: center;
+  border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-muted); cursor: pointer;
+}
+.login-reveal:hover { color: var(--text); background: var(--surface-2); }
+.login-reveal:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+/* Región viva siempre presente: vacía no ocupa lugar (el -6px compensa el espacio de `.field`). */
+.login-caps { margin: 0; font-size: var(--text-xs); font-weight: 500; color: var(--warning); }
+.login-caps:empty { height: 0; margin-top: -6px; overflow: hidden; }
+.login-help { margin: 0; text-align: center; font-size: var(--text-sm); color: var(--text-muted); }
+
+/* ---------- Ilustración ---------- */
+.ill-dot { fill: rgb(255 255 255 / 0.1); }
+.ill-edges path { fill: none; stroke: var(--brand-line); stroke-width: 1.5; stroke-dasharray: 4 5; }
+.ill-card-body { fill: rgb(255 255 255 / 0.07); stroke: rgb(255 255 255 / 0.22); }
+.ill-card-head { fill: rgb(255 255 255 / 0.1); }
+.ill-card-icon { fill: #a5b4fc; }
+.ill-bar-strong { fill: rgb(255 255 255 / 0.55); }
+.ill-bar { fill: rgb(255 255 255 / 0.26); }
+.ill-bar-soft { fill: rgb(255 255 255 / 0.14); }
+.ill-bar-accent { fill: #a5b4fc; }
+.ill-card-new .ill-card-body { stroke: #a5b4fc; stroke-dasharray: 5 4; }
+.ill-orbit { fill: none; stroke: rgb(199 210 254 / 0.35); stroke-dasharray: 3 7; }
+.ill-halo { fill: rgb(165 180 252 / 0.18); }
+.ill-spark { fill: #4338ca; }
+.ill-pulse { fill: #e0e7ff; opacity: 0; }
+.ill-orbit, .ill-halo { transform-box: fill-box; transform-origin: center; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .login-message { animation: login-message-in var(--dur) var(--ease); }
+  .ill-halo { animation: ill-breathe 4s ease-in-out infinite; }
+  .ill-orbit { animation: ill-spin 60s linear infinite; }
+  /* Propiedades largas: el minificador convierte `animation: 5.6s linear infinite` (sin nombre) en `animation: none`. */
+  .ill-pulse { animation-duration: 5.6s; animation-timing-function: linear; animation-iteration-count: infinite; }
+  .ill-pulse-1 { animation-name: ill-flow-1; }
+  .ill-pulse-2 { animation-name: ill-flow-2; animation-delay: -1.4s; }
+  .ill-pulse-3 { animation-name: ill-flow-3; animation-delay: -2.8s; }
+  .ill-pulse-4 { animation-name: ill-flow-4; animation-delay: -4.2s; }
+  /* Las filas del catálogo nuevo aparecen una a una (retrasos negativos: sin salto al empezar). */
+  .ill-card-new .ill-row { animation: ill-row-in 6s ease-in-out infinite; }
+  .ill-card-new .ill-row:nth-of-type(2) { animation-delay: -5.4s; }
+  .ill-card-new .ill-row:nth-of-type(3) { animation-delay: -4.8s; }
+}
+
+/* Con movimiento reducido tampoco hay transiciones (foco de los campos, botones): nada se mueve ni se desvanece. */
+@media (prefers-reduced-motion: reduce) {
+  .login-shell, .login-shell * { transition: none; }
+  .login-shell .spin { animation: none; } /* F-05: el indicador del botón tampoco gira */
+}
+
+@keyframes login-message-in { from { opacity: 0; transform: translateY(-4px); } }
+@keyframes ill-breathe { 0%, 100% { transform: scale(1); opacity: 0.9; } 50% { transform: scale(1.18); opacity: 0.35; } }
+@keyframes ill-spin { to { transform: rotate(360deg); } }
+@keyframes ill-row-in { 0%, 100% { opacity: 0.15; } 15%, 80% { opacity: 1; } }
+/* Cada pulso: tramo horizontal, vertical hasta la altura del nodo y horizontal hasta él (rutas de Brand.tsx). */
+@keyframes ill-flow-1 { 0% { opacity: 0; transform: translate(0, 0); } 8%, 92% { opacity: 1; } 17% { transform: translate(35px, 0); } 83% { transform: translate(35px, 134px); } 100% { opacity: 0; transform: translate(70px, 134px); } }
+@keyframes ill-flow-2 { 0% { opacity: 0; transform: translate(0, 0); } 8%, 92% { opacity: 1; } 17% { transform: translate(-35px, 0); } 83% { transform: translate(-35px, 124px); } 100% { opacity: 0; transform: translate(-70px, 124px); } }
+@keyframes ill-flow-3 { 0% { opacity: 0; transform: translate(0, 0); } 8%, 92% { opacity: 1; } 17% { transform: translate(35px, 0); } 83% { transform: translate(35px, -112px); } 100% { opacity: 0; transform: translate(70px, -112px); } }
+@keyframes ill-flow-4 { 0% { opacity: 0; transform: translate(0, 0); } 8%, 92% { opacity: 1; } 17% { transform: translate(-35px, 0); } 83% { transform: translate(-35px, -108px); } 100% { opacity: 0; transform: translate(-70px, -108px); } }
+
+/* ---------- Pantallas angostas: sin panel de marca ---------- */
+@media (max-width: 1023px) {
+  .login-shell {
+    grid-template-columns: minmax(0, 1fr);
+    background: radial-gradient(900px 480px at 50% -12%, var(--accent-soft), transparent 70%), var(--bg);
+  }
+  .login-aside { display: none; }
+  .login-compact-logo { display: flex; }
+  .login-header { text-align: center; }
+}
+@media (max-width: 480px) {
+  .login-main { justify-content: flex-start; padding: 64px var(--space-4) var(--space-8); }
+}

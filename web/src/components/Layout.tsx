@@ -8,6 +8,7 @@ import { dashboardsApi, reportsApi } from '../api/endpoints';
 import type { AppSummary, EntityDef } from '../api/types';
 import { useAsync } from '../lib/hooks';
 import { useAuth } from '../auth/AuthContext';
+import { useToast } from './Toast';
 import { useTheme } from '../lib/theme';
 import { initials } from '../lib/format';
 import { safeStorageGet, safeStorageSet } from '../lib/hooks';
@@ -79,6 +80,7 @@ function useBreadcrumb(): { label: string; to?: string }[] {
 function UserMenu() {
   const { me, logout } = useAuth();
   const navigate = useNavigate();
+  const toast = useToast();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -111,7 +113,11 @@ function UserMenu() {
           <button
             className="menu-item"
             role="menuitem"
-            onClick={async () => { setOpen(false); await logout(); navigate('/login', { replace: true }); }}
+            onClick={async () => {
+              setOpen(false);
+              if (await logout()) navigate('/login', { replace: true });
+              else toast.error('No pudimos cerrar la sesión', 'El servidor no respondió. Inténtalo de nuevo antes de dejar el equipo.');
+            }}
           >
             <LogOut size={15} aria-hidden /> Cerrar sesión
           </button>

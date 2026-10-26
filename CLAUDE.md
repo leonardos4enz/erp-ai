@@ -82,6 +82,8 @@ compilan en su propia carpeta.
 - Un trabajo asíncrono marca su éxito dentro de su transacción y comprueba que el *lease* sigue siendo suyo (021-3).
 - Nadie otorga, aprueba ni hereda lo que no tiene; el beneficiario no se aprueba (021-1).
 - Al borrar un worktree, quitar antes la unión de `node_modules` (013 F-03); `e2e:regresion` ya lo hace.
+- El minificador de CSS convierte `animation: 5.6s linear infinite` **sin nombre** en `animation: none`: con `animation-name`
+  aparte, usar propiedades largas (032, R-032-5).
 
 ## Antes de cada push (repositorio público)
 - `git diff --cached` sin secretos: contraseñas reales, API keys (la de Anthropic se captura en la app, cifrada; nunca en archivos), tokens.

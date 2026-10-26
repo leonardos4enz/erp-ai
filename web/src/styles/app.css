@@ -307,10 +307,7 @@ code, pre, .mono { font-family: var(--font-mono); font-size: 0.8125rem; }
 .tab[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }
 
 /* ---------- Login ---------- */
-.login-page { min-height: 100%; display: grid; place-items: center; padding: var(--space-6); background: radial-gradient(1200px 600px at 50% -20%, var(--accent-soft), transparent 70%), var(--bg); }
-.login-card { width: 100%; max-width: 380px; padding: var(--space-8); }
-.login-brand { display: flex; flex-direction: column; align-items: center; gap: var(--space-3); margin-bottom: var(--space-6); text-align: center; }
-.login-brand .brand-mark { width: 44px; height: 44px; border-radius: var(--radius-lg); }
+/* Inicio de sesión: login.css (spec 032). */
 
 /* ---------- Dashboard ---------- */
 .grid-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: var(--space-4); }

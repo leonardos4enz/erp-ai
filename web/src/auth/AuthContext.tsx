@@ -1,13 +1,21 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { ApiError, setUnauthorizedHandler } from '../api/client';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { ApiError, newSessionGeneration, setUnauthorizedHandler } from '../api/client';
 import { authApi, modelApi } from '../api/endpoints';
 import type { EntityDef, EntityPerms, Me } from '../api/types';
+
+/**
+ * Spec 032: por qué terminó la sesión, para decirlo en el login, y de quién era (F-03: solo esa persona regresa a donde
+ * estaba). Solo en memoria: recargar lo olvida.
+ */
+export type SessionEnd = { reason: 'expired' | 'signedOut'; username: string } | null;
 
 interface AuthState {
   me: Me | null;
   loading: boolean;
-  login: (username: string, password: string) => Promise<void>;
-  logout: () => Promise<void>;
+  sessionEnd: SessionEnd;
+  login: (username: string, password: string) => Promise<Me>;
+  /** Falso si el servidor no confirmó el cierre (la cookie puede seguir viva): la sesión sigue abierta en la SPA. */
+  logout: () => Promise<boolean>;
   /** Entities visible to the current user (read permission or superuser / modeler). */
   entities: EntityDef[];
   entitiesLoading: boolean;
@@ -28,6 +36,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [entities, setEntities] = useState<EntityDef[]>([]);
   const [entitiesLoading, setEntitiesLoading] = useState(false);
+  const [sessionEnd, setSessionEnd] = useState<SessionEnd>(null);
+  const meRef = useRef<Me | null>(null);
+  meRef.current = me;
 
   const perms = useCallback((entity: string): EntityPerms => {
     if (!me) return NONE;
@@ -60,18 +71,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [me, reloadEntities]);
 
   useEffect(() => {
-    setUnauthorizedHandler(() => setMe(null));
+    // Un 401 con la sesión abierta es una sesión que expiró (o se revocó); sin sesión, solo es que no hay una.
+    setUnauthorizedHandler(() => {
+      const previous = meRef.current;
+      // F-02: tras «Cerraste sesión» un 401 rezagado no lo cambia por «expiró».
+      if (previous) setSessionEnd((end) => (end?.reason === 'signedOut' ? end : { reason: 'expired', username: previous.username }));
+      setMe(null);
+    });
     return () => setUnauthorizedHandler(null);
   }, []);
 
   const login = useCallback(async (username: string, password: string) => {
     const user = await authApi.login(username, password);
+    newSessionGeneration();
+    setSessionEnd(null);
     setMe(user);
+    return user;
   }, []);
 
   const logout = useCallback(async () => {
-    try { await authApi.logout(); } catch (e) { if (!(e instanceof ApiError)) throw e; }
+    // F-01: «Cerraste sesión» solo si el servidor la cerró (204) o ya no había sesión (401). Si falla la red o el servidor,
+    // la cookie puede seguir viva: no se le dice a la persona que salió.
+    try { await authApi.logout(); } catch (e) {
+      if (!(e instanceof ApiError)) throw e;
+      if (e.status !== 401) return false;
+    }
+    newSessionGeneration();
+    setSessionEnd({ reason: 'signedOut', username: meRef.current?.username ?? '' });
     setMe(null);
+    return true;
   }, []);
 
   // setMe con un objeto nuevo dispara la recarga de catálogos (efecto de arriba).
@@ -91,8 +119,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const value = useMemo<AuthState>(() => ({
-    me, loading, login, logout, entities: visible, entitiesLoading, reloadEntities, refresh, perms, switchCompany,
-  }), [me, loading, login, logout, visible, entitiesLoading, reloadEntities, refresh, perms, switchCompany]);
+    me, loading, sessionEnd, login, logout, entities: visible, entitiesLoading, reloadEntities, refresh, perms, switchCompany,
+  }), [me, loading, sessionEnd, login, logout, visible, entitiesLoading, reloadEntities, refresh, perms, switchCompany]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

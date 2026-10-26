@@ -12,7 +12,7 @@ type Pantalla = { capturas: string[] } | { sinCaptura: string };
 
 /** Ruta de App.tsx → capturas que la protegen (archivo › nombre) o por qué no tiene. */
 export const PANTALLAS: Record<string, Pantalla> = {
-  '/login': { capturas: ['visual.spec.ts/login-light.png', 'visual.spec.ts/login-dark.png'] },
+  '/login': { capturas: ['visual.spec.ts/login-light.png', 'visual.spec.ts/login-dark.png', 'visual.spec.ts/login-movil.png', 'visual.spec.ts/login-error-light.png', 'visual.spec.ts/login-error-dark.png'] },
   '/': { capturas: ['navegacion.spec.ts/inicio-light.png', 'navegacion.spec.ts/inicio-dark.png'] },
   'm/:app': { sinCaptura: 'misma plantilla que el inicio (navegacion.spec.ts › inicio-*), filtrada por módulo' },
   admin: { capturas: ['navegacion.spec.ts/configuracion-light.png', 'navegacion.spec.ts/configuracion-dark.png'] },

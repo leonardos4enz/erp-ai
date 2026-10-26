@@ -230,6 +230,39 @@ public class ApiSecurityTests(ApiSecurityTests.Host host) : IClassFixture<ApiSec
         Assert.Equal(401, (await api.PostAsync("/api/auth/login", new { username = "api-bloqueo", password = UserPwd })).Status);
     }
 
+    // Spec 032 (STRIDE, caminos alternos e I): la pantalla nueva no distingue «bloqueada» porque el servidor tampoco lo hace.
+    [Fact]
+    public async Task la_cuenta_bloqueada_responde_igual_que_un_usuario_inexistente()
+    {
+        using var admin = await host.AdminAsync();
+        Assert.Equal(201, (await admin.PostAsync("/api/admin/users", new { username = "api-bloqueo-032", password = UserPwd, displayName = "Bloqueo 032", roleIds = new[] { await admin.RoleIdAsync("Usuario") } })).Status);
+        using var api = host.Anonymous();
+        for (var i = 0; i < 5; i++) await api.PostAsync("/api/auth/login", new { username = "api-bloqueo-032", password = "incorrecta incorrecta" });
+        var locked = await api.PostAsync("/api/auth/login", new { username = "api-bloqueo-032", password = UserPwd });
+        var missing = await api.PostAsync("/api/auth/login", new { username = "no-existe-032", password = UserPwd });
+        Assert.Equal(401, locked.Status);
+        Assert.Equal(401, missing.Status);
+        Assert.Equal(missing["title"]!.GetValue<string>(), locked["title"]!.GetValue<string>());
+        Assert.Equal(missing["detail"]?.ToString(), locked["detail"]?.ToString());
+    }
+
+    // Spec 032 (STRIDE, límites): el 429 real del login (la pantalla lo muestra con un mensaje genérico). Hasta ahora solo
+    // estaba probado el de otras políticas; la suite sube este límite para no bloquearse a sí misma.
+    [Fact]
+    public async Task el_login_responde_429_al_rebasar_el_limite_por_direccion_sin_decir_nada_del_usuario()
+    {
+        var limited = await host.SiblingAsync(s => s["Security:LoginAttemptsPerMinute"] = "3");
+        using var api = limited.Anonymous();
+        var statuses = new List<int>();
+        for (var i = 0; i < 3; i++) statuses.Add((await api.PostAsync("/api/auth/login", new { username = "no-existe-429", password = "incorrecta incorrecta" })).Status);
+        Assert.Equal([401, 401, 401], statuses);
+        // Con la contraseña correcta también: el límite es por dirección, antes de mirar la cuenta.
+        var over = await api.PostAsync("/api/auth/login", new { username = "api-capturista", password = UserPwd });
+        Assert.Equal(429, over.Status);
+        Assert.DoesNotContain("api-capturista", over.Text);
+        Assert.False(over.Headers.ContainsKey("Set-Cookie"));
+    }
+
     [Fact]
     public async Task no_permite_dejar_el_sistema_sin_administradores()
     {

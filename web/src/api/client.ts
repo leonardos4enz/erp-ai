@@ -42,6 +42,16 @@ export function setUnauthorizedHandler(handler: UnauthorizedHandler | null) {
   onUnauthorized = handler;
 }
 
+/**
+ * Spec 032 (revisión adversarial F-02): cada inicio o cierre de sesión abre una generación nueva. El 401 de una petición
+ * enviada en una generación anterior (en vuelo durante el cierre o antes de volver a entrar) es de una sesión que ya no
+ * existe: no avisa al manejador, que si no echaría a quien acaba de entrar o cambiaría «Cerraste sesión» por «expiró».
+ */
+let generation = 0;
+export function newSessionGeneration() {
+  generation++;
+}
+
 interface RequestOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
   body?: unknown;
@@ -72,6 +82,7 @@ export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T
   if (opts.body !== undefined) headers['Content-Type'] = 'application/json';
   if (opts.rawBody !== undefined) headers['Content-Type'] = 'application/octet-stream';
 
+  const sentIn = generation;
   let res: Response;
   try {
     res = await fetch(url, {
@@ -86,7 +97,7 @@ export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T
     throw new ApiError(0, { title: 'No se pudo conectar con el servidor' });
   }
 
-  if (res.status === 401 && !opts.skipAuthRedirect && onUnauthorized) {
+  if (res.status === 401 && !opts.skipAuthRedirect && onUnauthorized && sentIn === generation) {
     onUnauthorized();
   }
 

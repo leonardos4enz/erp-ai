@@ -20,6 +20,19 @@ for (const scheme of ['light', 'dark'] as const) {
       await ctx.close();
     });
 
+    // Spec 032: el aviso genérico tras un 401 (mismo texto para inexistente, incorrecta o bloqueada).
+    test('login con error', async ({ browser }) => {
+      const ctx = await browser.newContext({ colorScheme: scheme, storageState: undefined, viewport: { width: 1280, height: 800 } });
+      const page = await ctx.newPage();
+      await page.goto('/login');
+      await page.getByLabel('Usuario').fill('e2e-visual-no-existe');
+      await page.getByLabel('Contraseña', { exact: true }).fill('una contraseña cualquiera');
+      await page.getByRole('button', { name: 'Entrar' }).click();
+      await expect(page.getByRole('alert')).toContainText('Usuario o contraseña incorrectos');
+      await expect(page).toHaveScreenshot(`login-error-${scheme}.png`);
+      await ctx.close();
+    });
+
     test('formulario dinámico', async ({ page }) => {
       await page.goto('/c/Empaque/new');
       await expect(page.getByLabel('Clave')).toBeVisible();
@@ -33,6 +46,16 @@ for (const scheme of ['light', 'dark'] as const) {
     });
   });
 }
+
+// Spec 032: en móvil, sin ilustración y con el logotipo sobre el formulario.
+test('móvil: el login', async ({ browser }) => {
+  const ctx = await browser.newContext({ colorScheme: 'light', storageState: undefined, viewport: { width: 390, height: 844 } });
+  const page = await ctx.newPage();
+  await page.goto('/login');
+  await expect(page.getByRole('button', { name: 'Entrar' })).toBeVisible();
+  await expect(page).toHaveScreenshot('login-movil.png');
+  await ctx.close();
+});
 
 test('móvil: el formulario se adapta sin scroll horizontal', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });

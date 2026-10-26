@@ -61,6 +61,13 @@
   --shadow-md: 0 4px 12px rgb(0 0 0 / 0.08), 0 1px 3px rgb(0 0 0 / 0.06);
   --shadow-lg: 0 20px 40px rgb(0 0 0 / 0.14), 0 4px 10px rgb(0 0 0 / 0.06);
   --overlay: rgb(9 9 11 / 0.45);
+  /* Spec 032: panel de marca del inicio de sesión (índigo profundo en los dos temas; texto ≥ 4.5:1 sobre --brand-to). */
+  --brand-from: #1e1b4b;
+  --brand-to: #4338ca;
+  --brand-glow: rgb(129 140 248 / 0.45);
+  --brand-text: #ffffff;
+  --brand-muted: #e0e7ff;
+  --brand-line: rgb(255 255 255 / 0.28);
   color-scheme: light;
 }
 
@@ -92,5 +99,11 @@
   --shadow-md: 0 4px 12px rgb(0 0 0 / 0.45);
   --shadow-lg: 0 20px 40px rgb(0 0 0 / 0.6);
   --overlay: rgb(0 0 0 / 0.6);
+  --brand-from: #0b0a24;
+  --brand-to: #312e81;
+  --brand-glow: rgb(99 102 241 / 0.35);
+  --brand-text: #ffffff;
+  --brand-muted: #e0e7ff;
+  --brand-line: rgb(255 255 255 / 0.22);
   color-scheme: dark;
 }

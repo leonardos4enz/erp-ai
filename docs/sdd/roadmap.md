@@ -37,8 +37,9 @@ en orden, no en paralelo: casi todas tocan el núcleo del motor (`PlanCompiler`,
 | 029 Endurecimiento 3: capacidades declaradas y canario de fugas | Implementado ([spec](specs/029-endurecimiento-3/spec.md)) |
 | 030 Integración y CI | Implementado ([spec](specs/030-integracion-ci/spec.md)) |
 | 031 Endurecimiento 4 (auditoría 5) | Implementado ([spec](specs/031-endurecimiento-4/spec.md)) |
-| 032 Módulo de Ventas | Planeado |
-| 033 CFDI 4.0 con PAC | Planeado |
+| 032 Rediseño del inicio de sesión | Implementado ([spec](specs/032-login/spec.md)) |
+| 033 Módulo de Ventas | Planeado |
+| 034 CFDI 4.0 con PAC | Planeado |
 
 ## Diagnóstico
 | Brecha señalada | Situación actual | Spec |
@@ -277,7 +278,7 @@ reglas de negocio** (constitución I.1), configurables por metadatos con valores
   ventas) y revaluación, que siguen de la 020.
 
 ### 023 — Capacidades del motor: listas que se fusionan, reglas de aviso y rutas de tres niveles
-Origen: pendientes de la 022 que limitan a los módulos y que Ventas (024, luego 025, 026, 027, 028, 031, ahora 032) necesitará; plan del dueño (2026-10-24).
+Origen: pendientes de la 022 que limitan a los módulos y que Ventas (024, luego 025, 026, 027, 028, 031, 032, ahora 033) necesitará; plan del dueño (2026-10-24).
 - **Estado:** implementado en la [spec 023](specs/023-capacidades-motor/spec.md). `merge` en las seis listas del catálogo
   (reglas, automatizaciones, vistas, reportes, webhooks, tareas): agrega o reemplaza por nombre en su lugar; la vista previa
   ya no dice que quita lo que un `merge` conserva, y un paquete de Entornos que extiende un catálogo que no crea llega al
@@ -358,7 +359,7 @@ la representación impresa del CFDI). Ventas pasa a la 028 y CFDI 4.0 a la 029.
   servidor SMTP/proveedor, plantillas de mensaje y bitácora); adjuntarlo automáticamente al ejecutar una transición
   (requiere el tipo de campo archivo); firma electrónica (e.firma/FIEL: certificados y custodia de llaves, otra spec);
   **tipo de campo `image`/`file` en catálogos** (DDL, captura, importación, OData, miniaturas y límites por registro: la
-  base `meta.[File]` ya existe); SVG sanitizado y WebP; códigos QR y de barras (los pedirá el CFDI, ahora 033); diseño libre por
+  base `meta.[File]` ya existe); SVG sanitizado y WebP; códigos QR y de barras (los pedirá el CFDI, ahora 034); diseño libre por
   coordenadas.
 
 ### 028 — Mejoras del proceso (retrospectiva 001)
@@ -437,6 +438,19 @@ Origen: la auditoría externa 5 (2026-10-25, solo lectura sobre la 029), que la 
   roles de otro módulo o un permiso por campo para cuentas de servicio (R-031-1, capacidad nueva del motor); que el
   almacenista vea el costo de entrada (R-029-6, decisión del dueño).
 
+### 032 — Rediseño del inicio de sesión
+Origen: pedido del dueño (2026-10-25) antes de Ventas: el login «parecía prototipo». Ventas pasa a la 033 y CFDI 4.0 a la 034.
+- **Estado:** implementado en la [spec 032](specs/032-login/spec.md). Dos paneles desde 1024 px (marca con ilustración SVG
+  de catálogos y relaciones | formulario), isotipo propio, animación solo CSS sobre `transform`/`opacity` que se apaga con
+  `prefers-reduced-motion`; mostrar contraseña, aviso de Bloq Mayús, errores por campo y foco de vuelta a la contraseña;
+  mensajes propios para 401 (uno solo, también para la cuenta bloqueada), 429, servidor no disponible, sesión expirada y
+  sesión cerrada. Sin cambios de contrato, rutas ni CSP; 429 real del login probado en integración.
+- **Pendiente (diferido con razón):** el isotipo nuevo en la barra lateral y el favicon (mueven las 19 capturas de otras
+  pantallas: con la siguiente spec que toque el menú); recuperación de contraseña, SSO y segundo factor (rutas anónimas y
+  contrato nuevos); logo de la empresa antes de iniciar sesión (ruta anónima; spec 032, CLARIFY 2).
+- **Encontrado (preexistente, fuera de alcance):** R-032-6, posible fuga en la bitácora para quien tiene alcance de unidad
+  (`AuditFilter` y acciones fuera de sus listas): para la spec de pendientes o la auditoría 6.
+
 ## Specs planeadas (después de la 029)
 En este orden, por decisión del dueño (2026-10-25):
 1. ~~**029 — Endurecimiento 3: capacidades declaradas y canario de fugas** (retrospectiva P1 y P2).~~ Implementado (ver arriba).
@@ -476,15 +490,16 @@ En este orden, por decisión del dueño (2026-10-25):
      R-029-5), R-021-5 (`ForwardedHeaders`), R-021-6 (bloqueo de navegación en la SPA) y un permiso por campo para cuentas
      de servicio (R-031-1). Va en su propia spec; **el dueño decide si antes de Ventas** (se numeraría al abrirla y Ventas y
      CFDI se recorrerían). Sus pruebas de concurrencia y fallas parciales van en integración.
-3. **032 — Módulo de Ventas:** clientes, cotización, pedido, salida de almacén con costo de ventas (póliza de salidas),
+3. ~~**032 — Rediseño del inicio de sesión**~~ (pedido del dueño antes de Ventas). Implementado (ver arriba).
+4. **033 — Módulo de Ventas:** clientes, cotización, pedido, salida de almacén con costo de ventas (póliza de salidas),
    factura y cobranza. Usa `merge` para extender Producto e Inventario, avisos (límite de crédito) y rutas de tres niveles;
    declara su módulo con `setApp` (orden 15, entre Compras e Inventario).
-4. **033 — CFDI 4.0 con PAC:** timbrado de la factura de Ventas con un proveedor autorizado, cancelación y complemento de
+5. **034 — CFDI 4.0 con PAC:** timbrado de la factura de Ventas con un proveedor autorizado, cancelación y complemento de
    pago; el secreto del PAC fuera del código (constitución II.7). Su representación impresa usa las plantillas de la 027
    (con un bloque de código QR nuevo).
-5. **Pólizas en moneda extranjera** (pendiente de la 020).
-6. **Revaluación de existencias** (pendiente de la 020).
-7. **Reversa de pólizas con otra póliza** (pendiente de la 020).
+6. **Pólizas en moneda extranjera** (pendiente de la 020).
+7. **Revaluación de existencias** (pendiente de la 020).
+8. **Reversa de pólizas con otra póliza** (pendiente de la 020).
 
 ## Decisión: ¿extensión con código?
 La auditoría tiene razón en el costo: cada necesidad nueva exige una capacidad del motor. Se mantiene

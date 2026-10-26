@@ -532,7 +532,7 @@ test.describe('H4 · aprobación de cambios de seguridad', () => {
     // El primero solicita desde la UI: el mensaje dice que espera aprobación.
     await page.goto('/login');
     await page.getByLabel('Usuario').fill(ADMIN.username);
-    await page.getByLabel('Contraseña').fill(ADMIN.password);
+    await page.getByLabel('Contraseña', { exact: true }).fill(ADMIN.password);
     await page.getByRole('button', { name: 'Entrar' }).click();
     await expect(page.getByLabel('Navegación principal')).toBeVisible();
     await page.goto('/admin/security');
@@ -544,7 +544,7 @@ test.describe('H4 · aprobación de cambios de seguridad', () => {
 
     await page.goto('/login');
     await page.getByLabel('Usuario').fill(users.admin2);
-    await page.getByLabel('Contraseña').fill(PWD);
+    await page.getByLabel('Contraseña', { exact: true }).fill(PWD);
     await page.getByRole('button', { name: 'Entrar' }).click();
     await expect(page.getByLabel('Navegación principal')).toBeVisible();
     await page.goto('/admin/security');

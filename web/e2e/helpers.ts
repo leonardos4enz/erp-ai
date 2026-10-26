@@ -54,7 +54,7 @@ export async function roleId(api: APIRequestContext, name: string): Promise<numb
 export async function uiLogin(page: Page, username: string, password: string) {
   await page.goto('/login');
   await page.getByLabel('Usuario').fill(username);
-  await page.getByLabel('Contraseña').fill(password);
+  await page.getByLabel('Contraseña', { exact: true }).fill(password);
   await page.getByRole('button', { name: 'Entrar' }).click();
   await expect(page.getByRole('navigation', { name: 'Navegación principal' }).or(page.getByLabel('Navegación principal'))).toBeVisible();
 }
