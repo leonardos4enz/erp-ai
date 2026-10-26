@@ -112,4 +112,6 @@ preexistente), R-032-3 (cuenta de prueba que se bloquea en reruns), R-032-4 (mov
 R-032-5 (minificador y `animation` sin nombre), R-032-6 (bitácora de jerarquía, preexistente, medio).
 
 ## 6. CI
-Push a `main` y corrida de CI: ver abajo.
+Push de `b8ac1db` a `main`: [corrida 40251043995](https://github.com/leonardos4enz/erp-ai/actions/runs/40251043995)
+**en verde** (rápido + integración + E2E completa en `windows-2025`; 00:47 → 01:03 UTC, unos 16 min). Es la segunda
+corrida completa de la spec.
