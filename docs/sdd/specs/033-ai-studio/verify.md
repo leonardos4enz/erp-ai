@@ -6,7 +6,7 @@
 - unitarias: 740 (+35: 643 de Erp.Tests, +7 en StudioCoreTests; 97 de integración, +28 en StudioTests, StudioModulesTests y StudioProviderTests) y Vitest 36 (sin cambios)
 - e2e: 374 (+0: la spec no tiene pantalla; la 034 la agrega)
 - corridas completas: 2 (7 min 23 s antes de la revisión adversarial; 7 min 09 s la final)
-- corridas parciales: 15 (multiempresa con el PUT retrasado: código anterior y corregido; --veces=3 sobre compras + inventario + multiempresa + jerarquia tras CI; StudioTests ×4 iterando; StudioModulesTests; StudioProviderTests ×6 hasta tener el servidor simulado; las nuevas de integración y StudioCoreTests ×3 con el código final)
+- corridas parciales: 19 (visual-modelador con las funciones retrasadas: anterior y corregido; compras + visual-modelador; --veces=3 sobre compras + inventario + valuacion-contable + explorador + visual-modelador; multiempresa con el PUT retrasado: código anterior y corregido; --veces=3 sobre compras + inventario + multiempresa + jerarquia tras CI; StudioTests ×4 iterando; StudioModulesTests; StudioProviderTests ×6 hasta tener el servidor simulado; las nuevas de integración y StudioCoreTests ×3 con el código final)
 - contra el código anterior: 1 (reversión local de las 7 correcciones de la revisión adversarial: las 7 pruebas fallan)
 - hallazgos: 0/2/9
 - categorías: seguridad=5, motor-api=4, pruebas=2
@@ -125,4 +125,13 @@ Push de `b2ad44f`: [corrida 40561473722](https://github.com/leonardos4enz/erp-ai
   `--veces=3` sobre compras + inventario + multiempresa + jerarquia, 65 × 3 en verde.
 - `jerarquia.spec.ts › Spec 018 H1 CA2`: `read ECONNRESET` en `GET /api/admin/oauth-clients`; las demás pruebas siguieron
   contra la misma instancia (no se cayó el servidor). No se reproduce en local; queda en R-030-5.
-El resultado de la corrida del commit de corrección se registra en un commit aparte («CI en verde»), como en la 030–032.
+Push de `8c2b53e`: [corrida 40565089739](https://github.com/leonardos4enz/erp-ai/actions/runs/40565089739) **en rojo**
+otra vez, con otras dos pruebas (las dos anteriores pasaron), también carreras de la prueba con el runner lento:
+- `visual-modelador.spec.ts › H3 CA4`: el editor de expresiones carga las funciones al montarse; «ROU» se escribía antes y no
+  aparecía la sugerencia. Reproducida en local con 1.5 s de retraso en `/api/model/expressions/functions` (falla con la
+  versión anterior, pasa con la corregida); la prueba espera la lista antes de escribir.
+- `explorador.spec.ts › H1 CA9`: el foco del diagrama se leía antes de llegar (los dos `aria-label` nulos); la prueba espera
+  el foco y el movimiento.
+`--veces=3` sobre compras + inventario + valuacion-contable + explorador + visual-modelador: 87 × 3 en verde. Ninguna de las
+cuatro fallas toca código de esta spec (la 033 no tiene pantalla) y la duración de la E2E en CI no cambió (~14 min); el
+runner las expone ahora. El resultado de la corrida siguiente se registra en un commit aparte («CI en verde»).

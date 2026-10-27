@@ -318,10 +318,14 @@ test('H1 CA9: el diagrama se recorre con el teclado y Enter abre el detalle', as
   const boxes = diagram(page).getByRole('button');
   // Una sola parada de tabulación en el diagrama.
   await expect(diagram(page).locator('[tabindex="0"]')).toHaveCount(1);
+  // Regresión (CI de la 033, R-030-5): el foco se leía antes de que llegara (el diagrama aún se pintaba en el runner lento).
   await boxes.first().focus();
+  await expect(boxes.first()).toBeFocused();
   const first = await page.evaluate(() => document.activeElement?.getAttribute('aria-label'));
+  expect(first).toMatch(/^Tabla app\./);
   await page.keyboard.press('ArrowDown');
   await page.keyboard.press('ArrowRight');
+  await expect.poll(() => page.evaluate(() => document.activeElement?.getAttribute('aria-label'))).not.toBe(first);
   const moved = await page.evaluate(() => document.activeElement?.getAttribute('aria-label'));
   expect(moved).not.toBe(first);
   expect(moved).toMatch(/^Tabla app\./);

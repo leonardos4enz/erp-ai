@@ -370,8 +370,12 @@ test('H3 CA5: constructor de condiciones — listas, Y/O, rutas, «es uno de», 
 });
 
 test('H3 CA4: la fórmula y el valor por defecto de un campo usan el editor de expresiones', async ({ page }) => {
+  // Regresión (CI de la 033, R-030-5): el editor carga la lista de funciones al montarse; si «ROU» se escribía antes de que
+  // llegara, no aparecía la sugerencia (solo en el runner lento de CI). Se espera la lista antes de escribir.
+  const functions = page.waitForResponse((r) => r.url().includes('/api/model/expressions/functions'));
   await page.goto(`/admin/model?edit=${NOTA}`);
   await page.getByRole('button', { name: 'Mostrar opciones de Total' }).click();
+  expect((await functions).ok()).toBe(true);
   const byDefault = page.getByRole('combobox', { name: /Valor por defecto/ });
   await byDefault.pressSequentially('ROU');
   await expect(page.getByRole('option', { name: /ROUND/ })).toBeVisible();
