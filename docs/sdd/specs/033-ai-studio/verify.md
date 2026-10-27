@@ -149,4 +149,6 @@ suyo; con el mismo retraso H1 CA4 pasa, y `--veces=3` sobre compras + integracio
 reabrir la spec por esta falla (vía la sesión de arquitectura). La causa de fondo de las intermitentes la busca la
 auditoría 6.
 
-Push de la corrección: la corrida se registra abajo cuando termine.
+Push de la corrección `381bae8`: [corrida 40580869299](https://github.com/leonardos4enz/erp-ai/actions/runs/40580869299)
+**en verde** (rápido + integración + E2E completa; 20:45 → 21:01 UTC, unos 16 min). Este registro (solo `verify.md`) dispara
+otra corrida con el mismo código de producto; su resultado lo confirma la sesión antes de dar la spec por cerrada.
