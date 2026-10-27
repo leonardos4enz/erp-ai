@@ -294,14 +294,22 @@ test('H4 CA1: tipos de cambio por fecha: registrar, reemplazar el del día, filt
   await page.goto('/admin/companies');
   await page.getByRole('tab', { name: 'Tipos de cambio' }).click();
   const form = page.getByRole('region', { name: 'Registrar tipo de cambio' });
-  const save = async (from: string, to: string, date: string, rate: string) => {
+  // Regresión (CI de la 033, R-030-5): al guardar, la pantalla vacía «Tipo de cambio»; si la respuesta llegaba después de
+  // llenar el siguiente, lo borraba y ese tipo no se guardaba (solo en el runner lento de CI). Cada guardado espera su PUT
+  // y que el campo quede vacío antes del siguiente.
+  const save = async (from: string, to: string, date: string, rate: string, server = true) => {
     await form.getByLabel(/^De/).fill(from);
     await form.getByLabel(/^A\b/).fill(to);
     await form.getByLabel(/^Fecha/).fill(date);
     await form.getByLabel(/^Tipo de cambio/).fill(rate);
+    const saved = server ? page.waitForResponse((r) => r.url().includes('/api/admin/exchange-rates') && r.request().method() === 'PUT') : null;
     await form.getByRole('button', { name: 'Guardar' }).click();
+    if (saved) {
+      expect((await saved).ok()).toBe(true);
+      await expect(form.getByLabel(/^Tipo de cambio/)).toHaveValue('');
+    }
   };
-  await save('USD', 'USD', '2026-10-01', '1');
+  await save('USD', 'USD', '2026-10-01', '1', false);
   await expect(form.getByText('Elige dos monedas distintas.')).toBeVisible();
   await save('USD', 'MXN', '2026-10-01', '18.5');
   await expect(page.getByText('Tipo de cambio guardado')).toBeVisible();

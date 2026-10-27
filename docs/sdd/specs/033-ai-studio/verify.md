@@ -6,7 +6,7 @@
 - unitarias: 740 (+35: 643 de Erp.Tests, +7 en StudioCoreTests; 97 de integración, +28 en StudioTests, StudioModulesTests y StudioProviderTests) y Vitest 36 (sin cambios)
 - e2e: 374 (+0: la spec no tiene pantalla; la 034 la agrega)
 - corridas completas: 2 (7 min 23 s antes de la revisión adversarial; 7 min 09 s la final)
-- corridas parciales: 12 (StudioTests ×4 iterando; StudioModulesTests; StudioProviderTests ×6 hasta tener el servidor simulado; las nuevas de integración y StudioCoreTests ×3 con el código final)
+- corridas parciales: 15 (multiempresa con el PUT retrasado: código anterior y corregido; --veces=3 sobre compras + inventario + multiempresa + jerarquia tras CI; StudioTests ×4 iterando; StudioModulesTests; StudioProviderTests ×6 hasta tener el servidor simulado; las nuevas de integración y StudioCoreTests ×3 con el código final)
 - contra el código anterior: 1 (reversión local de las 7 correcciones de la revisión adversarial: las 7 pruebas fallan)
 - hallazgos: 0/2/9
 - categorías: seguridad=5, motor-api=4, pruebas=2
@@ -116,4 +116,13 @@ R-033-7 (precios configurados), R-033-8 (sesión interrumpida no se retoma), R-0
 R-033-10 (sondeo costoso), R-033-11 (informe declarado por el modelo).
 
 ## 6. CI
-El push a `main` dispara la segunda corrida completa (integración y E2E en `windows-2025`); su resultado se registra en un commit aparte («CI en verde»), como en la 030–032.
+Push de `b2ad44f`: [corrida 40561473722](https://github.com/leonardos4enz/erp-ai/actions/runs/40561473722) **en rojo**
+(rápido en verde; integración en verde; E2E completa con 2 fallas, 18:36 → 18:51 UTC). La spec se reabrió (CLAUDE.md):
+- `multiempresa.spec.ts › H4 CA1` (preexistente, no de esta spec; es una de las intermitentes de R-030-5): la prueba llenaba el
+  siguiente tipo de cambio sin esperar la respuesta del anterior, y al llegar la pantalla vaciaba «Tipo de cambio»; en el
+  runner lento se perdía un tipo (1 fila de USD → MXN en lugar de 2). **Reproducida en local** con 700 ms de retraso en el
+  PUT (falla igual que en CI) y corregida: cada guardado espera su PUT y el campo vacío; con el mismo retraso pasa, y
+  `--veces=3` sobre compras + inventario + multiempresa + jerarquia, 65 × 3 en verde.
+- `jerarquia.spec.ts › Spec 018 H1 CA2`: `read ECONNRESET` en `GET /api/admin/oauth-clients`; las demás pruebas siguieron
+  contra la misma instancia (no se cayó el servidor). No se reproduce en local; queda en R-030-5.
+El resultado de la corrida del commit de corrección se registra en un commit aparte («CI en verde»), como en la 030–032.
