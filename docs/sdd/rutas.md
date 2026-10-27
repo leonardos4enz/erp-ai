@@ -9,7 +9,7 @@ sin compuerta, si es costosa sin límite o si aplica lo revisado sin huella. `we
 Capacidades: **anónima** (lista blanca) · **sesión** (lo propio del usuario) · **registros** (el motor exige permiso del
 catálogo, alcance por registro y seguridad por campo) · **modelador** · **usuarios** · **auditoría** · **superusuario**.
 
-Total: 139 rutas.
+Total: 149 rutas.
 
 | Método | Ruta | Capacidad | Efecto | Compuerta | Costosa | Huella |
 |---|---|---|---|---|---|---|
@@ -113,6 +113,8 @@ Total: 139 rutas.
 | GET | `/api/explorer/entities/{name}` | modelador |  |  |  |  |
 | GET | `/api/explorer/navigation` | modelador |  |  |  |  |
 | GET | `/api/explorer/relations` | modelador |  |  |  |  |
+| GET | `/api/explorer/risks` | modelador |  |  |  |  |
+| GET | `/api/explorer/routes` | modelador |  |  |  |  |
 | GET | `/api/explorer/security` | modelador |  |  |  |  |
 | GET | `/api/explorer/usages` | modelador |  |  |  |  |
 | GET | `/api/files/{id:int}` | modelador |  |  |  |  |
@@ -132,6 +134,14 @@ Total: 139 rutas.
 | GET | `/api/reports/{entity}/{name}` | registros |  |  | agrega el catálogo completo (aggregate) |  |
 | GET | `/api/reports/{entity}/{name}/export` | registros |  |  | hasta 1000 grupos en un archivo (bulk) |  |
 | GET | `/api/search` | registros |  |  | busca en todos los catálogos con folio (search) |  |
+| GET | `/api/studio/` | modelador |  |  |  |  |
+| GET | `/api/studio/sessions` | modelador |  |  |  |  |
+| POST | `/api/studio/sessions` | modelador | sesión |  | un agente que llama al modelo de lenguaje por pasos (Studio:SessionsPerDay, Studio:CostPerDayUsd y una sesión activa por persona) |  |
+| GET | `/api/studio/sessions/{id:int}` | modelador |  |  |  |  |
+| POST | `/api/studio/sessions/{id:int}/apply` | modelador | modelo | cambio directo |  | reviewHash |
+| POST | `/api/studio/sessions/{id:int}/cancel` | modelador | sesión |  |  |  |
+| POST | `/api/studio/sessions/{id:int}/discard` | modelador | sesión |  |  |  |
+| GET | `/api/studio/tools` | modelador |  |  |  |  |
 | GET | `/api/users/lookup` | sesión |  |  |  |  |
 | GET | `/api/views/{entity}/` | registros |  |  |  |  |
 | POST | `/api/views/{entity}/` | registros | sesión |  |  |  |

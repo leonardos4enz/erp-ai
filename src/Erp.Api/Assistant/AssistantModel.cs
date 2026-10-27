@@ -56,7 +56,7 @@ public sealed class AnthropicAssistantModel : IAssistantModel, IDisposable
     /// Un cliente por clave (la clave puede cambiar desde la app). Siempre con la clave explícita: así el SDK no toma
     /// credenciales del equipo (variables o perfiles).
     /// </summary>
-    private IAnthropicClient Client(AssistantCredential credential)
+    internal IAnthropicClient Client(AssistantCredential credential)
     {
         lock (gate)
         {
@@ -108,7 +108,7 @@ public sealed class AnthropicAssistantModel : IAssistantModel, IDisposable
         catch (Exception ex) { throw Fail(ex); }
     }
 
-    private AssistantProviderException Fail(Exception ex)
+    internal AssistantProviderException Fail(Exception ex)
     {
         var code = ex switch
         {

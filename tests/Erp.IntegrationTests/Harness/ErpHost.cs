@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.SqlClient;
 
@@ -51,6 +52,9 @@ public class ErpHost : IAsyncLifetime
     /// <summary>Opciones de la instancia principal; una subclase las cambia (p. ej. sin cambios directos).</summary>
     protected virtual void Configure(IDictionary<string, string?> settings) { }
 
+    /// <summary>Spec 033: servicios que una subclase reemplaza en todas sus instancias (p. ej. el proveedor de LLM simulado).</summary>
+    protected virtual void ConfigureServices(Microsoft.Extensions.DependencyInjection.IServiceCollection services) { }
+
     public virtual async Task InitializeAsync()
     {
         await DropAsync();
@@ -97,7 +101,7 @@ public class ErpHost : IAsyncLifetime
             ["Assistant:BaseUrl"] = "http://127.0.0.1:9", // ninguna prueba de integración habla con un proveedor
         };
         configure(settings);
-        var f = new Factory(Path.Combine(root, "src", "Erp.Api"), settings);
+        var f = new Factory(Path.Combine(root, "src", "Erp.Api"), settings, ConfigureServices);
         _factories.Add(f);
         return f;
     }
@@ -127,7 +131,7 @@ public class ErpHost : IAsyncLifetime
 
     public async Task ExecAsync(string sql) => await ScalarAsync<object>(sql);
 
-    public async Task DisposeAsync()
+    public virtual async Task DisposeAsync()
     {
         foreach (var f in _factories) await f.DisposeAsync();
         await DropAsync();
@@ -155,7 +159,8 @@ public class ErpHost : IAsyncLifetime
     }
 
     /// <summary>Una instancia de la API en memoria (TestServer).</summary>
-    public sealed class Factory(string contentRoot, IReadOnlyDictionary<string, string?> settings) : WebApplicationFactory<Program>
+    public sealed class Factory(string contentRoot, IReadOnlyDictionary<string, string?> settings,
+        Action<Microsoft.Extensions.DependencyInjection.IServiceCollection>? services = null) : WebApplicationFactory<Program>
     {
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
@@ -163,6 +168,7 @@ public class ErpHost : IAsyncLifetime
             builder.UseContentRoot(contentRoot);
             // UseSetting llega a WebApplication.CreateBuilder: AddErp lee varias opciones al registrar los servicios.
             foreach (var (k, v) in settings) builder.UseSetting(k, v);
+            if (services is not null) builder.ConfigureTestServices(services);
         }
 
         internal Task StartAsync()

@@ -76,9 +76,21 @@ public static class ErpApp
         // Spec 011: asistente IA. La clave de Anthropic la guarda un administrador desde la app (cifrada con Data Protection);
         // si el servidor la trae por configuración (user-secrets o variable de entorno), esa manda.
         services.AddSingleton(AssistantOptions.From(config));
-        services.AddSingleton<IAssistantModel, AnthropicAssistantModel>();
+        services.AddSingleton<IAssistantModel>(sp => sp.GetRequiredService<AnthropicAssistantModel>());
         services.AddSingleton<AssistantKeys>();
         services.AddScoped<AssistantService>();
+        // Spec 033: ERP AI Studio. Las herramientas son rutas de la API ejecutadas con la identidad de la persona; la copia
+        // aislada levanta estos mismos servicios (ServiceBlueprint) sobre otra base.
+        services.AddSingleton(new Erp.Api.Studio.ServiceBlueprint(services));
+        services.AddSingleton(Erp.Api.Studio.StudioOptions.From(config));
+        services.AddSingleton<AnthropicAssistantModel>();
+        services.AddSingleton<Erp.Api.Studio.IStudioModel, Erp.Api.Studio.AnthropicStudioModel>();
+        services.AddSingleton<Erp.Api.Studio.RouteDispatcher>();
+        services.AddSingleton<Erp.Api.Studio.SandboxFactory>();
+        services.AddSingleton<Erp.Api.Studio.StudioToolRunner>();
+        services.AddScoped<Erp.Api.Studio.StudioAgent>();
+        services.AddScoped<Erp.Api.Studio.StudioService>();
+        services.AddHostedService<Erp.Api.Studio.StudioDispatcher>();
 
         // ---------- Autenticación: cookie (ADR-0002) ----------
         // Spec 008: con «Authorization: Bearer» se usa la clave de API (y nunca la cookie); si no, la cookie. Spec 018: «Bearer erpat_…» es un token OAuth.
@@ -200,6 +212,7 @@ public static class ErpApp
         app.MapEnvironments();
         app.MapCompanies();
         app.MapAssistant();
+        app.MapStudio(); // spec 033
         app.MapOAuthToken(); // spec 018
         app.MapOData();
         app.MapExplorer(); // spec 025

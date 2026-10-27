@@ -22,11 +22,14 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Erp.Tests" />
+    <InternalsVisibleTo Include="Erp.IntegrationTests" />
   </ItemGroup>
 
   <!-- Spec 027 (ADR-0007): la fuente de los PDF viaja dentro del ensamblado (Lato, SIL OFL 1.1): igual en Windows y Linux. -->
   <ItemGroup>
     <EmbeddedResource Include="Printing\Fonts\*.ttf" LogicalName="Erp.Fonts.%(Filename)%(Extension)" />
+    <!-- Spec 033: el registro de riesgos, para el explorador y la herramienta "riesgos" del agente. -->
+    <EmbeddedResource Include="..\..\docs\sdd\riesgos.md" LogicalName="riesgos.md" />
   </ItemGroup>
 
 </Project>

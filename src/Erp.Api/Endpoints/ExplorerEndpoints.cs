@@ -91,6 +91,19 @@ public static class ExplorerEndpoints
         {
             return ModelExplorer.Navigation(await store.GetAsync(ct), await store.GetAppsAsync(ct));
         }).Requires(Capability.Modeler);
+
+        // Spec 033: inventario de rutas en vivo y registro de riesgos (herramientas del agente de ERP AI Studio).
+        g.MapGet("/routes", (EndpointDataSource endpoints, string? q) =>
+        {
+            if (q is { Length: > ApiInventory.MaxQuery }) throw new AppException(400, $"El texto a buscar admite como máximo {ApiInventory.MaxQuery} caracteres.");
+            return ApiInventory.Routes(endpoints, Blank(q));
+        }).Requires(Capability.Modeler);
+
+        g.MapGet("/risks", (string? q) =>
+        {
+            if (q is { Length: > ApiInventory.MaxQuery }) throw new AppException(400, $"El texto a buscar admite como máximo {ApiInventory.MaxQuery} caracteres.");
+            return ApiInventory.Risks(Blank(q));
+        }).Requires(Capability.Modeler);
     }
 
     private static async Task<DbSchema> DatabaseAsync(HttpContext http, Db db, MetadataStore store, string? schema, string? app, string? q, CancellationToken ct)

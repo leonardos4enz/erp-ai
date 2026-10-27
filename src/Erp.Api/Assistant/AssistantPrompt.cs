@@ -6,7 +6,9 @@ namespace Erp.Api.Assistant;
 /// </summary>
 public static class AssistantPrompt
 {
-    public const string Instructions = """
+    public const string Instructions = Intro + "\n\n" + PlanReference + "\n\n" + Closing;
+
+    private const string Intro = """
         Eres el asistente de modelado de un ERP dirigido por metadatos. Una persona autorizada (modeladora) te describe en
         español un cambio y tú respondes con una propuesta de Plan de Cambios: un JSON que el ERP valida con su compilador,
         muestra como vista previa y solo aplica si esa persona lo confirma. No ejecutas nada: no tienes acceso a la base de
@@ -28,7 +30,10 @@ public static class AssistantPrompt
         - explanation: en español, breve (unas cuantas oraciones o viñetas con guiones), qué hace la propuesta y qué debe
           revisar la persona. Texto plano, sin Markdown ni enlaces.
         - plan: el Plan de Cambios serializado como texto JSON, o "" si no propones cambios.
+        """;
 
+    /// <summary>Spec 033: formato del Plan de Cambios y lenguaje de expresiones, compartido con ERP AI Studio.</summary>
+    public const string PlanReference = """
         Plan de Cambios: { "description": string, "operations": Operation[] } (máximo 100 operaciones), aplicadas en
         orden sobre el modelo que deja la anterior. Identificadores (name de catálogos, campos, estados, transiciones,
         reglas, vistas, reportes, tableros): ^[A-Za-z][A-Za-z0-9_]{1,62}$, sin acentos ni espacios, en PascalCase y en
@@ -132,7 +137,9 @@ public static class AssistantPrompt
         ISO de 3 letras. Una fórmula guardada de un catálogo compartido (no perCompany) no puede usar BASECURRENCY() ni
         CURRENTCOMPANY(). Comparar contra un campo vacío da desconocido y una regla desconocida no se viola: usa
         ISBLANK() cuando importe.
+        """;
 
+    private const string Closing = """
         Si recibes errores del compilador sobre tu plan anterior, corrígelo y responde de nuevo con el plan completo.
         """;
 

@@ -677,6 +677,57 @@ public static class Bootstrap
         IF COL_LENGTH('meta.Company', 'TaxId') IS NULL ALTER TABLE meta.Company ADD TaxId nvarchar(20) NULL;
         IF COL_LENGTH('meta.Company', 'Address') IS NULL ALTER TABLE meta.Company ADD Address nvarchar(500) NULL;
 
+        -- Spec 033: sesiones de ERP AI Studio (un trabajador con lease por sesión) y sus pasos (avance visible).
+        IF OBJECT_ID('meta.StudioSession') IS NULL
+        CREATE TABLE meta.StudioSession (
+            Id int IDENTITY PRIMARY KEY,
+            UserId int NOT NULL REFERENCES meta.[User](Id),
+            CompanyId int NULL,
+            SecurityStamp uniqueidentifier NOT NULL,
+            Prompt nvarchar(4000) NOT NULL,
+            Scopes nvarchar(100) NOT NULL,
+            Status nvarchar(12) NOT NULL,
+            CancelRequested bit NOT NULL DEFAULT 0,
+            LeaseToken uniqueidentifier NULL,
+            LeaseUntil datetime2(3) NULL,
+            Steps int NOT NULL DEFAULT 0,
+            ToolCalls int NOT NULL DEFAULT 0,
+            InputTokens bigint NOT NULL DEFAULT 0,
+            OutputTokens bigint NOT NULL DEFAULT 0,
+            CostMicros bigint NOT NULL DEFAULT 0,
+            ReservedMicros bigint NOT NULL DEFAULT 0,
+            Model nvarchar(100) NOT NULL,
+            ErrorCode nvarchar(30) NULL,
+            Summary nvarchar(max) NULL,
+            PlanJson nvarchar(max) NULL,
+            ReportJson nvarchar(max) NULL,
+            SandboxDb nvarchar(128) NULL,
+            CreatedAt datetime2(3) NOT NULL DEFAULT SYSUTCDATETIME(),
+            StartedAt datetime2(3) NULL,
+            FinishedAt datetime2(3) NULL,
+            AppliedAt datetime2(3) NULL,
+            ChangeSetId int NULL
+        );
+        IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_StudioSession_User')
+            CREATE INDEX IX_StudioSession_User ON meta.StudioSession (UserId, CreatedAt);
+        IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_StudioSession_Status')
+            CREATE INDEX IX_StudioSession_Status ON meta.StudioSession (Status);
+        IF OBJECT_ID('meta.StudioStep') IS NULL
+        CREATE TABLE meta.StudioStep (
+            Id bigint IDENTITY PRIMARY KEY,
+            SessionId int NOT NULL REFERENCES meta.StudioSession(Id),
+            Seq int NOT NULL,
+            Kind nvarchar(12) NOT NULL,
+            Tool nvarchar(60) NULL,
+            InputJson nvarchar(max) NULL,
+            OutputJson nvarchar(max) NULL,
+            Status nvarchar(10) NOT NULL,
+            Summary nvarchar(400) NOT NULL,
+            DurationMs int NOT NULL DEFAULT 0,
+            CreatedAt datetime2(3) NOT NULL DEFAULT SYSUTCDATETIME(),
+            CONSTRAINT UX_StudioStep_Seq UNIQUE (SessionId, Seq)
+        );
+
         -- Constitución II.4: la auditoría es de solo inserción, incluso para la propia aplicación.
         IF OBJECT_ID('meta.TR_AuditLog_Immutable') IS NULL
             EXEC('CREATE TRIGGER meta.TR_AuditLog_Immutable ON meta.AuditLog INSTEAD OF UPDATE, DELETE AS

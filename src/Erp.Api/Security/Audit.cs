@@ -61,6 +61,12 @@ public static class AuditActions
     public const string FileChange = "file.change";
     /// <summary>Spec 027: PDF generado (catálogo, registro y plantilla; nunca el contenido).</summary>
     public const string PrintPdf = "data.print";
+    /// <summary>Spec 033: sesión de ERP AI Studio pedida, terminada (estado, pasos, tokens y costo), cancelada, descartada y aplicada.</summary>
+    public const string StudioStart = "studio.start";
+    public const string StudioFinish = "studio.finish";
+    public const string StudioCancel = "studio.cancel";
+    public const string StudioDiscard = "studio.discard";
+    public const string StudioApply = "studio.apply";
 }
 
 public static class Audit
