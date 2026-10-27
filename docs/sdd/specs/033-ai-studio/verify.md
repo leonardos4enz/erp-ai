@@ -134,4 +134,8 @@ otra vez, con otras dos pruebas (las dos anteriores pasaron), también carreras 
   el foco y el movimiento.
 `--veces=3` sobre compras + inventario + valuacion-contable + explorador + visual-modelador: 87 × 3 en verde. Ninguna de las
 cuatro fallas toca código de esta spec (la 033 no tiene pantalla) y la duración de la E2E en CI no cambió (~14 min); el
-runner las expone ahora. El resultado de la corrida siguiente se registra en un commit aparte («CI en verde»).
+runner las expone ahora.
+
+Push de `4aed4e0`: [corrida 40569213056](https://github.com/leonardos4enz/erp-ai/actions/runs/40569213056) **en verde**
+(rápido + integración + E2E completa en `windows-2025`; 19:27 → 19:42 UTC, unos 16 min). Es la segunda corrida completa de
+la spec.
