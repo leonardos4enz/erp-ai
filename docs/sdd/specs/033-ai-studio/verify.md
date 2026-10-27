@@ -6,7 +6,7 @@
 - unitarias: 740 (+35: 643 de Erp.Tests, +7 en StudioCoreTests; 97 de integración, +28 en StudioTests, StudioModulesTests y StudioProviderTests) y Vitest 36 (sin cambios)
 - e2e: 374 (+0: la spec no tiene pantalla; la 034 la agrega)
 - corridas completas: 2 (7 min 23 s antes de la revisión adversarial; 7 min 09 s la final)
-- corridas parciales: 23 (integraciones con la prueba retrasada: anterior y corregida; --veces=3 sobre compras + integraciones; visual-modelador con las funciones retrasadas: anterior y corregido; compras + visual-modelador; --veces=3 sobre compras + inventario + valuacion-contable + explorador + visual-modelador; multiempresa con el PUT retrasado: código anterior y corregido; --veces=3 sobre compras + inventario + multiempresa + jerarquia tras CI; StudioTests ×4 iterando; StudioModulesTests; StudioProviderTests ×6 hasta tener el servidor simulado; las nuevas de integración y StudioCoreTests ×3 con el código final)
+- corridas parciales: 28 (explorador: el diagrama medido al abrir el detalle y 1 s después, y el puntero sobre otra caja con el código anterior; --veces=3 sobre compras + explorador; integraciones con la prueba retrasada: anterior y corregida; --veces=3 sobre compras + integraciones; visual-modelador con las funciones retrasadas: anterior y corregido; compras + visual-modelador; --veces=3 sobre compras + inventario + valuacion-contable + explorador + visual-modelador; multiempresa con el PUT retrasado: código anterior y corregido; --veces=3 sobre compras + inventario + multiempresa + jerarquia tras CI; StudioTests ×4 iterando; StudioModulesTests; StudioProviderTests ×6 hasta tener el servidor simulado; las nuevas de integración y StudioCoreTests ×3 con el código final)
 - contra el código anterior: 1 (reversión local de las 7 correcciones de la revisión adversarial: las 7 pruebas fallan)
 - hallazgos: 0/2/9
 - categorías: seguridad=5, motor-api=4, pruebas=2
@@ -150,5 +150,19 @@ reabrir la spec por esta falla (vía la sesión de arquitectura). La causa de fo
 auditoría 6.
 
 Push de la corrección `381bae8`: [corrida 40580869299](https://github.com/leonardos4enz/erp-ai/actions/runs/40580869299)
-**en verde** (rápido + integración + E2E completa; 20:45 → 21:01 UTC, unos 16 min). Este registro (solo `verify.md`) dispara
-otra corrida con el mismo código de producto; su resultado lo confirma la sesión antes de dar la spec por cerrada.
+**en verde** (rápido + integración + E2E completa; 20:45 → 21:01 UTC, unos 16 min).
+
+Push de `ccf8588` (solo el registro anterior en `verify.md`): [corrida 40583536588](https://github.com/leonardos4enz/erp-ai/actions/runs/40583536588)
+**en rojo**, con el mismo código de producto que `381bae8`: la captura `explorador.spec.ts › visual: diagrama ER del módulo en
+tema oscuro` difirió un 2 % (14 838 píxeles; tolerancia 1 %). No es un cambio visual (la 033 no toca la SPA y la misma
+captura pasó en la corrida anterior). La imagen de diferencias no se pudo ver (el artefacto pide sesión), así que la causa
+**no se confirmó**: en local, ni medir el diagrama al abrir el detalle y un segundo después (mismas posiciones y zoom, 63 %)
+ni poner el puntero sobre otra caja visible (queda bajo la tolerancia) la reproducen. La prueba ahora fija lo que depende
+del momento antes de capturar: el puntero fuera del diagrama (el resaltado sigue `hover ?? selected`), `document.fonts.ready`
+y las cajas quietas entre dos cuadros; pasa contra las mismas referencias, sin actualizarlas (umbral sin cambios), y
+`--veces=3` sobre compras + explorador da 42 × 3 en verde.
+
+Por pedido del dueño (vía la sesión de arquitectura) ya no hay commits que solo registren en `verify.md`: cada uno volvía a
+correr la E2E completa y destapaba otra intermitente. El resultado de la corrida del commit con esta corrección lo anota la
+034 al abrirse, junto con la última corrida de `main`; la causa de fondo (modo lento, primitivas en `helpers.ts`, guardia) va
+en la 034.

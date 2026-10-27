@@ -499,6 +499,17 @@ for (const scheme of ['light', 'dark'] as const) {
     await openDb(page);
     await diagram(page).getByRole('button', { name: /^Tabla app\.ExpPedido,/ }).click();
     await expect(panel(page, 'Detalle de app.ExpPedido')).toBeVisible();
+    // CI de ccf8588 (R-030-5): esta captura difirió un 2 % en el runner con el mismo código que pasó en la corrida anterior
+    // (no es un cambio visual: la 033 no toca la SPA). Sin la imagen de diferencias (el artefacto pide sesión) la causa no
+    // se confirmó; en local ni el reajuste del diagrama ni otra caja bajo el puntero la reproducen. Se fija lo que depende
+    // del momento: el puntero fuera del diagrama (el resaltado sigue `hover ?? selected` en BoxGraph), las fuentes cargadas
+    // y las cajas quietas entre dos cuadros.
+    await page.mouse.move(0, 0);
+    await page.evaluate(() => document.fonts.ready);
+    const boxes = () => page.evaluate(() => new Promise<string>((done) => requestAnimationFrame(() => requestAnimationFrame(() =>
+      done([...document.querySelectorAll('.bg-node')].map((n) => JSON.stringify(n.getBoundingClientRect())).join('|'))))));
+    let last = '';
+    await expect.poll(async () => { const now = await boxes(); const still = now === last; last = now; return still; }).toBe(true);
     await expect(page).toHaveScreenshot(`explorador-bd-${scheme}.png`);
     await ctx.close();
   });
