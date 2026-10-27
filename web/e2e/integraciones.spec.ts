@@ -251,10 +251,18 @@ test('H1 CA4: reintentos con bitácora; reintento manual, prueba y rotación del
   await expect(deliveryRow().getByText('Entregada')).toBeVisible({ timeout: 10_000 });
 
   // «Probar» envía un ping firmado en el momento.
-  await page.getByRole('button', { name: 'Probar Contacto validado' }).click();
-  await expect(page.getByText(/Prueba entregada \(respuesta 200\)/)).toBeVisible();
-  const ping = received.at(-1)!;
-  expect(ping.json.event).toBe('ping');
+  // Regresión (CI de 09ffa0e, R-030-5): se tomaba la última entrega cuando aparecía un aviso «Prueba entregada», pero el
+  // aviso de la prueba anterior seguía visible y la del secreto nuevo aún no llegaba (runner lento): se validaba el ping
+  // viejo con el secreto nuevo. Ahora cada prueba espera su propio ping.
+  const pings = () => deliveriesFor('ContactoValidado').filter((r) => r.json.event === 'ping');
+  const probe = async () => {
+    const n = pings().length;
+    await page.getByRole('button', { name: 'Probar Contacto validado' }).click();
+    await expect.poll(() => pings().length, { timeout: 15_000 }).toBe(n + 1);
+    return pings()[n];
+  };
+  const ping = await probe();
+  await expect(page.getByText(/Prueba entregada \(respuesta 200\)/).first()).toBeVisible();
   expect(validSignature(ping, secrets.ContactoValidado)).toBe(true);
 
   // Rotar: el secreto anterior deja de firmar.
@@ -263,10 +271,9 @@ test('H1 CA4: reintentos con bitácora; reintento manual, prueba y rotación del
   const fresh = (await page.getByRole('dialog', { name: 'Secreto del webhook' }).getByLabel('Valor secreto').textContent())!;
   expect(fresh).not.toBe(secrets.ContactoValidado);
   await page.getByRole('button', { name: 'Ya lo guardé' }).click();
-  await page.getByRole('button', { name: 'Probar Contacto validado' }).click();
-  await expect(page.getByText(/Prueba entregada/).last()).toBeVisible();
-  expect(validSignature(received.at(-1)!, fresh)).toBe(true);
-  expect(validSignature(received.at(-1)!, secrets.ContactoValidado)).toBe(false);
+  const rotated = await probe();
+  expect(validSignature(rotated, fresh)).toBe(true);
+  expect(validSignature(rotated, secrets.ContactoValidado)).toBe(false);
   secrets.ContactoValidado = fresh;
 });
 

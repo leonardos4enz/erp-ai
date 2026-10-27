@@ -6,7 +6,7 @@
 - unitarias: 740 (+35: 643 de Erp.Tests, +7 en StudioCoreTests; 97 de integración, +28 en StudioTests, StudioModulesTests y StudioProviderTests) y Vitest 36 (sin cambios)
 - e2e: 374 (+0: la spec no tiene pantalla; la 034 la agrega)
 - corridas completas: 2 (7 min 23 s antes de la revisión adversarial; 7 min 09 s la final)
-- corridas parciales: 19 (visual-modelador con las funciones retrasadas: anterior y corregido; compras + visual-modelador; --veces=3 sobre compras + inventario + valuacion-contable + explorador + visual-modelador; multiempresa con el PUT retrasado: código anterior y corregido; --veces=3 sobre compras + inventario + multiempresa + jerarquia tras CI; StudioTests ×4 iterando; StudioModulesTests; StudioProviderTests ×6 hasta tener el servidor simulado; las nuevas de integración y StudioCoreTests ×3 con el código final)
+- corridas parciales: 23 (integraciones con la prueba retrasada: anterior y corregida; --veces=3 sobre compras + integraciones; visual-modelador con las funciones retrasadas: anterior y corregido; compras + visual-modelador; --veces=3 sobre compras + inventario + valuacion-contable + explorador + visual-modelador; multiempresa con el PUT retrasado: código anterior y corregido; --veces=3 sobre compras + inventario + multiempresa + jerarquia tras CI; StudioTests ×4 iterando; StudioModulesTests; StudioProviderTests ×6 hasta tener el servidor simulado; las nuevas de integración y StudioCoreTests ×3 con el código final)
 - contra el código anterior: 1 (reversión local de las 7 correcciones de la revisión adversarial: las 7 pruebas fallan)
 - hallazgos: 0/2/9
 - categorías: seguridad=5, motor-api=4, pruebas=2
@@ -137,5 +137,16 @@ cuatro fallas toca código de esta spec (la 033 no tiene pantalla) y la duració
 runner las expone ahora.
 
 Push de `4aed4e0`: [corrida 40569213056](https://github.com/leonardos4enz/erp-ai/actions/runs/40569213056) **en verde**
-(rápido + integración + E2E completa en `windows-2025`; 19:27 → 19:42 UTC, unos 16 min). Es la segunda corrida completa de
-la spec.
+(rápido + integración + E2E completa en `windows-2025`; 19:27 → 19:42 UTC, unos 16 min).
+
+Push de `09ffa0e` (el registro de lo anterior, solo `verify.md`): [corrida 40571722551](https://github.com/leonardos4enz/erp-ai/actions/runs/40571722551)
+**en rojo**: el «CI en verde» de ese commit valía para `4aed4e0`, no para él. Falló `integraciones.spec.ts › H1 CA4` (363 en
+verde, 10 sin correr tras la falla): después de rotar el secreto, la prueba esperaba un aviso «Prueba entregada» con `.last()`
+y tomaba `received.at(-1)`; el aviso de la prueba anterior seguía visible, así que no esperaba nada y validaba el ping
+**viejo** con el secreto nuevo. **Reproducida en local** con 1.5 s de retraso en `POST /api/admin/webhooks/…/test` (falla en
+la misma aserción, con las siguientes sin correr) y corregida: cada «Probar» cuenta los pings de ese webhook y espera el
+suyo; con el mismo retraso H1 CA4 pasa, y `--veces=3` sobre compras + integraciones da 38 × 3 en verde. El dueño pidió
+reabrir la spec por esta falla (vía la sesión de arquitectura). La causa de fondo de las intermitentes la busca la
+auditoría 6.
+
+Push de la corrección: la corrida se registra abajo cuando termine.
