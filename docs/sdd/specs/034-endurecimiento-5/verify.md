@@ -104,4 +104,4 @@ clave), R-011-2, R-015-3, R-021-4, R-032-6, R-033-5. Con prueba de su alcance: R
 Sin prueba: R-016-3 (va con R-029-4).
 
 ## 6. CI
-La segunda corrida completa es la de CI tras el push a `main`; su resultado se registra aquí en un commit posterior (como en la 033).
+La segunda corrida completa es la de CI: `f412bcf` en `main`, **verde** (`completed`/`success`, 16 min 46 s: unitarias, build, Vitest, auditoría de dependencias, integración y E2E completa en `windows-2025`).
