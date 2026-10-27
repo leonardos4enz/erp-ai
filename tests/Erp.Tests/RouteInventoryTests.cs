@@ -99,7 +99,10 @@ public class RouteInventoryTests
     {
         var missing = Routes.Where(r => r.Method is not ("GET" or "*") && r.Effect is null).Select(r => r.Key).ToList();
         Assert.True(missing.Count == 0, "Rutas que escriben sin declarar qué cambian: " + string.Join(", ", missing));
-        Assert.DoesNotContain(Routes, r => r.Method == "GET" && r.Effect is { Effect: not Effect.None });
+        // Spec 034 (A-04): un GET no cambia datos; si deja rastro en la bitácora lo declara («bitácora») y el despachador de
+        // Studio y del MCP no lo trata como lectura. Que la declaración coincida con lo que hace lo recorre
+        // Hardening034Tests › H3_CA3_cada_GET_que_deja_rastro_declara_su_efecto.
+        Assert.DoesNotContain(Routes, r => r.Method == "GET" && r.Effect is { Effect: not (Effect.None or Effect.AuditTrail) });
     }
 
     [Fact]
@@ -211,6 +214,7 @@ public class RouteInventoryTests
         Effect.Security => "seguridad",
         Effect.Config => "configuración",
         Effect.Session => "sesión",
+        Effect.AuditTrail => "bitácora",
         _ => e.ToString()!,
     };
 }

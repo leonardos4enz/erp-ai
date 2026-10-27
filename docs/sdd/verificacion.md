@@ -113,6 +113,20 @@ cerrar un diálogo o un rechazo, el foco no está en `body`). Una prueba que pro
   como antes de la 030 y lo dice en `verify.md`.
 - Registrar en `verify.md` cada corrida con su duración.
 
+### Carreras de la prueba (spec 034, R-030-5)
+Las intermitentes de CI de la 033 eran carreras de la prueba: escribir antes de que llegara la respuesta, leer el último
+elemento de un receptor (la petición de la acción anterior) o el aviso de la acción anterior con `getByText(...).last()`.
+- **`--lento`** (`run.mjs`): cada petición de la página a `/api/**` tarda al azar hasta 700 ms (`helpers.ts`, `LENTO_MS`).
+  Con `--veces` > 1 es obligatorio: «lo nuevo, tres veces» corre siempre lento.
+- **Primitivas** de `helpers.ts`: `tras(page.waitForResponse(...), acción)` (la espera se registra antes de actuar),
+  `expectToast(page, texto, acción)` (solo cuenta el aviso que deja esta acción) y `receptor()` para servidores simulados,
+  con `marca()` antes de actuar y `siguiente(cond)` después (espera con `expect.poll`).
+- **Guardia** (`src/__tests__/e2eGuardia.test.ts`, Vitest): prohíbe `.at(-1)` sobre un receptor y `getByText(...).last()`
+  sin una línea `// razón: …` encima.
+- **En CI**, si la suite falla, `reintentar-ci.mjs` repite solo los archivos que fallaron (con los que su encabezado dice
+  que corren antes: «Corre después de …») sobre una base nueva y anota «intermitente» o «reproducible». Es detección: el
+  trabajo sigue en rojo y la spec se reabre igual; una intermitente se anota en R-030-5 con su motivo.
+
 ### Fragmentación (`--shard`): todavía no (revisado de nuevo en la 030)
 La suite no se puede partir por archivo (revisado en la 028): 13 archivos declaran en su encabezado que dependen de que
 otro corra antes (`compras` instala Compras para `entornos`, `explorador`, `integraciones`, `interfaz`, `inventario`,

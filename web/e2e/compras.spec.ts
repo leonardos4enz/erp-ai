@@ -169,6 +169,7 @@ test('R8: el gerente autoriza y quedan registrados quién y cuándo', async ({ b
   await expect(page.getByLabel(/^Autorizado por/)).toHaveValue('Gerente E2E');
   await expect(page.getByLabel(/^Fecha de autorización/)).not.toHaveValue('');
   // Historial visible con el cambio de estado.
+  // razón: el nombre está también en el campo «Autorizado por»; el del historial es el último y se acaba de comprobar el campo.
   await expect(page.getByText('Gerente E2E').last()).toBeVisible();
   await page.context().close();
 });

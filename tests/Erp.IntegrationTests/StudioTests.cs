@@ -131,7 +131,7 @@ public class StudioTests(StudioTests.Host host) : IClassFixture<StudioTests.Host
             var roleId = await admin.RoleIdAsync("Studio Modelador");
             Assert.Equal(200, (await admin.PutAsync($"/api/admin/roles/{roleId}", new { name = "Studio Modelador", description = "Spec 033",
                 canManageModel = true, canManageUsers = false, canViewAudit = false, permissions = new[] { Perm("StTarea"), Perm("StCanario") } })).Status);
-            foreach (var u in new[] { "st-ana", "st-beto", "st-carla", "st-dora", "st-eli", "st-fer", "st-gil" })
+            foreach (var u in new[] { "st-ana", "st-beto", "st-carla", "st-dora", "st-eli", "st-fer", "st-gil", "st-hugo", "st-ines" })
             {
                 var res = await admin.PostAsync("/api/admin/users", new { username = u, displayName = u, password = Pwd, roleIds = new[] { roleId } });
                 Assert.True(res.Status == 201, res.Text);
@@ -480,6 +480,76 @@ public class StudioTests(StudioTests.Host host) : IClassFixture<StudioTests.Host
         await WaitForAsync(() => DatabaseExistsAsync(name), e => !e, "base aislada de la sesión interrumpida borrada");
         using var beto = await host.LoginAsync("st-beto", Pwd);
         Assert.Contains("interrump", (await beto.GetAsync($"/api/studio/sessions/{id}")).Body!.Str("error"));
+    }
+
+    // ---------- Spec 034 (auditoría 6) ----------
+
+    private Task<(long Cost, long Reserved)> CostAsync(int id) => Task.Run(async () =>
+        (await host.ScalarAsync<long>($"SELECT CostMicros FROM meta.StudioSession WHERE Id = {id}"),
+         await host.ScalarAsync<long>($"SELECT ReservedMicros FROM meta.StudioSession WHERE Id = {id}")));
+
+    [Fact]
+    public async Task A05_cancelar_cobra_lo_reservado_de_la_llamada_en_curso()
+    {
+        using var hugo = await host.LoginAsync("st-hugo", Pwd);
+        var waiting = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        host.Llm.Scripts["reserva"] = async t =>
+        {
+            if (t.Index == 0) return Reply.Tool("listar_catalogos");
+            waiting.TrySetResult();
+            await Task.Delay(Timeout.Infinite, t.Ct); // el proveedor ya cobra esta llamada
+            return Reply.Text("no llega");
+        };
+        var id = (await StartAsync(hugo, "reserva", "Algo largo")).Id();
+        await waiting.Task.WaitAsync(TimeSpan.FromSeconds(90));
+        var during = await CostAsync(id);
+        Assert.True(during.Reserved > 0, "la segunda llamada reservó su peor caso");
+        Assert.Equal(200, (await hugo.PostAsync($"/api/studio/sessions/{id}/cancel")).Status);
+        Assert.Equal("cancelled", (await WaitAsync(hugo, id)).Str("status"));
+        // Regresión (auditoría 6 A-05): el cierre ponía la reserva en 0 sin sumarla y el tope del día bajaba.
+        Assert.Equal((during.Cost + during.Reserved, 0L), await CostAsync(id));
+    }
+
+    [Fact]
+    public async Task F03_un_error_del_proveedor_no_cobra_la_reserva()
+    {
+        using var hugo = await host.LoginAsync("st-hugo", Pwd);
+        // Revisión adversarial 034 (F-03): una clave rechazada no se factura; cobrar la reserva llenaba el tope del día.
+        host.Llm.Scripts["proveedor-falla"] = _ => throw new AssistantProviderException("auth");
+        var id = (await StartAsync(hugo, "proveedor-falla", "Algo")).Id();
+        Assert.Equal("failed", (await WaitAsync(hugo, id)).Str("status"));
+        Assert.Equal((0L, 0L), await CostAsync(id));
+    }
+
+    [Fact]
+    public async Task A05_una_sesion_vencida_cobra_lo_reservado()
+    {
+        var uid = host.Users["st-hugo"];
+        var id = await host.ScalarAsync<int>($"""
+            INSERT meta.StudioSession (UserId, SecurityStamp, Prompt, Scopes, Status, Model, LeaseToken, LeaseUntil, StartedAt, CostMicros, ReservedMicros)
+            OUTPUT inserted.Id SELECT {uid}, SecurityStamp, N'cortada a mitad de la llamada', N'', 'running', N'prueba', NEWID(),
+                   DATEADD(second, -30, SYSUTCDATETIME()), SYSUTCDATETIME(), 1000, 250000
+              FROM meta.[User] WHERE Id = {uid}
+            """);
+        await WaitForAsync(() => host.ScalarAsync<string>($"SELECT Status FROM meta.StudioSession WHERE Id = {id}"), s => s == "interrupted", "sesión interrumpida");
+        Assert.Equal((251000L, 0L), await CostAsync(id));
+    }
+
+    [Fact]
+    public async Task A06_una_copia_aislada_que_falla_no_se_vuelve_a_crear()
+    {
+        // Preparar la copia falla en su primer paso (anotar el nombre de la base en la sesión), solo para esta sesión.
+        await using var fault = await host.FailWhenAsync("meta.StudioSession", "SandboxDb IS NOT NULL AND CHARINDEX(N'copia-falla', Prompt) > 0");
+        using var ines = await host.LoginAsync("st-ines", Pwd);
+        host.Llm.Scripts["copia-falla"] = Reply.Steps(_ => Reply.Tool("aislado_listar", new { entity = "StTarea" }),
+            _ => Reply.Tool("aislado_listar", new { entity = "StTarea" }), _ => Reply.Tool("aislado_crear", new { entity = "StTarea", values = new { Nombre = "x" } }));
+        var s = await WaitAsync(ines, (await StartAsync(ines, "copia-falla", "Prueba en la copia", "aislado")).Id());
+        var tools = Trail(s).Where(x => x.Str("kind") == "tool" && x.Str("tool")!.StartsWith("aislado_")).ToList();
+        Assert.Equal(3, tools.Count);
+        Assert.All(tools, x => Assert.Equal("error", x.Str("status")));
+        // Regresión (auditoría 6 A-06): cada herramienta volvía a crear la copia; ahora la segunda y la tercera responden la falla.
+        Assert.All(tools.Skip(1), x => Assert.Contains("no se vuelve a intentar", x.Str("summary")));
+        Assert.DoesNotContain(Trail(s), x => x.Str("tool") == "aislado_preparar");
     }
 
     // ---------- Revisión adversarial ----------

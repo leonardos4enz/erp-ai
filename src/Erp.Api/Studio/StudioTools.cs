@@ -9,7 +9,7 @@ using Erp.Api.Security;
 
 namespace Erp.Api.Studio;
 
-/// <summary>Spec 033 (H1 CA4): alcances de una sesión (y, en la 035, de un token MCP).</summary>
+/// <summary>Spec 033 (H1 CA4): alcances de una sesión (y, en la 036, de un token MCP).</summary>
 public static class StudioScopes
 {
     /// <summary>Leer el modelo, el explorador, el inventario y compilar: siempre.</summary>
@@ -33,6 +33,11 @@ public sealed class ToolContext
     public required IServiceProvider Services { get; init; }
     /// <summary>La copia aislada de la sesión; se crea al primer uso.</summary>
     public required Func<CancellationToken, Task<Sandbox>> SandboxAsync { get; init; }
+    /// <summary>
+    /// Spec 034 (A-03): la credencial con la que llegó la persona (token OAuth o clave de API, en el MCP); null = su sesión.
+    /// Cada ruta despachada le aplica la misma regla que a la petición HTTP.
+    /// </summary>
+    public BearerCredential? Credential { get; init; }
 }
 
 /// <param name="Status"><c>ok</c>, <c>error</c> o <c>denied</c> (la API o los alcances lo negaron).</param>
@@ -48,9 +53,20 @@ public sealed class ToolInputException(string message) : Exception(message);
 
 /// <param name="Route">Ruta del inventario que usa (las del destino real y aislado); la capacidad es la de esa ruta.</param>
 public sealed record StudioTool(string Name, string Description, string Scope, ToolTarget Target, JsonObject InputSchema,
-    string? Method, string? Route, bool Costly, Func<StudioToolRunner, ToolContext, JsonObject, CancellationToken, Task<ToolOutput>>? Run);
+    string? Method, string? Route, bool Costly, Func<StudioToolRunner, ToolContext, JsonObject, CancellationToken, Task<ToolOutput>>? Run)
+{
+    /// <summary>
+    /// La capacidad que se publica (<c>GET /api/studio/tools › capability</c>) y que el runner exige (spec 034, A-02): la de la
+    /// ruta en el entorno real; en la copia aislada y en el servidor, *modelador* (la copia corre como su administrador: sin
+    /// esta comprobación, cualquier identidad que llegue al runner la usaría con sus privilegios).
+    /// </summary>
+    public CapabilityMetadata? Capability(RouteDispatcher routes) =>
+        Target == ToolTarget.Real
+            ? Route is null ? null : routes.Find(Method!, Route)?.Metadata.GetMetadata<CapabilityMetadata>()
+            : new CapabilityMetadata([Infrastructure.Capability.Modeler]);
+}
 
-/// <summary>Lo que se publica del catálogo (<c>GET /api/studio/tools</c>; el servidor MCP de la 035 dará lo mismo).</summary>
+/// <summary>Lo que se publica del catálogo (<c>GET /api/studio/tools</c>; el servidor MCP de la 036 dará lo mismo).</summary>
 public sealed record StudioToolInfo(string Name, string Description, string Scope, string Target, string? Method, string? Route,
     string Capability, bool Costly, JsonObject InputSchema);
 
@@ -224,9 +240,7 @@ public sealed class StudioToolRunner(RouteDispatcher routes, SandboxFactory sand
 {
     public static IReadOnlyList<StudioToolInfo> Describe(RouteDispatcher routes) => StudioTools.All.Select(t =>
     {
-        var capability = t.Target == ToolTarget.Real && t.Route is not null && routes.Find(t.Method!, t.Route) is { } e
-            ? e.Metadata.GetMetadata<CapabilityMetadata>()?.ToString() ?? "—"
-            : CapabilityMetadata.Name(Capability.Modeler);
+        var capability = t.Capability(routes)?.ToString() ?? "—";
         return new StudioToolInfo(t.Name, t.Description, t.Scope, t.Target switch { ToolTarget.Real => "real", ToolTarget.Sandbox => "aislado", _ => "servidor" },
             t.Method, t.Route, capability, t.Costly, (JsonObject)t.InputSchema.DeepClone());
     }).ToList();
@@ -237,6 +251,16 @@ public sealed class StudioToolRunner(RouteDispatcher routes, SandboxFactory sand
         if (tool?.Run is null) return ToolOutput.Fail($"La herramienta «{ToolOutput.Trim(name)}» no existe.");
         if (!ctx.Scopes.Contains(tool.Scope))
             return ToolOutput.Fail($"La herramienta «{name}» necesita el alcance «{tool.Scope}», que esta sesión no tiene.", "denied");
+        // Spec 034 (A-02): la capacidad publicada, para la persona, antes de leer la entrada (en el entorno real la ruta la
+        // vuelve a exigir al despacharse).
+        if (tool.Capability(routes) is not { } required || !required.AnyOf.Any(c => EndpointCapabilities.Has(c, ctx.User)))
+            return ToolOutput.Fail(new Forbidden().Message, "denied");
+        // Revisión adversarial 034 (F-02): en la copia, la credencial se mira antes de prepararla; una herramienta aislada
+        // sin ruta (procesar las asíncronas) no la usa una credencial de integración.
+        if (tool.Target == ToolTarget.Sandbox && ctx.Credential is not null
+            && (tool.Route is null ? new BearerScope.Denial("Una credencial de integración no usa la copia aislada.")
+                : BearerScope.Check(ctx.Credential, RouteDispatcher.Expand(tool.Route, null), tool.Method!)) is { } denied)
+            return ToolOutput.Fail(denied.Title, "denied");
         if (input.ValueKind != JsonValueKind.Object) return ToolOutput.Fail("La entrada debe ser un objeto JSON.");
         try
         {
@@ -254,13 +278,17 @@ public sealed class StudioToolRunner(RouteDispatcher routes, SandboxFactory sand
     }
 
     internal async Task<ToolOutput> RealAsync(ToolContext c, RouteCall call, Func<JsonNode?, JsonNode?>? shape, CancellationToken ct) =>
-        Output(await routes.SendAsync(c.Services, c.User, call, allowWrites: false, ct), shape);
+        Output(await routes.SendAsync(c.Services, c.User, call, allowWrites: false, ct, c.Credential), shape);
 
     internal async Task<ToolOutput> SandboxAsync(ToolContext c, RouteCall call, CancellationToken ct)
     {
         var sb = await c.SandboxAsync(ct);
-        return Output(await routes.SendAsync(sb.Services, sb.Admin, call, allowWrites: true, ct), null);
+        return Output(await SendSandboxAsync(c, sb, call, ct), null);
     }
+
+    /// <summary>En la copia, como su administrador, con la credencial y los límites de la persona (spec 034).</summary>
+    private Task<RouteResult> SendSandboxAsync(ToolContext c, Sandbox sb, RouteCall call, CancellationToken ct) =>
+        routes.SendAsync(sb.Services, sb.Admin, call, allowWrites: true, ct, c.Credential, caller: c.User.Id);
 
     internal static ToolOutput Output(RouteResult r, Func<JsonNode?, JsonNode?>? shape)
     {
@@ -274,7 +302,7 @@ public sealed class StudioToolRunner(RouteDispatcher routes, SandboxFactory sand
     /// <summary>Vista previa en el modelo real más los avisos de seguridad de la 011 (<see cref="PlanWarnings"/>).</summary>
     internal async Task<ToolOutput> CompileAsync(ToolContext c, JsonObject plan, CancellationToken ct)
     {
-        var r = await routes.SendAsync(c.Services, c.User, new RouteCall("POST", "/api/model/plan/preview", Body: plan), allowWrites: false, ct);
+        var r = await routes.SendAsync(c.Services, c.User, new RouteCall("POST", "/api/model/plan/preview", Body: plan), allowWrites: false, ct, c.Credential);
         if (!r.Ok) return Output(r, null);
         var warnings = new JsonArray();
         try
@@ -300,7 +328,7 @@ public sealed class StudioToolRunner(RouteDispatcher routes, SandboxFactory sand
     internal async Task<ToolOutput> SandboxApplyAsync(ToolContext c, JsonObject plan, CancellationToken ct)
     {
         var sb = await c.SandboxAsync(ct);
-        var error = await sandboxes.ApplyAsync(sb.Services, sb.Admin, plan, ct);
+        var error = await sandboxes.ApplyAsync(sb.Services, sb.Admin, plan, ct, c.Credential, c.User.Id);
         return error is null
             ? new("ok", new JsonObject { ["applied"] = true, ["operations"] = (plan["operations"] as JsonArray)?.Count ?? 0 }, "aplicado en la copia")
             : ToolOutput.Fail(error);
@@ -310,17 +338,17 @@ public sealed class StudioToolRunner(RouteDispatcher routes, SandboxFactory sand
     {
         var sb = await c.SandboxAsync(ct);
         var route = V(entity, id);
-        var current = await routes.SendAsync(sb.Services, sb.Admin, new RouteCall("GET", "/api/data/{entity}/{id:long}", route), true, ct);
+        var current = await SendSandboxAsync(c, sb, new RouteCall("GET", "/api/data/{entity}/{id:long}", route), ct);
         if (!current.Ok) return Output(current, null);
         values["_rowVersion"] = current.Body?["_rowVersion"]?.DeepClone();
-        return Output(await routes.SendAsync(sb.Services, sb.Admin, new RouteCall("PUT", "/api/data/{entity}/{id:long}", route, Body: values), true, ct), null);
+        return Output(await SendSandboxAsync(c, sb, new RouteCall("PUT", "/api/data/{entity}/{id:long}", route, Body: values), ct), null);
     }
 
     internal async Task<ToolOutput> SandboxTransitionAsync(ToolContext c, JsonObject i, CancellationToken ct)
     {
         var sb = await c.SandboxAsync(ct);
         var route = V(StudioTools.Req(i, "entity"), StudioTools.Id(i));
-        var current = await routes.SendAsync(sb.Services, sb.Admin, new RouteCall("GET", "/api/data/{entity}/{id:long}", route), true, ct);
+        var current = await SendSandboxAsync(c, sb, new RouteCall("GET", "/api/data/{entity}/{id:long}", route), ct);
         if (!current.Ok) return Output(current, null);
         var body = new JsonObject
         {
@@ -329,11 +357,12 @@ public sealed class StudioToolRunner(RouteDispatcher routes, SandboxFactory sand
             ["_rowVersion"] = current.Body?["_rowVersion"]?.DeepClone(),
             ["acceptWarnings"] = i["acceptWarnings"] as JsonArray is { } a ? a.DeepClone() : null,
         };
-        return Output(await routes.SendAsync(sb.Services, sb.Admin, new RouteCall("POST", "/api/data/{entity}/{id:long}/transition", route, Body: body), true, ct), null);
+        return Output(await SendSandboxAsync(c, sb, new RouteCall("POST", "/api/data/{entity}/{id:long}/transition", route, Body: body), ct), null);
     }
 
     internal async Task<ToolOutput> SandboxDrainAsync(ToolContext c, CancellationToken ct)
     {
+        if (!routes.TryAcquire(c.User.Id)) return ToolOutput.Fail(RouteDispatcher.TooMany);
         var sb = await c.SandboxAsync(ct);
         var processed = 0;
         await using (var scope = sb.Services.CreateAsyncScope())

@@ -42,7 +42,7 @@ public static class DataEndpoints
             return format == "xlsx"
                 ? Results.File(ReportExport.Xlsx(r), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", file + ".xlsx")
                 : Results.File(ReportExport.Csv(r), "text/csv; charset=utf-8", file + ".csv");
-        }).Requires(Capability.Records).Costly("hasta " + RecordService.MaxExport + " filas").RequireRateLimiting(RatePolicies.Bulk);
+        }).Requires(Capability.Records).Writes(Effect.AuditTrail).Costly("hasta " + RecordService.MaxExport + " filas").RequireRateLimiting(RatePolicies.Bulk);
 
         // Spec 008: importación masiva. El cuerpo es el archivo tal cual (CSV o XLSX, máx. 2 MB por Kestrel).
         g.MapPost("/import", async (string entity, bool? dryRun, HttpContext http, RecordService records, CancellationToken ct) =>

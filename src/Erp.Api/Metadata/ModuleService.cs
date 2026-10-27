@@ -164,7 +164,7 @@ public sealed partial class ModuleService(Db db, MetadataStore store, PlanServic
 
         await cn.ExecuteAsync("INSERT meta.Module (Id, Version, InstalledBy) VALUES (@Id, @Version, @UserId)",
             new { p.Id, p.Version, UserId = user.Id }, tx);
-        await Audit.WriteAsync(cn, tx, http, "module.install", "Modulo", p.Id,
+        await Audit.WriteAsync(cn, tx, http, AuditActions.ModuleInstall, "Modulo", p.Id,
             after: new { p.Id, p.Version, changeSetId, roles = p.AllRoles.Select(r => r.Name), seeded });
         await tx.CommitAsync(ct);
         store.Invalidate();
@@ -213,7 +213,7 @@ public sealed partial class ModuleService(Db db, MetadataStore store, PlanServic
             changeSetId = await plans.ApplyInTransactionAsync(cn, tx, u.Plan with { Description = $"{p.Name} {u.Version}: {u.Description}" }, http);
         await GrantAsync(cn, tx, newRoles, roleIds, await MetadataStore.LoadAsync(cn, tx));
         await cn.ExecuteAsync("UPDATE meta.Module SET Version = @Version WHERE Id = @id", new { id, p.Version }, tx);
-        await Audit.WriteAsync(cn, tx, http, "module.upgrade", "Modulo", p.Id,
+        await Audit.WriteAsync(cn, tx, http, AuditActions.ModuleUpgrade, "Modulo", p.Id,
             before: new { version = installed }, after: new { version = p.Version, changeSetId, applied = pending.Select(u => u.Version), roles = newRoles.Select(r => r.Name) });
         await tx.CommitAsync(ct);
         store.Invalidate();

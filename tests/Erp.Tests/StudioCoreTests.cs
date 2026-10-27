@@ -15,7 +15,8 @@ namespace Erp.Tests;
 public class StudioCoreTests
 {
     private static readonly RouteDispatcher Dispatcher =
-        new(new DefaultEndpointDataSource(RouteInventoryTests.Routes.Select(r => r.Endpoint).Distinct()), NullLogger<RouteDispatcher>.Instance);
+        new(new DefaultEndpointDataSource(RouteInventoryTests.Routes.Select(r => r.Endpoint).Distinct()),
+            new DispatchLimits(new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build()), NullLogger<RouteDispatcher>.Instance);
 
     private static RouteInventoryTests.Route RouteOf(StudioTool t) =>
         RouteInventoryTests.Routes.SingleOrDefault(r => r.Method == t.Method && r.Path == t.Route)

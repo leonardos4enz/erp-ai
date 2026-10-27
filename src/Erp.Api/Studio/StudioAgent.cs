@@ -53,9 +53,16 @@ public sealed class StudioAgent(Db db, StudioOptions options, AssistantOptions a
         public int ToolCalls;
         public long Tokens;
         public long Cost;
+        /// <summary>
+        /// Spec 034 (A-05): lo reservado para la llamada en curso (0 al liquidarla). Si la sesión se corta a mitad de la
+        /// llamada, el proveedor la cobra igual: el cierre lo suma al costo.
+        /// </summary>
+        public long Reserved;
         public long Input;
         public long Output;
         public Sandbox? Sandbox;
+        /// <summary>Spec 034 (A-06): por qué no se pudo preparar la copia; las demás herramientas lo responden sin reintentar.</summary>
+        public string? SandboxError;
         public UserContext? User;
         public string? LastText;
         /// <summary>Tokens de entrada y salida medidos en la llamada anterior y los caracteres que llevaba (F-02).</summary>
@@ -105,7 +112,8 @@ public sealed class StudioAgent(Db db, StudioOptions options, AssistantOptions a
         catch (OperationCanceledException) when (cancelled) { outcome = new(StudioStatus.Cancelled, "cancelled"); }
         catch (OperationCanceledException) when (stopping.IsCancellationRequested) { /* apagado: el lease vence y queda interrumpida */ }
         catch (OperationCanceledException) { outcome = new(StudioStatus.Failed, "limit_time", Summary: $"Se alcanzó el tiempo máximo de {options.MaxMinutes} minutos."); }
-        catch (AssistantProviderException ex) { outcome = new(StudioStatus.Failed, ex.Code); }
+        // Revisión adversarial 034 (F-03): el proveedor respondió con error (clave, sobrecarga): esa llamada no se factura.
+        catch (AssistantProviderException ex) { run.Reserved = 0; outcome = new(StudioStatus.Failed, ex.Code); }
         catch (Exception ex)
         {
             log.LogError(ex, "Error no controlado en la sesión de Studio {Id}", claim.Id);
@@ -142,7 +150,7 @@ public sealed class StudioAgent(Db db, StudioOptions options, AssistantOptions a
         var context = new ToolContext
         {
             User = null!, Scopes = scopes, Services = services,
-            SandboxAsync = async token => run.Sandbox ??= await CreateSandboxAsync(run, token),
+            SandboxAsync = token => SandboxOnceAsync(run, token),
         };
 
         while (true)
@@ -299,6 +307,25 @@ public sealed class StudioAgent(Db db, StudioOptions options, AssistantOptions a
         return user;
     }
 
+    /// <summary>
+    /// Spec 034 (A-06): la copia se prepara una vez por sesión. Si falla, la falla queda en la corrida y las siguientes
+    /// herramientas aisladas la responden sin crear otra base (cancelar no cuenta como falla: la sesión ya termina).
+    /// </summary>
+    private async Task<Sandbox> SandboxOnceAsync(Run run, CancellationToken ct)
+    {
+        if (run.Sandbox is { } ready) return ready;
+        if (run.SandboxError is { } error) throw new SandboxUnavailable(error);
+        try { return run.Sandbox = await CreateSandboxAsync(run, ct); }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (StudioLeaseLost) { throw; }
+        catch (Exception ex)
+        {
+            run.SandboxError = (ex is SandboxUnavailable ? ex.Message : "No se pudo preparar la copia aislada.")
+                               + " En esta sesión no se vuelve a intentar: entrega sin probar en la copia.";
+            throw;
+        }
+    }
+
     private async Task<Sandbox> CreateSandboxAsync(Run run, CancellationToken ct)
     {
         if (!options.Sandbox) throw new SandboxUnavailable("El entorno aislado está deshabilitado en este servidor (Studio:Sandbox).");
@@ -358,6 +385,7 @@ public sealed class StudioAgent(Db db, StudioOptions options, AssistantOptions a
                 """, new { reserve, run.Claim.Id, run.Claim.LeaseToken }, tx) == 0)
             throw new StudioLeaseLost();
         await tx.CommitAsync(ct);
+        run.Reserved = reserve; // revisión adversarial 034 (F-03): solo lo que quedó guardado
         return true;
     }
 
@@ -370,6 +398,7 @@ public sealed class StudioAgent(Db db, StudioOptions options, AssistantOptions a
                  WHERE Id = @Id AND LeaseToken = @LeaseToken AND Status = 'running'
                 """, new { run.Steps, run.ToolCalls, run.Input, run.Output, run.Cost, run.Claim.Id, run.Claim.LeaseToken }) == 0)
             throw new StudioLeaseLost();
+        run.Reserved = 0;
     }
 
     private async Task StepAsync(Run run, string kind, string? tool, string? input, JsonNode? output, string status, string summary, int ms)
@@ -401,12 +430,13 @@ public sealed class StudioAgent(Db db, StudioOptions options, AssistantOptions a
                    ReportJson = @ReportJson, Steps = @Steps, ToolCalls = @ToolCalls, InputTokens = @Input, OutputTokens = @Output,
                    CostMicros = @Cost, ReservedMicros = 0, FinishedAt = SYSUTCDATETIME(), LeaseToken = NULL, LeaseUntil = NULL
              WHERE Id = @Id AND LeaseToken = @LeaseToken AND Status = 'running'
-            """, new { o.Status, o.ErrorCode, o.Summary, o.PlanJson, o.ReportJson, run.Steps, run.ToolCalls, run.Input, run.Output, run.Cost,
-                run.Claim.Id, run.Claim.LeaseToken }, tx);
+            """, new { o.Status, o.ErrorCode, o.Summary, o.PlanJson, o.ReportJson, run.Steps, run.ToolCalls, run.Input, run.Output,
+                // A-05: la llamada cortada (cancelar, tiempo máximo, error del proveedor) se cobra como su reserva, el peor caso.
+                Cost = run.Cost + run.Reserved, run.Claim.Id, run.Claim.LeaseToken }, tx);
         if (n == 0) throw new StudioLeaseLost();
         await Audit.WriteAsync(cn, tx, new DefaultHttpContext(), AuditActions.StudioFinish, entity: "studio", recordId: run.Claim.Id.ToString(),
             after: new { status = o.Status, errorCode = o.ErrorCode, steps = run.Steps, toolCalls = run.ToolCalls, inputTokens = run.Input,
-                outputTokens = run.Output, costUsd = run.Cost / 1_000_000m, model = assistant.Model },
+                outputTokens = run.Output, costUsd = (run.Cost + run.Reserved) / 1_000_000m, model = assistant.Model },
             userId: run.Claim.UserId, username: run.User?.Username ?? await cn.ExecuteScalarAsync<string>("SELECT Username FROM meta.[User] WHERE Id = @UserId", new { run.Claim.UserId }, tx));
         await tx.CommitAsync();
     }

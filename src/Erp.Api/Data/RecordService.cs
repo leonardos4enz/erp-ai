@@ -451,7 +451,7 @@ public sealed partial class RecordService(Db db, MetadataStore store)
 
         await UpdateHeaderAsync(c.Cn, c.Tx, e, id, draft.Header, rowVersion, c.User.Id, c.Ct);
         await WriteHistoryAsync(c.Cn, c.Tx, e, id, from, t.To, t.Name, comment, c.User.Id, c.Ct);
-        await Audit.WriteAsync(c.Cn, c.Tx, c.Http, $"workflow.{t.Name}", e.Name, id.ToString(), before, AuditAfter(draft, warnings));
+        await Audit.WriteAsync(c.Cn, c.Tx, c.Http, AuditActions.WorkflowPrefix + t.Name, e.Name, id.ToString(), before, AuditAfter(draft, warnings));
         await FireAsync(c, e, id, AutomationEvents.Transition, t.Name);
         await FireAsync(c, e, id, AutomationEvents.EnterState, t.To);
     }

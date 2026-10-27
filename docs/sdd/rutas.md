@@ -97,14 +97,14 @@ Total: 149 rutas.
 | GET | `/api/data/{entity}/` | registros |  |  |  |  |
 | POST | `/api/data/{entity}/` | registros | datos |  |  |  |
 | POST | `/api/data/{entity}/compute` | registros | ninguno |  |  |  |
-| GET | `/api/data/{entity}/export` | registros |  |  | hasta 5000 filas (bulk) |  |
+| GET | `/api/data/{entity}/export` | registros | bitácora |  | hasta 5000 filas (bulk) |  |
 | POST | `/api/data/{entity}/import` | registros | datos |  | archivo de hasta 2 MB por el motor (bulk) |  |
 | GET | `/api/data/{entity}/lookup` | registros |  |  |  |  |
 | DELETE | `/api/data/{entity}/{id:long}` | registros | datos |  |  |  |
 | GET | `/api/data/{entity}/{id:long}` | registros |  |  |  |  |
 | PUT | `/api/data/{entity}/{id:long}` | registros | datos |  |  |  |
 | GET | `/api/data/{entity}/{id:long}/history` | registros |  |  |  |  |
-| GET | `/api/data/{entity}/{id:long}/pdf` | registros |  |  | genera un PDF (print) |  |
+| GET | `/api/data/{entity}/{id:long}/pdf` | registros | bitácora |  | genera un PDF (print) |  |
 | GET | `/api/data/{entity}/{id:long}/print` | registros |  |  |  |  |
 | POST | `/api/data/{entity}/{id:long}/transition` | registros | datos |  |  |  |
 | GET | `/api/explorer/automations` | modelador |  |  |  |  |

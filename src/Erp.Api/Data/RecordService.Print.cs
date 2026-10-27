@@ -12,7 +12,8 @@ namespace Erp.Api.Data;
 
 public sealed record PrintChoice(string Name, string Label, string? Description, bool Default);
 
-public sealed record PrintResult(byte[] Pdf, string FileName, string Template, IReadOnlyList<string> Warnings);
+/// <param name="Entity">Spec 034 (F-05): el nombre del catálogo como está en el modelo (la bitácora lo filtra por él).</param>
+public sealed record PrintResult(byte[] Pdf, string FileName, string Template, IReadOnlyList<string> Warnings, string Entity = "");
 
 /// <summary>Spec 027 (H5 CA4): límites del generador (por proceso).</summary>
 public static class PrintLimits
@@ -148,7 +149,7 @@ public sealed partial class RecordService
         var folio = e.EffectiveDisplayField is { } df ? Convert.ToString(draft.Header.GetValueOrDefault(df), PrintFormat.Culture) : null;
         var safe = UnsafeFileChars().Replace(string.IsNullOrWhiteSpace(folio) ? id.ToString(PrintFormat.Culture) : folio, "-").Trim('-');
         return new PrintResult(pdf, $"{e.Name}-{(safe.Length == 0 ? id.ToString(PrintFormat.Culture) : safe[..Math.Min(safe.Length, 60)])}.pdf",
-            template.Name, ctx.Warnings.Distinct().ToList());
+            template.Name, ctx.Warnings.Distinct().ToList(), e.Name);
     }
 
     // ---------------- Elegir la plantilla ----------------

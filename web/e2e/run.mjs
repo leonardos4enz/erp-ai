@@ -30,7 +30,11 @@ const puerto = await bloqueDePuertos({ fijo: process.env.E2E_PORT_BASE, preferid
 // datos con nombre fijo (casi todos los archivos seriales).
 const veces = Number(process.argv.find((a) => a.startsWith('--veces='))?.slice('--veces='.length) ?? 1);
 if (!Number.isInteger(veces) || veces < 1 || veces > 10) { console.error('[e2e] --veces debe ser un entero entre 1 y 10'); process.exit(2); }
-const argsPlaywright = process.argv.slice(2).filter((a) => !a.startsWith('--veces='));
+// Spec 034 (H7): --lento agrega latencia al azar a cada petición de la página a /api/** (helpers.ts, LENTO_MS). Las
+// intermitentes de CI de la 033 eran carreras de la prueba que solo salían con un runner lento. Con --veces > 1 («lo
+// nuevo, tres veces» al cerrar una spec) es obligatorio.
+const lento = process.argv.includes('--lento') || veces > 1;
+const argsPlaywright = process.argv.slice(2).filter((a) => !a.startsWith('--veces=') && a !== '--lento');
 
 console.log(`[e2e] Recreando base ${db} en ${SQL_SERVER}; API en el puerto ${puerto} (auxiliares ${puerto + 1}–${puerto + 4})`);
 borrarBase(db);
@@ -54,7 +58,9 @@ const env = {
   E2E_ADMIN_PASSWORD: process.env.E2E_ADMIN_PASSWORD ?? `E2e-${randomBytes(12).toString('base64url')}`,
   // Spec 009: clave de firma de paquetes, también nueva por corrida.
   E2E_SIGNING_KEY: process.env.E2E_SIGNING_KEY ?? randomBytes(32).toString('base64url'),
+  ...(lento ? { E2E_LENTO: '1' } : {}),
 };
+if (lento) console.log('[e2e] Modo lento: latencia al azar en /api/** de cada página' + (veces > 1 ? ' (obligatorio con --veces)' : ''));
 for (let i = 1; i <= veces; i++) {
   if (i > 1) {
     console.log(`[e2e] Vuelta ${i} de ${veces}: recreando base ${db}`);

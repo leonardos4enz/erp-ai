@@ -242,7 +242,10 @@ public sealed class StudioService(Db db, MetadataStore store, PlanService plans,
 
     // ---------- Trabajador ----------
 
-    /// <summary>Sesiones cuyo trabajador dejó de renovar: terminan como interrumpidas (no se repiten) y su copia se borra.</summary>
+    /// <summary>
+    /// Sesiones cuyo trabajador dejó de renovar: terminan como interrumpidas (no se repiten) y su copia se borra. Spec 034
+    /// (A-05): lo reservado para la llamada en curso se cobra (el proveedor la cobra aunque el trabajador haya caído).
+    /// </summary>
     internal async Task<int> ExpireAsync(CancellationToken ct)
     {
         List<(int Id, int UserId, string? SandboxDb)> expired;
@@ -251,7 +254,7 @@ public sealed class StudioService(Db db, MetadataStore store, PlanService plans,
         {
             expired = (await cn.QueryAsync<(int, int, string?)>("""
                 UPDATE meta.StudioSession SET Status = 'interrupted', ErrorCode = 'interrupted', FinishedAt = SYSUTCDATETIME(),
-                       LeaseToken = NULL, LeaseUntil = NULL, ReservedMicros = 0
+                       LeaseToken = NULL, LeaseUntil = NULL, CostMicros = CostMicros + ReservedMicros, ReservedMicros = 0
                 OUTPUT inserted.Id, inserted.UserId, inserted.SandboxDb
                  WHERE Status = 'running' AND LeaseUntil < SYSUTCDATETIME()
                 """, transaction: tx)).ToList();

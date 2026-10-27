@@ -102,7 +102,7 @@ otra → «Ocurrió un error inesperado.» (detalle al log). La salida al modelo
 `<datos_no_confiables herramienta="…">JSON</datos_no_confiables>` con el codificador por omisión de System.Text.Json
 (escapa `<`, `>` y `&`: un texto no puede cerrar el delimitador) y recortada a `Studio:MaxToolResultChars`.
 
-**Lista para la 035 (MCP):** `StudioTools` + `ToolRunner` no dependen del bucle ni de la sesión: reciben la identidad, los
+**Lista para la 036 (MCP; antes 035):** `StudioTools` + `ToolRunner` no dependen del bucle ni de la sesión: reciben la identidad, los
 alcances y la entrada. El servidor MCP los llamará con el usuario del token y los alcances consentidos (`modelo`, `datos`,
 `aislado`), y `GET /api/studio/tools` ya da el `inputSchema` de cada una en JSON Schema.
 
@@ -121,7 +121,7 @@ alcances y la entrada. El servidor MCP los llamará con el usuario del token y l
 | `Workers`, `PollSeconds`, `LeaseSeconds`, `RenewSeconds` | 2, 2, 120, 10 | Trabajador |
 
 ## 3. SPA
-Sin pantalla en esta spec (CLARIFY 1): la **034** construye Configuración › ERP AI Studio sobre este contrato.
+Sin pantalla en esta spec (CLARIFY 1): la **035** (antes 034, renumerada por el Endurecimiento 5) construye Configuración › ERP AI Studio sobre este contrato.
 
 ## 4. Pruebas
 - **Unitarias** (`tests/Erp.Tests/StudioCoreTests.cs`, nuevo): catálogo contra el inventario de rutas, nombre de la base

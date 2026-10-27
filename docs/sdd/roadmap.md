@@ -39,10 +39,11 @@ en orden, no en paralelo: casi todas tocan el núcleo del motor (`PlanCompiler`,
 | 031 Endurecimiento 4 (auditoría 5) | Implementado ([spec](specs/031-endurecimiento-4/spec.md)) |
 | 032 Rediseño del inicio de sesión | Implementado ([spec](specs/032-login/spec.md)) |
 | 033 ERP AI Studio: herramientas, bucle agéntico y entorno aislado | Implementado ([spec](specs/033-ai-studio/spec.md)) |
-| 034 ERP AI Studio: pantalla | Planeado |
-| 035 Servidor MCP por persona | Planeado |
-| 036 Módulo de Ventas | Planeado |
-| 037 CFDI 4.0 con PAC | Planeado |
+| 034 Endurecimiento 5 (auditoría 6) | Implementado ([spec](specs/034-endurecimiento-5/spec.md)) |
+| 035 ERP AI Studio: pantalla | Planeado |
+| 036 Servidor MCP por persona | Planeado |
+| 037 Módulo de Ventas | Planeado |
+| 038 CFDI 4.0 con PAC | Planeado |
 
 ## Diagnóstico
 | Brecha señalada | Situación actual | Spec |
@@ -281,7 +282,7 @@ reglas de negocio** (constitución I.1), configurables por metadatos con valores
   ventas) y revaluación, que siguen de la 020.
 
 ### 023 — Capacidades del motor: listas que se fusionan, reglas de aviso y rutas de tres niveles
-Origen: pendientes de la 022 que limitan a los módulos y que Ventas (024, luego 025, 026, 027, 028, 031, 032, 033, ahora 036) necesitará; plan del dueño (2026-10-24).
+Origen: pendientes de la 022 que limitan a los módulos y que Ventas (024, luego 025, 026, 027, 028, 031, 032, 033, 036, ahora 037) necesitará; plan del dueño (2026-10-24).
 - **Estado:** implementado en la [spec 023](specs/023-capacidades-motor/spec.md). `merge` en las seis listas del catálogo
   (reglas, automatizaciones, vistas, reportes, webhooks, tareas): agrega o reemplaza por nombre en su lugar; la vista previa
   ya no dice que quita lo que un `merge` conserva, y un paquete de Entornos que extiende un catálogo que no crea llega al
@@ -362,7 +363,7 @@ la representación impresa del CFDI). Ventas pasa a la 028 y CFDI 4.0 a la 029.
   servidor SMTP/proveedor, plantillas de mensaje y bitácora); adjuntarlo automáticamente al ejecutar una transición
   (requiere el tipo de campo archivo); firma electrónica (e.firma/FIEL: certificados y custodia de llaves, otra spec);
   **tipo de campo `image`/`file` en catálogos** (DDL, captura, importación, OData, miniaturas y límites por registro: la
-  base `meta.[File]` ya existe); SVG sanitizado y WebP; códigos QR y de barras (los pedirá el CFDI, ahora 037); diseño libre por
+  base `meta.[File]` ya existe); SVG sanitizado y WebP; códigos QR y de barras (los pedirá el CFDI, ahora 038); diseño libre por
   coordenadas.
 
 ### 028 — Mejoras del proceso (retrospectiva 001)
@@ -390,8 +391,8 @@ ya marcados) y sus hallazgos se vuelven una spec de endurecimiento.
 | 2026-10-24 (origen de la 021) | 014–020 | 8 defectos |
 | 2026-10-25, auditoría 4 (origen de la 029) | 021–028 | 9 defectos (1 alto: rutas de varios saltos fuera de alcance); ninguno de los 29 riesgos marcados estaba resuelto |
 | 2026-10-25, auditoría 5 (origen de la 031), adelantada | 029 (y la 030 en curso) | 5 defectos (1 alto: la importación calculaba avisos sin el alcance de quien importa) y 9 observaciones del canario y el inventario |
-| **Auditoría 6: al cerrar la 033, antes de abrir la 034** (la 033 agrega un trabajo agéntico en segundo plano y delegación de la identidad de la persona a herramientas) | 031–033 | — |
-| **Auditoría 7: al cerrar la 035** (servidor MCP: punto de entrada nuevo con OAuth por persona) | 034–035 | — |
+| 2026-10-27, auditoría 6 (origen de la 034), al cerrar la 033 | 031–033 | 7 defectos (1 alto: quien administra usuarios cambiaba la contraseña o desactivaba al superusuario) y huecos del catálogo de Studio antes del MCP; R-009-1 y R-032-6 confirmados |
+| **Auditoría 7: al cerrar la 036** (servidor MCP: punto de entrada nuevo con OAuth por persona) | 034–036 | — |
 
 La auditoría 5 (adelantada, sobre la 029) confirmó que las 139 rutas conservan una capacidad igual o más estricta y
 encontró que la regla «lo vivo con el alcance de quien lo ve» de la 029 no llegaba a la importación, a las transiciones ni
@@ -458,7 +459,8 @@ Origen: pedido del dueño (2026-10-25) antes de Ventas: el login «parecía prot
 ### 033 — ERP AI Studio: herramientas, bucle agéntico y entorno aislado
 Origen: pedido del dueño (2026-10-27): un agente que haga por pasos el trabajo de los desarrollos nuevos. En CLARIFY se
 dividió (UI nueva junto con seguridad y concurrencia, ~3 300 líneas): la **033** es el motor y la **034** la pantalla. Ventas
-pasa a la 036 y CFDI 4.0 a la 037; el servidor MCP es la 035.
+pasa a la 036 y CFDI 4.0 a la 037; el servidor MCP es la 035. (Con la 034 — Endurecimiento 5 — se recorren: pantalla 035,
+MCP 036, Ventas 037, CFDI 4.0 038.)
 - **Estado:** implementado en la [spec 033](specs/033-ai-studio/spec.md). **Herramientas = rutas de la API** ejecutadas en
   proceso con la identidad recargada de la persona (capacidad de la ruta, `RecordFilter`, `FieldAccess`, empresa): 22
   herramientas en tres alcances (`modelo`, `datos` opcional, `aislado`), las del entorno real solo de lectura; salidas
@@ -468,20 +470,33 @@ pasa a la 036 y CFDI 4.0 a la 037; el servidor MCP es la 035.
   copiado por el Plan de Cambios (0.5 s con los cuatro módulos) y los mismos servicios; se borra al terminar y se barre.
   **Entrega** compilada contra el modelo real; aplicar es de la persona con huella y compuerta de cambio directo. Canario de
   la 029 recorrido por todas las herramientas (integración).
-- **Pendiente (diferido con razón):** la pantalla (034); el servidor MCP (035), que expondrá `StudioTools` + `ToolRunner`
+- **Pendiente (diferido con razón):** la pantalla (035); el servidor MCP (036), que expondrá `StudioTools` + `ToolRunner`
   con el usuario del token; probar en la copia como otro rol; caducidad de los pasos guardados (R-033-4).
 
-### 034 — ERP AI Studio: pantalla (planeada)
+### 034 — Endurecimiento 5 (auditoría 6)
+Origen: la auditoría externa 6 (2026-10-27, solo lectura al cerrar la 033). Va antes de la pantalla de Studio: el servidor
+MCP reutilizará el catálogo de herramientas con los permisos exactos de cada persona, y la auditoría encontró por dónde no
+los respetaba. Con ella, la pantalla de Studio pasa a la 035, el servidor MCP a la 036, Ventas a la 037 y CFDI 4.0 a la 038.
+- **Estado:** implementado en la [spec 034](specs/034-endurecimiento-5/spec.md). **Nadie actúa sobre quien tiene más que
+  él** (A-01): contraseña, activación, unidad y empresas de alguien con capacidades que el actor no tiene, también al
+  aprobar; un entorno con aprobación no arranca sin clave de firma (R-009-1). **Catálogo de Studio listo para el MCP:** la
+  copia aislada exige la capacidad publicada (A-02), el despachador vuelve a aplicar los alcances de la credencial (A-03),
+  los GET con efecto lo declaran (A-04) y las rutas despachadas tienen sus límites (R-033-5). Bitácora: toda acción con
+  catálogo está clasificada (A-07, R-032-6). Studio cobra lo reservado al cancelar o vencer (A-05) y recuerda la falla de
+  la copia (A-06). **Estabilidad de CI:** modo `--lento`, primitivas de espera y guardia de receptores.
+
+### 035 — ERP AI Studio: pantalla (planeada)
 Configuración › ERP AI Studio (capacidad *modelador*): pedido con alcances, plan del agente, pasos con herramienta y resultado
 (resumidos y expandibles), avance en vivo (`GET /api/studio/sessions/{id}?after=n`), cancelar, propuesta final con vista
 previa, avisos, pruebas, fallas y riesgos, y «Revisar y aplicar» con la huella. Accesible, claro/oscuro, móvil razonable,
-captura de referencia. Sin cambios de contrato salvo lo que la pantalla pida. Antes: la **auditoría 6**.
+captura de referencia. Sin cambios de contrato salvo lo que la pantalla pida. La auditoría 6 ya se hizo (origen de la 034).
 
-### 035 — Servidor MCP por persona (planeada)
+### 036 — Servidor MCP por persona (planeada)
 Servidor MCP remoto para que cada persona conecte su Claude al ERP con exactamente sus permisos: OAuth *authorization code*
 + PKCE por usuario, consentimiento por alcances (`modelo`, `datos`, `aislado`) y revocación. Expone el catálogo de la 033
 (`GET /api/studio/tools` ya da el JSON Schema) despachado por `RouteDispatcher` con la identidad del token: si la persona no
-puede leer o insertar algo, por MCP tampoco. Punto de entrada nuevo: **auditoría 7** al cerrarla.
+puede leer o insertar algo, por MCP tampoco (desde la 034 el despachador vuelve a aplicar los alcances de la credencial y
+los límites de frecuencia en cada ruta). Punto de entrada nuevo: **auditoría 7** al cerrarla.
 
 ## Specs planeadas (después de la 029)
 En este orden, por decisión del dueño (2026-10-25):
@@ -524,17 +539,18 @@ En este orden, por decisión del dueño (2026-10-25):
      CFDI se recorrerían). Sus pruebas de concurrencia y fallas parciales van en integración.
 3. ~~**032 — Rediseño del inicio de sesión**~~ (pedido del dueño antes de Ventas). Implementado (ver arriba).
 4. ~~**033 — ERP AI Studio (motor)**~~ (pedido del dueño, 2026-10-27). Implementado (ver arriba).
-5. **034 — ERP AI Studio: pantalla**, después de la auditoría 6.
-6. **035 — Servidor MCP por persona** (auditoría 7 al cerrarla).
-7. **036 — Módulo de Ventas:** clientes, cotización, pedido, salida de almacén con costo de ventas (póliza de salidas),
+5. ~~**034 — Endurecimiento 5**~~ (auditoría 6). Implementado (ver arriba).
+6. **035 — ERP AI Studio: pantalla.**
+7. **036 — Servidor MCP por persona** (auditoría 7 al cerrarla).
+8. **037 — Módulo de Ventas:** clientes, cotización, pedido, salida de almacén con costo de ventas (póliza de salidas),
    factura y cobranza. Usa `merge` para extender Producto e Inventario, avisos (límite de crédito) y rutas de tres niveles;
    declara su módulo con `setApp` (orden 15, entre Compras e Inventario).
-8. **037 — CFDI 4.0 con PAC:** timbrado de la factura de Ventas con un proveedor autorizado, cancelación y complemento de
+9. **038 — CFDI 4.0 con PAC:** timbrado de la factura de Ventas con un proveedor autorizado, cancelación y complemento de
    pago; el secreto del PAC fuera del código (constitución II.7). Su representación impresa usa las plantillas de la 027
    (con un bloque de código QR nuevo).
-9. **Pólizas en moneda extranjera** (pendiente de la 020).
-10. **Revaluación de existencias** (pendiente de la 020).
-11. **Reversa de pólizas con otra póliza** (pendiente de la 020).
+10. **Pólizas en moneda extranjera** (pendiente de la 020).
+11. **Revaluación de existencias** (pendiente de la 020).
+12. **Reversa de pólizas con otra póliza** (pendiente de la 020).
 
 ## Decisión: ¿extensión con código?
 La auditoría tiene razón en el costo: cada necesidad nueva exige una capacidad del motor. Se mantiene

@@ -1,8 +1,10 @@
 // Spec 030 (H2 CA2): corre pruebas de integración contra el código anterior («cada hallazgo se vuelve prueba que falla con
 // el código anterior»). Crea un worktree en <commit>, le copia tests/Erp.IntegrationTests tal como está aquí y corre el
 // filtro pedido. Cada clase crea y borra su propia base (_IT), así que no choca con la suite de esta carpeta.
-// Uso: npm --prefix web run it:regresion -- <commit> <filtro de dotnet test o nombre de clase/prueba> [--conservar]
+// Uso: npm --prefix web run it:regresion -- <commit> <filtro de dotnet test o nombre de clase/prueba> [--conservar] [--sin=<archivo.cs>]
 //   p. ej. npm --prefix web run it:regresion -- cd81760 Hardening012Tests.H3
+// Spec 034: --sin=<archivo.cs> (repetible) no copia ese archivo. Una prueba que usa una API nueva no compila contra el
+// commit anterior y dejaría sin correr al resto: esa falla por definición y se dice en verify.md.
 import { execFileSync, spawnSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -10,7 +12,12 @@ import path from 'node:path';
 
 const args = process.argv.slice(2);
 const conservar = args.includes('--conservar');
-const [commit, filtro] = args.filter((a) => a !== '--conservar');
+const sin = args.filter((a) => a.startsWith('--sin=')).map((a) => a.slice('--sin='.length));
+if (sin.some((f) => !/^[A-Za-z0-9_.]+\.cs$/.test(f))) {
+  console.error('--sin espera el nombre de un archivo .cs de tests/Erp.IntegrationTests');
+  process.exit(2);
+}
+const [commit, filtro] = args.filter((a) => a !== '--conservar' && !a.startsWith('--sin='));
 if (!commit || commit.startsWith('-') || !filtro) {
   console.error('Uso: npm --prefix web run it:regresion -- <commit> <filtro> [--conservar]');
   process.exit(2);
@@ -33,8 +40,9 @@ try {
   creado = true;
   const origen = path.join(raiz, 'tests', 'Erp.IntegrationTests');
   cpSync(origen, path.join(wt, 'tests', 'Erp.IntegrationTests'), {
-    recursive: true, filter: (f) => !/[\\/](bin|obj|TestResults)([\\/]|$)/.test(path.relative(origen, f)),
+    recursive: true, filter: (f) => !/[\\/](bin|obj|TestResults)([\\/]|$)/.test(path.relative(origen, f)) && !sin.includes(path.basename(f)),
   });
+  if (sin.length) console.log(`[it:regresion] Sin copiar: ${sin.join(', ')}`);
   console.log(`[it:regresion] tests/Erp.IntegrationTests copiado; filtro: ${filter}`);
   const resultados = path.join(wt, 'tests', 'Erp.IntegrationTests', 'TestResults');
   const r = spawnSync('dotnet', ['test', path.join(wt, 'tests', 'Erp.IntegrationTests'), '--filter', filter,

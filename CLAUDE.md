@@ -43,10 +43,10 @@ se declaran como datos; el motor genera tablas, API y pantallas. Idioma del proy
 dotnet test                       # unitarias (núcleo de seguridad) e integración con SQL real (030, necesita LocalDB)
 dotnet test tests/Erp.Tests       # solo unitarias (sin base)
 npm --prefix web test             # Vitest: lógica de la SPA sin DOM y pantallas sin captura (030)
-npm --prefix web run it:regresion -- <commit> <filtro>   # pruebas de integración contra el código anterior (030)
+npm --prefix web run it:regresion -- <commit> <filtro> [--sin=<archivo.cs>]   # integración contra el código anterior (030; --sin, 034)
 ACTUALIZAR_RUTAS=1 dotnet test --filter RouteInventory   # regenera docs/sdd/rutas.md tras agregar o cambiar una ruta (029)
 npm --prefix web run e2e          # E2E Playwright sobre base desechable (ver abajo)
-npm --prefix web run e2e -- e2e/<archivo>.spec.ts --veces=3   # lo nuevo, 3 veces sobre base nueva
+npm --prefix web run e2e -- e2e/<archivo>.spec.ts --veces=3   # lo nuevo, 3 veces sobre base nueva y con --lento (034)
 npm --prefix web run e2e:regresion -- <commit> [e2e/<archivo>.spec.ts]   # pruebas nuevas contra el código anterior
 npm --prefix web run revision     # instancia para la revisión exploratoria (base propia, puerto libre)
 npm --prefix web run e2e:report   # reporte con video/trace de fallas
@@ -77,10 +77,12 @@ compilan en su propia carpeta.
   `role="alert"` en la vista o si el foco cae en `body`, y Vitest
   falla si una ruta nueva no tiene captura ni razón escrita (ver [verificacion.md](docs/sdd/verificacion.md)).
 - La regla de un camino debe valer en **todos**: bitácora, etiquetas, buscador, reportes, exportación, OData, webhooks,
-  importación, paquetes, reversión, impresión y asistente (012, 021).
+  importación, paquetes, reversión, impresión, asistente y herramientas de Studio (012, 021, 034: el despachador vuelve a
+  aplicar capacidad, alcances de la credencial, efecto y límites).
 - Toda operación «revisar → aplicar» o «abrir → guardar» lleva huella o versión (012-5, 021-2).
 - Un trabajo asíncrono marca su éxito dentro de su transacción y comprueba que el *lease* sigue siendo suyo (021-3).
-- Nadie otorga, aprueba ni hereda lo que no tiene; el beneficiario no se aprueba (021-1).
+- Nadie otorga, aprueba ni hereda lo que no tiene; el beneficiario no se aprueba (021-1). Tampoco actúa sobre quien tiene
+  más que él: contraseña, activación, unidad o empresas (034 A-01).
 - Al borrar un worktree, quitar antes la unión de `node_modules` (013 F-03); `e2e:regresion` ya lo hace.
 - El minificador de CSS convierte `animation: 5.6s linear infinite` **sin nombre** en `animation: none`: con `animation-name`
   aparte, usar propiedades largas (032, R-032-5).

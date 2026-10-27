@@ -171,6 +171,7 @@ public static partial class AdminEndpoints
         await RequireGrantableRolesAsync(cn, tx, me, before.RoleIds, p.RoleIds);
         var companyIds = p.CompanyIds ?? before.CompanyIds.ToArray();
         await RequireCompaniesAsync(cn, tx, companyIds);
+        await RequireActOnAsync(cn, tx, me, before, p, companyIds);
 
         var after = new UserAccessSnapshot(p.DisplayName, p.IsActive, p.RoleIds.Order().ToList(), p.Unit, companyIds.Order().ToList());
         // Spec 015 (H4): agregar roles o empresas, cambiar la unidad, reactivar o poner contraseña a otro espera aprobación.
@@ -242,6 +243,27 @@ public static partial class AdminEndpoints
                 throw new Forbidden(r.Caps.Superuser
                     ? $"Solo un administrador del sistema puede otorgar o quitar el rol «{r.Name}»."
                     : $"No puedes otorgar ni quitar el rol «{r.Name}»: da una capacidad que no tienes ({missing}).");
+    }
+
+    /// <summary>
+    /// Spec 034 (H1, auditoría 6 A-01): nadie cambia la contraseña, la activación, la unidad ni las empresas de quien tiene
+    /// capacidades que él no tiene; con superusuario solo actúa otro superusuario. Es la regla de 021-1 (los roles) aplicada a
+    /// la persona: sin ella, quien administra usuarios entraba como el administrador poniéndole contraseña. Corre al
+    /// solicitar (con quien solicita) y al aprobar (con quien aprueba); el nombre visible no da ni quita acceso.
+    /// </summary>
+    private static async Task RequireActOnAsync(DbConnection cn, DbTransaction tx, UserContext actor, UserDto target, UserPayload p, int[] companyIds)
+    {
+        // Revisión adversarial 034 (F-01): cambiar roles también, aunque el rol no dé capacidades: renueva el sello y cierra
+        // todas las sesiones del destino (repetido, deja fuera al administrador) o le quita sus roles de datos.
+        var acts = p.PasswordHash is not null || p.IsActive != target.IsActive || !string.Equals(p.Unit, target.Unit, StringComparison.Ordinal)
+                   || !target.CompanyIds.Order().SequenceEqual(companyIds.Distinct().Order())
+                   || !target.RoleIds.Order().SequenceEqual(p.RoleIds.Distinct().Order());
+        if (!acts || actor.IsSuperuser) return;
+        var caps = (await LoadCapabilitiesAsync(cn, tx, target.RoleIds.ToArray())).Aggregate(AdminCapabilities.None, (all, r) => all.Or(r.Caps));
+        if (caps.MissingFor(actor) is { } missing)
+            throw new Forbidden(caps.Superuser
+                ? $"Solo un administrador del sistema puede cambiar la contraseña, la activación, la unidad, las empresas o los roles de «{target.Username}»."
+                : $"No puedes cambiar la contraseña, la activación, la unidad, las empresas ni los roles de «{target.Username}»: tiene una capacidad que no tienes ({missing}).");
     }
 
     internal static async Task<IReadOnlyList<(int Id, string Name, AdminCapabilities Caps)>> LoadCapabilitiesAsync(DbConnection cn, DbTransaction? tx, int[] ids) =>

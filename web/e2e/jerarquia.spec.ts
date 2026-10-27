@@ -230,8 +230,11 @@ test('H5 CA1: buscadores, reportes, bitácora y etiquetas usan la misma regla', 
   const report = (await (await gina.get('/api/reports/J15Caso/Conteo')).json()) as { totals: Record<string, number> };
   expect(Object.values(report.totals)[0]).toBe(3);
   // Bitácora: los eventos de la rama, no los de J15 Sur.
-  const audit = (await (await gina.get('/api/audit', { params: { entity: 'J15Caso', pageSize: '100' } })).json()) as { items: { recordId: string }[] };
-  const seen = new Set(audit.items.map((x) => Number(x.recordId)));
+  const audit = (await (await gina.get('/api/audit', { params: { entity: 'J15Caso', pageSize: '100' } })).json()) as { items: { action: string; recordId: string }[] };
+  // Spec 034 (R-032-6): solo eventos de datos. En `model.change` el recordId es el id del ChangeSet, no de un caso: tras
+  // h5-h6-seguridad.spec.ts uno coincidía con el id del caso de Sur y la prueba fallaba sin fuga.
+  const datos = audit.items.filter((x) => ['create', 'update', 'delete', 'automation.create', 'automation.update'].includes(x.action) || x.action.startsWith('workflow.'));
+  const seen = new Set(datos.map((x) => Number(x.recordId)));
   expect(seen.has(rec.a.id) && seen.has(rec.b.id) && seen.has(rec.t.id)).toBe(true);
   expect(seen.has(rec.c.id)).toBe(false);
   // Etiqueta de una referencia a un caso fuera del alcance.

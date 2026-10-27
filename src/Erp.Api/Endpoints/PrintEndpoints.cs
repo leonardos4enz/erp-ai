@@ -26,11 +26,11 @@ public static class PrintEndpoints
         {
             var r = await records.PrintAsync(entity, id, template, http.CurrentUser(), ct);
             await using (var cn = await db.OpenAsync(ct))
-                await Audit.WriteAsync(cn, null, http, AuditActions.PrintPdf, entity, id.ToString(), after: new { template = r.Template });
+                await Audit.WriteAsync(cn, null, http, AuditActions.PrintPdf, r.Entity, id.ToString(), after: new { template = r.Template });
             PdfHeaders(http, frameable: false);
             // El nombre sale de los metadatos y del folio (caracteres seguros), nunca de la petición.
             return Results.File(r.Pdf, "application/pdf", r.FileName);
-        }).Requires(Capability.Records).Costly("genera un PDF").RequireRateLimiting(RatePolicy);
+        }).Requires(Capability.Records).Writes(Effect.AuditTrail).Costly("genera un PDF").RequireRateLimiting(RatePolicy);
 
         var model = app.MapGroup("/api/model/print").RequireAuthorization();
         model.MapPost("/preview", async (PreviewRequest req, HttpContext http, RecordService records, MetadataStore store, Db db, CancellationToken ct) =>

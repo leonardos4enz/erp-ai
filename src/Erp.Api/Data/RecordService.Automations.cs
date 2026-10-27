@@ -325,7 +325,7 @@ public sealed partial class RecordService
 
         await UpdateHeaderAsync(c.Cn, c.Tx, root, rootId, draft.Header, rowVersion: null, c.User.Id, c.Ct);
         await SaveLinesAsync(c.Cn, c.Tx, root, c.Model, rootId, draft, draft, c.User.Id, c.Ct);
-        await Audit.WriteAsync(c.Cn, c.Tx, c.Http, "automation.update", root.Name, rootId.ToString(CultureInfo.InvariantCulture), before, AuditAfter(draft, warnings));
+        await Audit.WriteAsync(c.Cn, c.Tx, c.Http, AuditActions.AutomationUpdate, root.Name, rootId.ToString(CultureInfo.InvariantCulture), before, AuditAfter(draft, warnings));
         await FireAsync(c, root, rootId, AutomationEvents.Update, null);
     }
 
@@ -346,7 +346,7 @@ public sealed partial class RecordService
         foreach (var (field, lines) in draft.Lines)
             if (target.FindField(field) is { ChildEntity: { } childName } && c.Model.TryGetValue(childName, out var child))
                 foreach (var l in lines) CheckRefs(child, l.Values);
-        return await InsertDraftAsync(c, target, draft, "automation.create");
+        return await InsertDraftAsync(c, target, draft, AuditActions.AutomationCreate);
     }
 
     /// <summary>Transición del destino si está en uno de sus estados de origen (si no, se omite).</summary>

@@ -35,28 +35,11 @@ public static class SecurityMiddleware
     /// </summary>
     public static IApplicationBuilder UseBearerScope(this IApplicationBuilder app) => app.Use(async (http, next) =>
     {
-        var scheme = http.User.Identity?.AuthenticationType;
-        if (scheme == Integrations.ApiKeyHandler.SchemeName &&
-            !Integrations.ApiKeyHandler.AllowedPaths.Any(p => http.Request.Path.StartsWithSegments(p)))
+        if (BearerScope.Check(BearerCredential.Of(http.User), http.Request.Path, http.Request.Method) is { } denied)
         {
             http.Response.StatusCode = StatusCodes.Status403Forbidden;
-            await http.Response.WriteAsJsonAsync(new { title = "Una clave de API solo puede usar la API de datos, reportes y OData.", status = 403 });
-            return;
-        }
-        if (scheme == Integrations.OAuthTokenHandler.SchemeName &&
-            Integrations.OAuthScopes.Required(http.Request.Path, http.Request.Method) is var required &&
-            (required is null || required.Length > 0 && !(http.User.FindFirst(Integrations.OAuthScopes.Claim)?.Value ?? "").Split(' ').Contains(required)))
-        {
-            http.Response.StatusCode = StatusCodes.Status403Forbidden;
-            http.Response.Headers.WWWAuthenticate = required is null
-                ? "Bearer error=\"insufficient_scope\""
-                : $"Bearer error=\"insufficient_scope\", scope=\"{required}\"";
-            await http.Response.WriteAsJsonAsync(new
-            {
-                title = required is null ? "Un token OAuth solo puede usar la API de datos, reportes y OData."
-                    : $"El token no tiene el alcance {required}.",
-                status = 403,
-            });
+            if (denied.WwwAuthenticate is { } challenge) http.Response.Headers.WWWAuthenticate = challenge;
+            await http.Response.WriteAsJsonAsync(new { title = denied.Title, status = 403 });
             return;
         }
         await next();
@@ -81,4 +64,39 @@ public static class SecurityMiddleware
         }
         await next();
     });
+}
+
+/// <summary>
+/// Spec 034 (auditoría 6 A-03): la credencial de integración con la que llega una petición (clave de API o token OAuth y sus
+/// alcances). Null = la sesión de la persona (cookie), que no tiene alcances. El despachador de Studio y del MCP la recibe
+/// para volver a aplicar <see cref="BearerScope.Check"/>.
+/// </summary>
+public sealed record BearerCredential(string Scheme, string? Scopes = null)
+{
+    public static BearerCredential? Of(System.Security.Claims.ClaimsPrincipal user) =>
+        user.Identity?.AuthenticationType is Integrations.ApiKeyHandler.SchemeName or Integrations.OAuthTokenHandler.SchemeName
+            ? new(user.Identity.AuthenticationType!, user.FindFirst(Integrations.OAuthScopes.Claim)?.Value)
+            : null;
+}
+
+/// <summary>
+/// Spec 008: una clave de API solo llega a datos, reportes y OData. Spec 018: un token OAuth, además, solo a lo que sus
+/// alcances permiten. Spec 034: función pura que usan el middleware y el despachador (una sola regla para los dos caminos).
+/// </summary>
+public static class BearerScope
+{
+    public sealed record Denial(string Title, string? WwwAuthenticate = null);
+
+    public static Denial? Check(BearerCredential? credential, PathString path, string method)
+    {
+        if (credential?.Scheme == Integrations.ApiKeyHandler.SchemeName && !Integrations.ApiKeyHandler.AllowedPaths.Any(p => path.StartsWithSegments(p)))
+            return new("Una clave de API solo puede usar la API de datos, reportes y OData.");
+        if (credential?.Scheme == Integrations.OAuthTokenHandler.SchemeName &&
+            Integrations.OAuthScopes.Required(path, method) is var required &&
+            (required is null || required.Length > 0 && !(credential.Scopes ?? "").Split(' ').Contains(required)))
+            return required is null
+                ? new("Un token OAuth solo puede usar la API de datos, reportes y OData.", "Bearer error=\"insufficient_scope\"")
+                : new($"El token no tiene el alcance {required}.", $"Bearer error=\"insufficient_scope\", scope=\"{required}\"");
+        return null;
+    }
 }

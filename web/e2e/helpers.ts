@@ -215,6 +215,13 @@ function revisarDesborde(): string | null {
 export const test = base.extend<{ guard: void; guardias: Guardias }>({
   guardias: [{ desborde: true, alerta: true, foco: true }, { option: true }],
   guard: [async ({ page, guardias }, use) => {
+    // Spec 034 (H7): con `run.mjs --lento` (obligatorio con --veces > 1) cada petición de la página a la API tarda al azar
+    // hasta LENTO_MS: una prueba que escribe antes de que llegue la respuesta, o que lee el último aviso de la acción
+    // anterior, falla en local como fallaba en CI (R-030-5).
+    if (process.env.E2E_LENTO) await page.route('**/api/**', async (route) => {
+      await new Promise((r) => setTimeout(r, Math.random() * LENTO_MS));
+      await route.fallback();
+    });
     const problems: string[] = [];
     page.on('pageerror', (e) => problems.push(`JS: ${e.message}`));
     page.on('console', (m) => {
@@ -242,6 +249,55 @@ export const test = base.extend<{ guard: void; guardias: Guardias }>({
 });
 
 export { expect };
+
+/** Spec 034 (H7): latencia máxima del modo lento (la carrera de `multiempresa › H4 CA1` se reprodujo con 700 ms). */
+export const LENTO_MS = 700;
+
+/**
+ * Spec 034 (H7): la respuesta que provoca una acción. `respuesta` es la espera ya registrada (`page.waitForResponse(...)`,
+ * que se evalúa antes de actuar): así no hay carrera entre actuar y empezar a esperar.
+ *   const res = await tras(page.waitForResponse((r) => r.url().endsWith('/rates')), () => boton.click());
+ */
+export async function tras<R>(respuesta: Promise<R>, accion: () => Promise<unknown>): Promise<R> {
+  const [r] = await Promise.all([respuesta, accion()]);
+  return r;
+}
+
+/**
+ * Spec 034 (H7): el aviso (`role="status"` o `"alert"`) que deja **esta** acción. Los que ya estaban (de la acción
+ * anterior, aún visibles) no cuentan: con `getByText(...).last()` la prueba pasaba con el aviso viejo (033, integraciones).
+ */
+export async function expectToast(page: Page, texto: string | RegExp, accion: () => Promise<unknown>) {
+  // Por atributo y no por rol: se marcan los avisos presentes para distinguirlos de los que lleguen.
+  await page.evaluate(() => document.querySelectorAll('[role="status"], [role="alert"]').forEach((e) => e.setAttribute('data-e2e-previo', '')));
+  await accion();
+  const nuevo = page.locator('[role="status"]:not([data-e2e-previo]), [role="alert"]:not([data-e2e-previo])').filter({ hasText: texto }).first();
+  await expect(nuevo).toBeVisible();
+  return nuevo;
+}
+
+/**
+ * Spec 034 (H7): lo que recibe un servidor simulado de la prueba (proveedor de IA, receptor de webhooks), en orden. En
+ * lugar de leer el último (`.at(-1)`, que puede ser el de la acción anterior si la nueva aún no llega): `marca()` antes de
+ * actuar y `siguiente(cond)` después, que espera con `expect.poll` el primero que llegue tras la marca y la avanza.
+ * La guardia de `src/__tests__/e2eGuardia.test.ts` prohíbe `.at(-1)` sobre un receptor.
+ */
+export function receptor<T>() {
+  const items: T[] = [];
+  let desde = 0;
+  return {
+    push: (item: T) => { items.push(item); },
+    get length() { return items.length; },
+    todos: (): readonly T[] => items,
+    marca: () => { desde = items.length; },
+    async siguiente(cond: (item: T) => boolean = () => true, mensaje = 'el receptor no recibió lo esperado tras la marca'): Promise<T> {
+      let hallado = -1;
+      await expect.poll(() => (hallado = items.findIndex((x, i) => i >= desde && cond(x))), { message: mensaje, timeout: 15_000 }).toBeGreaterThanOrEqual(0);
+      desde = hallado + 1;
+      return items[hallado];
+    },
+  };
+}
 
 /**
  * Spec 026: el JSON de cada sección del modelador es avanzado y está plegado («Ver como JSON»). Abre el de la etiqueta

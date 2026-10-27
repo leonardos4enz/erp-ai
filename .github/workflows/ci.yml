@@ -98,8 +98,17 @@ jobs:
         if: failure() && steps.e2e.outcome == 'failure'
         shell: bash
         run: node web/e2e/anotar-ci.mjs e2e-salida.log E2E
+      # Spec 034 (H7, R-030-5): repite solo lo que falló (con lo que su encabezado necesita) sobre una base nueva y anota si
+      # es intermitente o reproducible. Detección, no reintento: el trabajo sigue en rojo.
+      - name: Repetir lo que falló sobre base nueva (intermitente o reproducible)
+        if: failure() && steps.e2e.outcome == 'failure'
+        # Revisión adversarial 034 (F-07): con tope propio, para que el reporte se suba aunque el reintento se alargue.
+        timeout-minutes: 25
+        continue-on-error: true
+        shell: bash
+        run: node web/e2e/reintentar-ci.mjs e2e-salida.log
       - name: Reporte de Playwright (video y trace de las fallas)
-        if: failure()
+        if: failure() || cancelled()
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report
@@ -107,4 +116,6 @@ jobs:
             e2e-salida.log
             web/e2e/.report
             web/e2e/.results
+            web/e2e/.report-primera
+            web/e2e/.results-primera
           retention-days: 14

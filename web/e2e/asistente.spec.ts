@@ -4,7 +4,7 @@
 import { execFileSync } from 'node:child_process';
 import { createServer, type Server } from 'node:http';
 import type { APIRequestContext, Browser, Page } from '@playwright/test';
-import { ADMIN, DB, PORTS, apiAs, applyPlan, expect, expectAccessible, roleId, test, uiLogin } from './helpers';
+import { ADMIN, DB, PORTS, apiAs, applyPlan, expect, expectAccessible, receptor, roleId, test, uiLogin } from './helpers';
 
 test.describe.configure({ mode: process.env.E2E_INDEPENDENT ? 'default' : 'serial' });
 
@@ -22,8 +22,9 @@ type Captured = { headers: Record<string, string | string[] | undefined>; body: 
   model: string; system: { text: string }[]; messages: { role: string; content: string | { text: string }[] }[];
   output_config?: { format?: { type: string; schema: unknown } }; max_tokens: number } };
 type Scripted = { status?: number; explanation?: string; plan?: unknown; stop?: string; raw?: string; delayMs?: number };
-const captured: Captured[] = [];
-const verified: string[] = [];
+// Spec 034 (H7): receptores con marca, no arreglos leídos con .at(-1) (podía ser la petición de la acción anterior).
+const captured = receptor<Captured>();
+const verified = receptor<string>();
 const script: Scripted[] = [];
 let server: Server;
 
@@ -156,10 +157,11 @@ test('H3 CA4: sin clave el asistente lo explica; solo el administrador la guarda
   await field.fill('corta');
   await page.getByRole('button', { name: 'Guardar y probar' }).click();
   await expect(page.getByText('Pega la clave completa de Anthropic')).toBeVisible();
+  verified.marca();
   await field.fill('sk-ant-clave-que-el-proveedor-rechaza-99');
   await page.getByRole('button', { name: 'Guardar y probar' }).click();
   await expect(page.getByText('Anthropic rechazó la clave')).toBeVisible();
-  expect(verified.at(-1)).toBe('Bearer sk-ant-clave-que-el-proveedor-rechaza-99');
+  expect(await verified.siguiente()).toBe('Bearer sk-ant-clave-que-el-proveedor-rechaza-99');
   expect((await (await admin.get('/api/assistant')).json()).configured).toBe(false);
 
   await field.fill(API_KEY);
@@ -191,6 +193,7 @@ test('H1 CA1 · CA2 + H3 CA2: propone con la vista previa del modelador y solo e
   await expect(page.getByText('¿Qué necesitas en el modelo?')).toBeVisible();
 
   script.push({ explanation: 'Crea el catálogo Vehículos IA con placa única y año, y una regla para el año.', plan: vehiculoPlan() });
+  captured.marca();
   await ask(page, 'Agrega un catálogo de vehículos con placa única y año');
   const turn = lastTurn(page);
   await expect(turn.getByText('Propuesta lista')).toBeVisible();
@@ -202,7 +205,7 @@ test('H1 CA1 · CA2 + H3 CA2: propone con la vista previa del modelador y solo e
   await expectAccessible(page);
 
   // Lo que recibió el proveedor: la clave en una cabecera, salida estructurada y el modelo de metadatos… y nada más.
-  const req = captured.at(-1)!;
+  const req = await captured.siguiente();
   // El SDK oficial (v13) envía la clave como «Authorization: Bearer».
   expect(req.headers.authorization).toBe(`Bearer ${API_KEY}`);
   expect(req.headers['anthropic-version']).toBeTruthy();
@@ -276,10 +279,11 @@ test('H1 CA3: el asistente corrige su plan con los errores del compilador; si no
   const good = { description: 'Talleres', operations: [{ ...bad.operations[0], fields: [{ name: 'Nombre', label: 'Nombre', type: 'text' }] }] };
   script.push({ explanation: 'Primer intento.', plan: bad }, { explanation: 'Corregido: el tipo es text.', plan: good });
   await page.goto('/admin/assistant');
+  captured.marca();
   await ask(page, 'Crea un catálogo de talleres');
   await expect(lastTurn(page).getByText('Propuesta lista')).toBeVisible();
   await expect(lastTurn(page).getByText('Corregido: el tipo es text.')).toBeVisible();
-  const repair = captured.at(-1)!.body.messages;
+  const repair = (await captured.siguiente((c) => c.body.messages.length > 1)).body.messages;
   expect(repair).toHaveLength(3);
   expect(repair[1].role).toBe('assistant');
   expect(text(repair[2])).toContain("Tipo 'texto' no soportado en 'Nombre'");
@@ -333,10 +337,11 @@ test('H1 CA5 + H2 CA3: refinar reemplaza la propuesta anterior; descartar la dej
   await expect(turns.first().getByRole('button', { name: 'Aplicar…' })).toBeEnabled();
 
   script.push({ explanation: 'Versión 2: el año ya no tiene regla.', plan: { description: 'Camiones', operations: [vehiculoPlan('IaCamion').operations[0]] } });
+  captured.marca();
   await ask(page, 'Mejor sin la regla del año');
 
   // El modelo recibió la conversación completa: solicitudes y respuestas previas, y la nueva solicitud.
-  const msgs = captured.at(-1)!.body.messages;
+  const msgs = (await captured.siguiente()).body.messages;
   expect(msgs.map((m) => m.role)).toEqual(['user', 'assistant', 'user', 'assistant', 'user']);
   expect(text(msgs[0])).toBe('Agrega camiones');
   expect(text(msgs[1])).toContain('Versión 1.');
@@ -510,6 +515,7 @@ test('H4 CA1 · CA2 · CA3: cada solicitud queda registrada con su resultado, mo
   const history = page.getByRole('navigation', { name: 'Conversaciones' });
   await expect(history.getByRole('button', { name: /Agrega un catálogo de vehículos con placa única y año/ })).toBeVisible();
   await history.getByRole('button', { name: /Agrega un catálogo de vehículos con placa única y año/ }).click();
+  // razón: el texto está en el botón del historial y en la burbuja de la conversación; la burbuja es la última.
   await expect(page.getByText('Agrega un catálogo de vehículos con placa única y año', { exact: true }).last()).toBeVisible();
 });
 
@@ -565,6 +571,7 @@ test('En móvil el redactor no tapa la conversación mientras se lee', async ({ 
   await page.goto('/admin/assistant');
   await page.getByRole('navigation', { name: 'Conversaciones' }).getByRole('button', { name: /Agrega camiones/ }).click();
   await expect(page.getByRole('article', { name: /Respuesta del asistente/ })).toHaveCount(3);
+  // razón: el pedido está en el historial y en la conversación; se lleva a la vista el de la conversación (el último).
   await page.getByText('Agrega camiones', { exact: true }).last().scrollIntoViewIfNeeded();
   await page.evaluate(() => document.querySelector('.content')?.scrollTo(0, 0));
   await page.getByRole('article', { name: /Respuesta del asistente/ }).first().scrollIntoViewIfNeeded();
@@ -596,9 +603,11 @@ test('H3 CA4: el administrador reemplaza o quita la clave desde un diálogo; la 
   await expect(page.getByText('Clave reemplazada')).toBeVisible();
   expect(await (await admin.get('/api/assistant')).json()).toMatchObject({ configured: true, keySource: 'app', workspaceId: WORKSPACE });
   script.push({ explanation: 'Con espacio de trabajo.' });
+  captured.marca();
   expect((await admin.post('/api/assistant/requests', { data: { prompt: 'prueba con espacio de trabajo' } })).status()).toBe(200);
-  expect(captured.at(-1)!.headers['anthropic-workspace-id']).toBe(WORKSPACE);
-  expect(captured.at(-1)!.headers.authorization).toBe(`Bearer ${ORG_KEY}`);
+  const withWorkspace = await captured.siguiente();
+  expect(withWorkspace.headers['anthropic-workspace-id']).toBe(WORKSPACE);
+  expect(withWorkspace.headers.authorization).toBe(`Bearer ${ORG_KEY}`);
 
   await page.getByRole('button', { name: 'Clave de Anthropic' }).click();
   await expect(dialog.getByText(`espacio de trabajo ${WORKSPACE}`)).toBeVisible();

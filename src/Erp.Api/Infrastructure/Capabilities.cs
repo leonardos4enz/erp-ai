@@ -42,6 +42,11 @@ public enum Effect
     Config,
     /// <summary>Solo la sesión o lo personal de quien llama (cerrar sesión, cambiar de empresa, sus vistas, descartar su solicitud).</summary>
     Session,
+    /// <summary>
+    /// Spec 034 (auditoría 6 A-04): no cambia datos, pero deja rastro en la bitácora (imprimir, exportar). Es el único efecto
+    /// que puede declarar un GET: así el despachador de Studio y del MCP no lo trata como lectura.
+    /// </summary>
+    AuditTrail,
 }
 
 /// <summary>Por qué compuerta pasa un cambio al modelo o a la seguridad.</summary>

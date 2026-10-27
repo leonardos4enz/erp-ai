@@ -4,7 +4,7 @@
 - inicio: 2026-10-27 11:41
 - cierre: 2026-10-27 12:37
 - unitarias: 740 (+35: 643 de Erp.Tests, +7 en StudioCoreTests; 97 de integración, +28 en StudioTests, StudioModulesTests y StudioProviderTests) y Vitest 36 (sin cambios)
-- e2e: 374 (+0: la spec no tiene pantalla; la 034 la agrega)
+- e2e: 374 (+0: la spec no tiene pantalla; la pantalla la agrega en la 035)
 - corridas completas: 2 (7 min 23 s antes de la revisión adversarial; 7 min 09 s la final)
 - corridas parciales: 28 (explorador: el diagrama medido al abrir el detalle y 1 s después, y el puntero sobre otra caja con el código anterior; --veces=3 sobre compras + explorador; integraciones con la prueba retrasada: anterior y corregida; --veces=3 sobre compras + integraciones; visual-modelador con las funciones retrasadas: anterior y corregido; compras + visual-modelador; --veces=3 sobre compras + inventario + valuacion-contable + explorador + visual-modelador; multiempresa con el PUT retrasado: código anterior y corregido; --veces=3 sobre compras + inventario + multiempresa + jerarquia tras CI; StudioTests ×4 iterando; StudioModulesTests; StudioProviderTests ×6 hasta tener el servidor simulado; las nuevas de integración y StudioCoreTests ×3 con el código final)
 - contra el código anterior: 1 (reversión local de las 7 correcciones de la revisión adversarial: las 7 pruebas fallan)
@@ -19,7 +19,8 @@
 criterios: ~3 300 líneas con la pantalla y seguridad/concurrencia junto con UI nueva): la 033 es el motor (1 893 líneas de
 producto nuevas en `src/Erp.Api/Studio`, la ruta y el inventario vivo) y la **034** la pantalla. Renumeración del roadmap:
 035 servidor MCP, 036 Ventas, 037 CFDI 4.0; auditoría 6 al cerrar la 033 (trabajo agéntico y delegación de identidad) y 7
-al cerrar la 035 (punto de entrada OAuth).
+al cerrar la 035 (punto de entrada OAuth). (La auditoría 6 abrió la 034 — Endurecimiento 5 —: pantalla 035, MCP 036 y
+auditoría 7 al cerrarla, Ventas 037, CFDI 4.0 038.)
 
 ## 1. Pruebas unitarias e integración
 `dotnet test`: **740 correctas** (643 + 97). Nuevas:
@@ -70,10 +71,10 @@ usuario; aplicar con `UPDLOCK`, huella y compuerta; reclamo con `READPAST`; escr
 barrido. Encontró F-01…F-11 (abajo).
 
 ## 4. Revisión exploratoria
-No hay pantalla (CLARIFY 1: la 034). No se usó el servidor de desarrollo: sin la contraseña de `admin` (del dueño) ni una
+No hay pantalla (CLARIFY 1: la 035, renumerada). No se usó el servidor de desarrollo: sin la contraseña de `admin` (del dueño) ni una
 clave de Anthropic de prueba, y la spec prohíbe llamar a la API real. La exploración se hizo por la API real en memoria con
 el adaptador real contra el proveedor simulado (`StudioProviderTests`) y con sesiones completas en integración; el recorrido
-humano de la pantalla queda para la 034.
+humano de la pantalla queda para la 035.
 
 ### Hallazgos
 | ID | Severidad | Categoría | Hallazgo | Corrección | Prueba (falla con el código anterior) |
@@ -85,7 +86,7 @@ humano de la pantalla queda para la 034.
 | F-05 | Baja | seguridad | Los errores de `entregar` (mensajes del compilador que citan etiquetas del modelo, escritas por otras personas) volvían al modelo sin delimitar | También van en `<datos_no_confiables herramienta="entregar">` | `StudioTests › H2_CA1_una_sesion_investiga_compila_corrige_y_entrega` (falla con la reversión) |
 | F-06 | Baja | motor-api | Un nombre de herramienta de más de 60 caracteres (lo escribe el modelo) truncaba la columna y tumbaba la sesión; `Studio:MaxPromptChars` admitía 20 000 con una columna de 4 000 | Nombre recortado y, en el delimitador, solo nombres del catálogo («desconocida»); tope del pedido 4 000 | `StudioTests › F06_un_nombre_de_herramienta_largo_no_tumba_la_sesion` (falla con la reversión) |
 | F-07 | Baja | seguridad | `compilar_plan` devuelve, para un plan que quita estados, el conteo de registros por estado de toda la tabla aunque la sesión no tenga `datos` | Riesgo (es lo que el Modelador ya muestra a la persona; un conteo, no valores) | R-033-9 |
-| F-08 | Baja | seguridad | Los pasos guardan registros leídos sin caducidad y ningún auditor ve los pasos de otra persona | Riesgo (caducidad en la 034) | R-033-4 |
+| F-08 | Baja | seguridad | Los pasos guardan registros leídos sin caducidad y ningún auditor ve los pasos de otra persona | Riesgo (caducidad en la 035) | R-033-4 |
 | F-09 | Baja | motor-api | Una base previa con el nombre de la copia (huérfana sin barrer, id repetido tras restaurar) se reutilizaba con datos de otra sesión | La copia borra una base con ese nombre antes de crearla | `StudioTests › F09_una_base_previa_con_el_mismo_nombre_no_se_reutiliza` (falla con la reversión) |
 | F-10 | Baja | motor-api | Cada sondeo de una propuesta recompila el plan y sin `after` devuelve todos los pasos | Riesgo (la pantalla pide con `after`) | R-033-10 |
 | F-11 | Baja | pruebas | El informe «probado» es afirmación del modelo; la creación de la copia no recibe el token de cancelación; carrera del barrido entre leer las sesiones y las bases | El barrido lee las sesiones vivas después de las bases; el resto, riesgo | R-033-11 |
@@ -106,7 +107,7 @@ H2 CA1 por F-05). Restauradas, todo en verde. Las historias son capacidades nuev
 - [x] Canario de la 029 por todas las herramientas, con control positivo.
 - [x] Concurrencia y fallas parciales en integración (`Concurrently`, lease ajeno, sesión sin trabajador, falla al renovar).
 - [x] La suite y CI no llaman a Anthropic (proveedor simulado por DI y por loopback).
-- [x] Sin pantalla nueva (034): sin capturas que revisar.
+- [x] Sin pantalla nueva (035): sin capturas que revisar.
 
 ## 5. Riesgos residuales
 Registrados en [riesgos.md](../../riesgos.md#033): R-033-1 (permiso para crear bases; tiempo medido hasta 22 catálogos),

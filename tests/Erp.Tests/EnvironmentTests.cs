@@ -249,6 +249,19 @@ public class EnvironmentTests
         Assert.False(ok.Signing);
     }
 
+    /// <summary>Spec 034 (H2, R-009-1): con aprobación y sin clave se aceptarían paquetes sin firma; mejor no arrancar.</summary>
+    [Fact]
+    public void Con_aprobacion_y_sin_clave_no_arranca()
+    {
+        foreach (var key in new string?[] { null, "" })
+        {
+            var ex = Assert.Throws<InvalidOperationException>(() => EnvironmentOptions.Create("Producción", true, key));
+            Assert.Contains("Environments:SigningKey", ex.Message);
+            Assert.Contains("sin firmar", ex.Message);
+        }
+        Assert.True(EnvironmentOptions.Create("Producción", true, new string('k', EnvironmentOptions.MinKeyLength)).Signing);
+    }
+
     // ---------------- Reglas del paquete (H5) ----------------
 
     private static readonly IReadOnlySet<string> ServerModules = new HashSet<string>(["compras", "inventario"], Ci);

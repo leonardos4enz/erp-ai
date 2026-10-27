@@ -84,7 +84,10 @@ public class HardeningTests
         Assert.DoesNotContain("Privado", p.Sql);
         Assert.Contains("[CompanyId]", p.Sql);
         Assert.Contains("[Publico] = 1", p.Sql);
-        Assert.Contains("NOT LIKE 'workflow.%'", p.Sql);
+        Assert.Contains("LIKE 'workflow.%'", p.Sql);
+        // Spec 034 (A-07): lo que no es de datos va por lista; una acción sin clasificar no se ve.
+        Assert.Contains("a.[Action] IN (", p.Sql);
+        Assert.DoesNotContain("NOT IN", p.Sql);
         Assert.Contains(p.Parameters, x => Equals(x.Value, 3)); // empresa actual
         Assert.Contains(p.Parameters, x => Equals(x.Value, "Pedido"));
         Assert.DoesNotContain(p.Parameters, x => Equals(x.Value, "Privado"));
@@ -100,7 +103,7 @@ public class HardeningTests
         dev.RequireDirectChange("un plan");
         Assert.True(dev.DirectChanges);
 
-        var prod = EnvironmentOptions.Create("Producción", true, null);
+        var prod = EnvironmentOptions.Create("Producción", true, new string('k', EnvironmentOptions.MinKeyLength));
         Assert.False(prod.DirectChanges);
         var ex = Assert.Throws<Conflict>(() => prod.RequireDirectChange("un plan del modelador"));
         Assert.Contains("Entornos", ex.Message);

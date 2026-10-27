@@ -25,6 +25,14 @@ public static class AuditActions
     public const string OAuthClientChange = "integration.oauthclient";
     /// <summary>Spec 021: token emitido por <c>/oauth/token</c> (cliente, alcances y vigencia; nunca el token).</summary>
     public const string OAuthToken = "integration.oauthtoken";
+    /// <summary>Spec 005: escrituras que hace una automatización síncrona en otro registro (spec 034: constantes, no texto suelto).</summary>
+    public const string AutomationUpdate = "automation.update";
+    public const string AutomationCreate = "automation.create";
+    /// <summary>Spec 002 (H7): instalar y actualizar un módulo.</summary>
+    public const string ModuleInstall = "module.install";
+    public const string ModuleUpgrade = "module.upgrade";
+    /// <summary>Prefijo de una transición del proceso (<c>workflow.{nombre}</c>).</summary>
+    public const string WorkflowPrefix = "workflow.";
     public const string Import = "data.import";
     public const string Export = "data.export";
     /// <summary>Spec 009: paquetes de metadatos entre entornos (exportar, subir, rechazo al subir, aprobar, rechazar, aplicar).</summary>

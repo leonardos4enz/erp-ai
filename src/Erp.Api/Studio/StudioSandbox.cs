@@ -178,16 +178,26 @@ public sealed partial class SandboxFactory(ServiceBlueprint blueprint, Db db, IC
         }
     }
 
-    /// <summary>Vista previa y aplicar en la copia, como el modelador (huella incluida). Devuelve el error o null.</summary>
-    public async Task<string?> ApplyAsync(IServiceProvider sandbox, UserContext admin, System.Text.Json.Nodes.JsonNode plan, CancellationToken ct)
+    /// <summary>
+    /// Partición de los límites del despachador para la copia del modelo al preparar la copia (no es de ninguna persona ni
+    /// del administrador real, que tiene el mismo id que el de la copia: revisión adversarial 034 F-02).
+    /// </summary>
+    public const int PreparationCaller = 0;
+
+    /// <summary>
+    /// Vista previa y aplicar en la copia, como el modelador (huella incluida). Devuelve el error o null. Spec 034: con la
+    /// credencial y los límites de la persona que lo pide (<paramref name="caller"/>).
+    /// </summary>
+    public async Task<string?> ApplyAsync(IServiceProvider sandbox, UserContext admin, System.Text.Json.Nodes.JsonNode plan, CancellationToken ct,
+        BearerCredential? credential = null, int caller = PreparationCaller)
     {
-        var preview = await routes.SendAsync(sandbox, admin, new RouteCall("POST", "/api/model/plan/preview", Body: plan), allowWrites: true, ct);
+        var preview = await routes.SendAsync(sandbox, admin, new RouteCall("POST", "/api/model/plan/preview", Body: plan), allowWrites: true, ct, credential, caller);
         if (!preview.Ok) return preview.Error;
         if (preview.Body?["valid"]?.GetValue<bool>() != true)
             return string.Join(" · ", (preview.Body?["errors"] as System.Text.Json.Nodes.JsonArray ?? []).Take(10).Select(e => e?["message"]?.ToString()));
         var body = plan.DeepClone().AsObject();
         body["baseHash"] = preview.Body!["baseHash"]?.DeepClone();
-        var applied = await routes.SendAsync(sandbox, admin, new RouteCall("POST", "/api/model/plan/apply", Body: body), allowWrites: true, ct);
+        var applied = await routes.SendAsync(sandbox, admin, new RouteCall("POST", "/api/model/plan/apply", Body: body), allowWrites: true, ct, credential, caller);
         return applied.Ok ? null : applied.Error;
     }
 

@@ -208,7 +208,7 @@ public class HierarchyTests
     {
         var dev = EnvironmentOptions.Create(null, false, null) with { RequireSecurityApproval = true };
         Assert.False(dev.SecurityChangesNeedApproval);
-        var prod = EnvironmentOptions.Create("Producción", true, null);
+        var prod = EnvironmentOptions.Create("Producción", true, new string('k', EnvironmentOptions.MinKeyLength));
         Assert.False(prod.SecurityChangesNeedApproval);
         Assert.True((prod with { RequireSecurityApproval = true }).SecurityChangesNeedApproval);
         // AllowDirectChanges es del modelo: no reabre los cambios de seguridad.

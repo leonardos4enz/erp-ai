@@ -53,6 +53,10 @@ public sealed record EnvironmentOptions(string Name, bool RequireApproval, strin
         var key = signingKey is { Length: > 0 } k ? k : null;
         if (key is { Length: < MinKeyLength })
             throw new InvalidOperationException($"Environments:SigningKey debe tener al menos {MinKeyLength} caracteres.");
+        // Spec 034 (R-009-1): sin clave, PackageSigner no verifica nada y un entorno que exige aprobación aceptaría paquetes sin firma.
+        if (requireApproval && key is null)
+            throw new InvalidOperationException(
+                $"Environments:RequireApproval exige Environments:SigningKey (al menos {MinKeyLength} caracteres): sin clave, este entorno aceptaría paquetes sin firmar.");
         return new(name, requireApproval, key);
     }
 }

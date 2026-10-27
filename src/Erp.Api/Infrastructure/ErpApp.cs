@@ -85,6 +85,7 @@ public static class ErpApp
         services.AddSingleton(Erp.Api.Studio.StudioOptions.From(config));
         services.AddSingleton<AnthropicAssistantModel>();
         services.AddSingleton<Erp.Api.Studio.IStudioModel, Erp.Api.Studio.AnthropicStudioModel>();
+        services.AddSingleton<Erp.Api.Studio.DispatchLimits>();
         services.AddSingleton<Erp.Api.Studio.RouteDispatcher>();
         services.AddSingleton<Erp.Api.Studio.SandboxFactory>();
         services.AddSingleton<Erp.Api.Studio.StudioToolRunner>();
@@ -160,7 +161,7 @@ public static class ErpApp
                 http.User.Identity?.Name ?? http.Connection.RemoteIpAddress?.ToString() ?? "unknown",
                 _ => new FixedWindowRateLimiterOptions
                 {
-                    PermitLimit = config.GetValue("Security:PrintsPerMinute", 30),
+                    PermitLimit = RatePolicies.PerMinute(config, PrintEndpoints.RatePolicy),
                     Window = TimeSpan.FromMinutes(1), QueueLimit = 0,
                 }));
             // Spec 029 (H5 CA3): la búsqueda global consulta todos los catálogos con folio; por usuario.
@@ -168,7 +169,7 @@ public static class ErpApp
                 http.User.Identity?.Name ?? http.Connection.RemoteIpAddress?.ToString() ?? "unknown",
                 _ => new FixedWindowRateLimiterOptions
                 {
-                    PermitLimit = config.GetValue("Security:SearchesPerMinute", 60),
+                    PermitLimit = RatePolicies.PerMinute(config, RatePolicies.Search),
                     Window = TimeSpan.FromMinutes(1), QueueLimit = 0,
                 }));
             // Spec 029 (H1 CA2): exportar e importar leen o escriben miles de filas; por usuario.
@@ -176,7 +177,7 @@ public static class ErpApp
                 http.User.Identity?.Name ?? http.Connection.RemoteIpAddress?.ToString() ?? "unknown",
                 _ => new FixedWindowRateLimiterOptions
                 {
-                    PermitLimit = config.GetValue("Security:BulkPerMinute", 20),
+                    PermitLimit = RatePolicies.PerMinute(config, RatePolicies.Bulk),
                     Window = TimeSpan.FromMinutes(1), QueueLimit = 0,
                 }));
             // Spec 031 (H6): tableros (un reporte por tarjeta), reportes y OData agregan o recorren muchas filas; por usuario.
@@ -184,7 +185,7 @@ public static class ErpApp
                 http.User.Identity?.Name ?? http.Connection.RemoteIpAddress?.ToString() ?? "unknown",
                 _ => new FixedWindowRateLimiterOptions
                 {
-                    PermitLimit = config.GetValue("Security:AggregatesPerMinute", 120),
+                    PermitLimit = RatePolicies.PerMinute(config, RatePolicies.Aggregate),
                     Window = TimeSpan.FromMinutes(1), QueueLimit = 0,
                 }));
             o.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(http => RateLimitPartition.GetFixedWindowLimiter(
@@ -192,7 +193,7 @@ public static class ErpApp
                 // Configurable solo para la suite E2E, que hace como administrador más de 600 peticiones por minuto.
                 _ => new FixedWindowRateLimiterOptions
                 {
-                    PermitLimit = config.GetValue("Security:RequestsPerMinute", 600),
+                    PermitLimit = RatePolicies.PerMinute(config, RatePolicies.Global),
                     Window = TimeSpan.FromMinutes(1), QueueLimit = 0,
                 }));
         });
@@ -230,4 +231,25 @@ public static class RatePolicies
     public const string Search = "search";
     public const string Bulk = "bulk";
     public const string Aggregate = "aggregate";
+    /// <summary>El límite global por usuario (no es una política con nombre).</summary>
+    public const string Global = "";
+
+    /// <summary>
+    /// Spec 034 (R-033-5): tope por usuario y minuto de cada política que se particiona por usuario y del límite global. Lo
+    /// usan el limitador de ASP.NET y el despachador de Studio y del MCP (<c>DispatchLimits</c>); null = la política no es
+    /// por usuario (inicio de sesión y servidor de tokens: por dirección, rutas anónimas que el despachador no llama).
+    /// </summary>
+    public static int? PerMinuteOrNull(IConfiguration config, string policy) => policy switch
+    {
+        PrintEndpoints.RatePolicy => config.GetValue("Security:PrintsPerMinute", 30),
+        Search => config.GetValue("Security:SearchesPerMinute", 60),
+        Bulk => config.GetValue("Security:BulkPerMinute", 20),
+        Aggregate => config.GetValue("Security:AggregatesPerMinute", 120),
+        // Configurable solo para la suite E2E, que hace como administrador más de 600 peticiones por minuto.
+        Global => config.GetValue("Security:RequestsPerMinute", 600),
+        _ => null,
+    };
+
+    public static int PerMinute(IConfiguration config, string policy) =>
+        PerMinuteOrNull(config, policy) ?? throw new ArgumentException($"La política «{policy}» no es por usuario.", nameof(policy));
 }

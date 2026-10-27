@@ -13,7 +13,10 @@ permiso y que la IA no actúe con privilegios propios ni aplique sin una persona
    endpoint y la identidad recargada de la persona (sello de seguridad, empresa). La capacidad no se declara en la
    herramienta: es la de la ruta (029), y la ruta aplica `RecordFilter`, `FieldAccess`, empresa y `viewer` como para el
    navegador. En el entorno real el despachador niega toda ruta que escriba; aplicar lo hace la persona por la ruta de
-   siempre. Así el agente nunca tiene privilegios propios (II.8) y el servidor MCP de la 035 reutiliza el mismo catálogo.
+   siempre. Así el agente nunca tiene privilegios propios (II.8) y el servidor MCP de la 036 reutiliza el mismo catálogo.
+   Desde la 034 el despachador también vuelve a aplicar los alcances de la credencial (OAuth o clave de API) con la misma
+   función que `UseBearerScope`, los límites de frecuencia de la ruta y, en la copia aislada, la capacidad publicada de la
+   herramienta para la persona (no la del administrador de la copia).
 2. **El entorno aislado es otra base** (`<base>_<huella>_S<id>_SBX`, nombre validado) con los mismos servicios de la app
    (`ServiceBlueprint`) salvo `Db`, `IConfiguration`, `EnvironmentOptions` y los trabajos en segundo plano. El modelo se
    copia con el mismo cálculo que un paquete del 009 (`ModelDiff` → Plan de Cambios); no se copian datos, usuarios,
@@ -26,6 +29,6 @@ permiso y que la IA no actúe con privilegios propios ni aplique sin una persona
 - (+) Una sola regla de autorización para el navegador, el agente y el MCP; las pruebas del inventario lo comprueban.
 - (+) Las pruebas del agente corren en integración con un proveedor simulado: la suite y CI no llaman a Anthropic.
 - (−) El entorno aislado exige permiso `CREATE DATABASE` en el servidor; sin él, el alcance `aislado` no está disponible.
-- (−) Las rutas despachadas en proceso no pasan por los limitadores de frecuencia de ASP.NET: los acotan los topes por
-  sesión (R-033-5).
+- (−) Las rutas despachadas en proceso no pasan por los limitadores de ASP.NET; desde la 034 el despachador aplica los
+  mismos topes por persona con contadores propios (R-033-5 cerrado).
 - (−) Con el alcance `datos`, registros del entorno viajan al proveedor y quedan en los pasos de la sesión (opt-in por sesión).

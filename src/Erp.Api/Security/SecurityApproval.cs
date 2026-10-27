@@ -244,6 +244,11 @@ public sealed class SecurityApproval(Db db, EnvironmentOptions env)
                     return "El cambio pasa al usuario a tu unidad (o a una que depende de ella) y te deja ver sus registros: lo aprueba otro administrador.";
                 var b = Ints(before, "roleIds");
                 var a = Ints(payload, "roleIds");
+                // Spec 034 (A-01): contraseña, activación, unidad o empresas de quien tiene capacidades que el revisor no tiene.
+                if (kind == SecurityChangeKinds.UserUpdate && ActsOnUser(payload, before)
+                    && b.Select(id => roles.TryGetValue(id, out var r) ? r.Caps : AdminCapabilities.None)
+                        .Aggregate(AdminCapabilities.None, (x, y) => x.Or(y)).MissingFor(user) is { } over)
+                    return $"El cambio toca la contraseña, la activación, la unidad, las empresas o los roles de alguien con capacidades que no tienes ({over}): lo aprueba quien las tenga.";
                 needed = a.Except(b).Concat(b.Except(a)).Select(id => roles.TryGetValue(id, out var r) ? r.Caps : AdminCapabilities.None)
                     .Aggregate(AdminCapabilities.None, (x, y) => x.Or(y));
                 break;
@@ -279,6 +284,18 @@ public sealed class SecurityApproval(Db db, EnvironmentOptions env)
     }
 
     internal const string NoRule = "Este tipo de cambio no tiene regla de aprobación: no se puede aprobar.";
+
+    /// <summary>
+    /// Spec 034: ¿la solicitud de <c>user.update</c> cambia la contraseña, la activación, la unidad, las empresas o los roles? (La misma
+    /// regla que <c>AdminEndpoints.RequireActOnAsync</c>, sobre el JSON guardado: <c>UserPayload</c> y su foto de antes.)
+    /// </summary>
+    internal static bool ActsOnUser(string payload, string? before) =>
+        Prop(payload, "passwordHash") is { ValueKind: JsonValueKind.String }
+        || Prop(payload, "isActive")?.ValueKind != Prop(before, "isActive")?.ValueKind
+        || !string.Equals(Str(payload, "unit"), Str(before, "unit"), StringComparison.Ordinal)
+        || Prop(payload, "companyIds") is { ValueKind: JsonValueKind.Array }
+           && !Ints(payload, "companyIds").Distinct().Order().SequenceEqual(Ints(before, "companyIds").Order())
+        || !Ints(payload, "roleIds").Distinct().Order().SequenceEqual(Ints(before, "roleIds").Order()); // F-01
 
     /// <summary>Spec 029: ruta materializada de cada unidad (la de la 015, «/1/4/»).</summary>
     public sealed record UnitPath(int Id, string Name, string Path);
