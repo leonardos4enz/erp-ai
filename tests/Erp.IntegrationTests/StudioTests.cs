@@ -83,7 +83,7 @@ public static class Reply
 /// activa), fallas parciales (lease perdido, sesión sin trabajador, bases aisladas huérfanas), entorno aislado y canario de
 /// la 029 por las herramientas.
 /// </summary>
-public class StudioTests(StudioTests.Host host) : IClassFixture<StudioTests.Host>
+public partial class StudioTests(StudioTests.Host host) : IClassFixture<StudioTests.Host>
 {
     public const string Pwd = "frase larga de estudio 2026";
     private const string Group = "Pruebas 033";
@@ -205,7 +205,10 @@ public class StudioTests(StudioTests.Host host) : IClassFixture<StudioTests.Host
         var s = await WaitAsync(ana, (await StartAsync(ana, "permiso", "Lee los privados", "datos")).Id());
         var step = Trail(s).Single(x => x.Str("tool") == "leer_registros");
         Assert.Equal("denied", step.Str("status"));
-        Assert.Equal(api["title"]!.GetValue<string>(), step["output"]!.Str("error"));
+        // El modelo recibió el mismo mensaje que la API (la salida guardada se borra al cerrar: spec 035, R-033-4).
+        Assert.Contains(api["title"]!.GetValue<string>(), s.Str("summary"));
+        Assert.Contains(api["title"]!.GetValue<string>(), step.Str("summary"));
+        Assert.Null(step["output"]);
         Assert.DoesNotContain("Privado 033", host.Llm.Sent("permiso"));
     }
 
@@ -899,6 +902,28 @@ public class StudioModulesTests(StudioModulesTests.Host host) : IClassFixture<St
         var prepare = s.Arr("trail").Nodes().Single(x => x.Str("tool") == "aislado_preparar");
         Assert.Equal("ok", prepare.Str("status"));
         Console.WriteLine($"Copia aislada con {entities} catálogos: {prepare.Str("summary")}");
+    }
+
+    [Fact]
+    public async Task H3_CA1_la_copia_aislada_de_un_modelo_con_mas_de_100_operaciones_se_aplica_por_tramos()
+    {
+        using var admin = await host.AdminAsync();
+        // Regresión (spec 035, corrida completa de la E2E): con los catálogos de la suite el plan de la copia pasaba de 100
+        // operaciones y el compilador lo rechazaba: el alcance «aislado» no servía en un entorno con muchos catálogos.
+        for (var batch = 0; batch < 2; batch++)
+            await admin.ApplyPlanAsync(new { description = "Spec 035 · muchos catálogos", operations = Enumerable.Range(batch * 40, 40).Select(i => (object)new {
+                op = "createEntity", group = "Pruebas 035", name = $"StMucho{i:D3}", label = $"Mucho {i:D3}", labelPlural = $"Muchos {i:D3}",
+                fields = new object[] { new { name = "Nombre", label = "Nombre", type = "text", required = true },
+                    new { name = "Proveedor", label = "Proveedor", type = "reference", referenceEntity = "Proveedor" } } }).ToArray() });
+        host.Llm.Scripts["muchos"] = Reply.Steps(
+            _ => Reply.Tool("aislado_listar", new { entity = "StMucho079" }),
+            t => { Assert.False(t.Results[0].IsError, t.Results[0].Content); return Reply.Tool(StudioTools.Deliver, new { summary = "La copia tiene todo." }); });
+        var res = await admin.PostAsync("/api/studio/sessions", new { prompt = "[guion:muchos] Revisa la copia", scopes = new[] { "aislado" } });
+        Assert.True(res.Status == 202, res.Text);
+        var s = await WaitForAsync(async () => (await admin.GetAsync($"/api/studio/sessions/{res.Body!.Id()}")).Body!,
+            x => x.Str("status") is not ("queued" or "running"), "sesión terminada", seconds: 240);
+        Assert.True(s.Str("status") == "answered", s.Json());
+        Assert.Equal("ok", s.Arr("trail").Nodes().Single(x => x.Str("tool") == "aislado_preparar").Str("status"));
     }
 }
 

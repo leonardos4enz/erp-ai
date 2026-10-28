@@ -744,6 +744,34 @@ export interface Proposal {
 export interface ConversationSummary { id: number; title: string; turns: number; updatedAt: string; lastStatus: ProposalStatus }
 export interface Conversation { id: number; turns: Proposal[] }
 
+// ---------- Spec 035: ERP AI Studio (contrato de la 033) ----------
+export interface StudioLimits {
+  maxSteps: number; maxToolCalls: number; maxTokens: number; maxMinutes: number; maxCostUsd: number; costPerDayUsd: number;
+  sessionsPerDay: number; maxPromptChars: number;
+}
+export interface StudioStatusInfo {
+  configured: boolean; model: string | null; sandboxAvailable: boolean; limits: StudioLimits; sessionsToday: number;
+  costTodayUsd: number; active: number | null; directChanges: boolean;
+}
+export type StudioSessionStatus = 'queued' | 'running' | 'proposed' | 'answered' | 'failed' | 'cancelled' | 'interrupted' | 'applied' | 'discarded';
+export type StudioScope = 'modelo' | 'datos' | 'aislado';
+export interface StudioSummary { id: number; title: string; status: StudioSessionStatus; createdAt: string; finishedAt?: string; steps: number; costUsd: number }
+/** Un paso del agente: texto del modelo, herramienta, entrega o tope. Entrada y salida son datos no confiables. */
+export interface StudioStep {
+  seq: number; kind: 'text' | 'tool' | 'deliver' | 'limit' | 'error'; tool?: string | null; status: 'ok' | 'error' | 'denied';
+  summary: string; input?: unknown; output?: unknown; durationMs: number; at: string;
+}
+export interface StudioTest { description: string; ok: boolean; detail?: string | null }
+export interface StudioReport { tested: StudioTest[]; failures: string[]; risks: string[] }
+export interface StudioSession {
+  id: number; prompt: string; scopes: StudioScope[]; status: StudioSessionStatus; error?: string | null; model: string;
+  steps: number; toolCalls: number; inputTokens: number; outputTokens: number; costUsd: number;
+  createdAt: string; startedAt?: string | null; finishedAt?: string | null; summary?: string | null; report?: StudioReport | null;
+  /** Solo en la lectura completa (sin `after`): con `after` no se compila (spec 035, R-033-10). */
+  plan?: ChangePlan | null; preview?: PlanPreview | null; warnings: string[]; reviewHash?: string | null;
+  canApply: boolean; blockedReason?: string | null; appliedAt?: string | null; changeSetId?: number | null; trail: StudioStep[];
+}
+
 /* ---------- Spec 015: unidades, equipos y solicitudes de cambios de seguridad ---------- */
 
 export interface BusinessUnit { id: number; name: string; parentId: number | null; depth: number; users: number; teams: number }

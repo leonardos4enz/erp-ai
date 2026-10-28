@@ -18,6 +18,7 @@ import { AutomationsPage } from './pages/AutomationsPage';
 import { EnvironmentsPage } from './pages/EnvironmentsPage';
 import { CompaniesPage } from './pages/CompaniesPage';
 import { AssistantPage } from './pages/AssistantPage';
+import { StudioPage } from './pages/StudioPage';
 import { ExplorerPage } from './pages/ExplorerPage';
 import { ImagesPage } from './pages/ImagesPage';
 import { ReportPage, ReportsPage } from './pages/ReportsPage';
@@ -69,6 +70,8 @@ export function App() {
         <Route path="admin/automations" element={<Guard allow={!!me?.isSuperuser}><AutomationsPage /></Guard>} />
         <Route path="admin/environments" element={<Guard allow={!!me?.isSuperuser}><EnvironmentsPage /></Guard>} />
         <Route path="admin/companies" element={<Guard allow={!!me?.isSuperuser}><CompaniesPage /></Guard>} />
+        {/* Spec 035: ERP AI Studio (motor de la 033). */}
+        <Route path="admin/studio" element={<Guard allow={!!(me?.canManageModel || me?.isSuperuser)}><StudioPage /></Guard>} />
         <Route path="admin/assistant" element={<Guard allow={!!(me?.canManageModel || me?.isSuperuser)}><AssistantPage /></Guard>} />
         <Route path="admin/audit" element={<Guard allow={!!(me?.canViewAudit || me?.isSuperuser)}><AuditPage /></Guard>} />
         <Route path="*" element={<NotFoundPage />} />

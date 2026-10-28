@@ -946,3 +946,67 @@ code, pre, .mono { font-family: var(--font-mono); font-size: 0.8125rem; }
   .value-row > :nth-child(2), .value-row > :nth-child(3) { grid-column: 1 / -1; }
 }
 .image-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: var(--space-3); }
+
+/* ---------- Spec 035: ERP AI Studio ---------- */
+.studio-layout { display: grid; grid-template-columns: minmax(200px, 270px) minmax(0, 1fr); gap: var(--space-4); align-items: start; }
+.studio-history { padding: var(--space-3); position: sticky; top: 0; max-height: calc(100vh - 140px); overflow-y: auto; }
+.studio-history ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.studio-history-item { width: 100%; text-align: left; display: grid; gap: var(--space-1); padding: var(--space-2) var(--space-3); border: 0; border-radius: var(--radius-md); background: none; color: var(--text); cursor: pointer; font: inherit; }
+.studio-history-item:hover { background: var(--surface-2); }
+.studio-history-item[aria-current="true"] { background: var(--accent-soft); color: var(--accent-text); }
+.studio-history-title { overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+.studio-history-meta { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; font-size: var(--text-xs); }
+.studio-main { display: flex; flex-direction: column; gap: var(--space-4); min-width: 0; }
+.studio-composer { display: flex; flex-direction: column; gap: var(--space-4); }
+.studio-composer-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; }
+.studio-composer-foot .subtle { font-size: var(--text-xs); max-width: 60ch; }
+.studio-scopes { border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-3) var(--space-4); margin: 0; display: grid; gap: var(--space-3); }
+.studio-scopes legend { padding: 0 var(--space-2); font-weight: 500; }
+.studio-scope { display: grid; gap: var(--space-1); }
+.studio-scope p { margin: 0 0 0 calc(36px + var(--space-2)); font-size: var(--text-xs); }
+.studio-session { min-width: 0; }
+.studio-session-head { flex-wrap: wrap; }
+.studio-prompt { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.55; background: var(--accent-soft); padding: var(--space-3) var(--space-4); border-radius: var(--radius-lg); }
+.studio-working { flex-wrap: wrap; color: var(--text-muted); }
+.studio-meters { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: var(--space-3); margin: 0; }
+.studio-meter { display: grid; gap: var(--space-1); min-width: 0; }
+.studio-meter dt { font-size: var(--text-xs); color: var(--text-muted); }
+.studio-meter dd { margin: 0; display: grid; gap: var(--space-1); }
+.studio-meter-text { font-size: var(--text-sm); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.studio-meter-bar { display: block; height: 6px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
+.studio-meter-bar > span { display: block; height: 100%; background: var(--accent); border-radius: inherit; }
+.studio-meter-bar.is-high > span { background: var(--warning, #b45309); }
+.studio-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
+.studio-step details { border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); }
+.studio-step summary { display: grid; grid-template-columns: auto minmax(90px, max-content) minmax(0, 1fr) auto; align-items: center; gap: var(--space-2) var(--space-3); padding: var(--space-2) var(--space-3); cursor: pointer; list-style: none; }
+.studio-step summary::-webkit-details-marker { display: none; }
+.studio-step summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-md); }
+.studio-step-icon { color: var(--text-muted); }
+.studio-step-name { font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--text-sm); overflow-wrap: anywhere; }
+.studio-step-text .studio-step-name { font-family: inherit; }
+.studio-step-summary { color: var(--text-muted); font-size: var(--text-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.studio-step-meta { display: inline-flex; align-items: center; gap: var(--space-2); }
+.studio-step-body { display: grid; gap: var(--space-3); padding: 0 var(--space-3) var(--space-3); border-top: 1px solid var(--border); padding-top: var(--space-3); }
+.studio-io-label { font-size: var(--text-xs); color: var(--text-muted); margin-bottom: var(--space-1); }
+.studio-io { max-height: 320px; margin: 0; border-radius: var(--radius-md); white-space: pre-wrap; overflow-wrap: anywhere; }
+.studio-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.55; }
+.studio-report { display: grid; gap: var(--space-2); border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-3) var(--space-4); }
+.studio-report-title { display: flex; align-items: center; gap: var(--space-2); margin: 0; font-size: var(--text-base); font-weight: 600; }
+.studio-report-sub { margin: var(--space-2) 0 0; font-size: var(--text-sm); font-weight: 600; }
+.studio-tests, .studio-list { margin: 0; padding: 0; list-style: none; display: grid; gap: var(--space-2); }
+.studio-list { padding-left: var(--space-4); list-style: disc; }
+.studio-tests li { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--space-2); align-items: start; overflow-wrap: anywhere; }
+.studio-tests li.is-ok > svg { color: var(--success, #15803d); margin-top: 2px; }
+.studio-tests li.is-fail > svg { color: var(--danger); margin-top: 2px; }
+.studio-test-detail { display: block; font-size: var(--text-xs); }
+.studio-list li { overflow-wrap: anywhere; }
+.studio-actions { justify-content: flex-end; flex-wrap: wrap; }
+@media (max-width: 900px) {
+  .studio-layout { grid-template-columns: minmax(0, 1fr); }
+  .studio-history { position: static; max-height: 240px; order: 2; }
+  .studio-step summary { grid-template-columns: auto minmax(0, 1fr) auto; }
+  /* Revisión exploratoria 035 (F-10): el resumen de un paso (hasta 400 caracteres) ocupaba media pantalla plegado. */
+  .studio-step-summary { grid-column: 2 / -1; grid-row: 2; white-space: normal; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+}
+.studio-session > article[tabindex="-1"]:focus { outline: none; }
+.studio-session > article[tabindex="-1"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

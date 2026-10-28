@@ -84,6 +84,10 @@ export default defineConfig({
       // app en la prueba y es ficticia: la suite nunca usa una clave real de Anthropic.
       Assistant__BaseUrl: `http://127.0.0.1:${PORT + 1}`,
       Assistant__RequestsPerHour: '30',
+      // Spec 035: ERP AI Studio con el mismo proveedor simulado (studio.spec.ts); cancelar se nota en ~1 s.
+      Studio__PollSeconds: '1',
+      Studio__RenewSeconds: '1',
+      Studio__SessionsPerDay: '50',
       Spa__Path: path.join(root, 'web', 'dist'),
     },
   },

@@ -434,6 +434,8 @@ public sealed class StudioAgent(Db db, StudioOptions options, AssistantOptions a
                 // A-05: la llamada cortada (cancelar, tiempo máximo, error del proveedor) se cobra como su reserva, el peor caso.
                 Cost = run.Cost + run.Reserved, run.Claim.Id, run.Claim.LeaseToken }, tx);
         if (n == 0) throw new StudioLeaseLost();
+        // Spec 035 (R-033-4): los registros que leyó el agente no se quedan en la sesión cerrada.
+        await StudioTools.PurgeDataAsync(cn, tx, run.Claim.Id);
         await Audit.WriteAsync(cn, tx, new DefaultHttpContext(), AuditActions.StudioFinish, entity: "studio", recordId: run.Claim.Id.ToString(),
             after: new { status = o.Status, errorCode = o.ErrorCode, steps = run.Steps, toolCalls = run.ToolCalls, inputTokens = run.Input,
                 outputTokens = run.Output, costUsd = (run.Cost + run.Reserved) / 1_000_000m, model = assistant.Model },

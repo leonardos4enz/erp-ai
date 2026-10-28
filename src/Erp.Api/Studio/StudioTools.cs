@@ -157,6 +157,14 @@ public static class StudioTools
 
     public static StudioTool? Find(string name) => All.FirstOrDefault(t => t.Name == name);
 
+    /// <summary>Spec 035 (R-033-4): las que devuelven registros; sus salidas se borran al cerrar la sesión.</summary>
+    public static readonly IReadOnlyList<string> DataTools = All.Where(t => t.Scope == StudioScopes.Data).Select(t => t.Name).ToList();
+
+    /// <summary>Spec 035 (R-033-4): borra lo que devolvieron las herramientas de <see cref="DataTools"/>, en la transacción del cierre.</summary>
+    public static Task PurgeDataAsync(System.Data.Common.DbConnection cn, System.Data.Common.DbTransaction tx, int sessionId) =>
+        cn.ExecuteAsync("UPDATE meta.StudioStep SET OutputJson = NULL WHERE SessionId = @sessionId AND Tool IN @DataTools AND OutputJson IS NOT NULL",
+            new { sessionId, DataTools }, tx);
+
     // ---------- Definición ----------
 
     private static StudioTool Real(string name, string description, JsonObject schema, string method, string route,

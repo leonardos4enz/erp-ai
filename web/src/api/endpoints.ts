@@ -1,7 +1,7 @@
 import { api, ApiError } from './client';
 import type {
   AppSummary, SearchHit, AuditEntry, AutomationRun, AutomationRunDetail, ScheduleSummary, ChangePlan, Company, EntityOrigin, ExprFunction, FieldDef, ExchangeRate, ChangeSetSummary, DashboardResult, DashboardSummary, EntityDef, HistoryEntry, LayoutState, LookupItem, Me, PrintChoice, PrintTemplate, StoredImage,
-  ApiKey, AssistantStatus, OAuthClient, OAuthScope, BusinessUnit, PendingChange, SecurityChange, Team, Conversation, ConversationSummary, Proposal, EnvironmentInfo, ExportableCatalogs, ExportPreview, ExportRequest, ImportResult, ModuleInfo, PackageImport, ModulePreview, WebhookDelivery, WebhookSummary, Paged, PlanPreview, ReportResult, ReportSummary, Role, Row, RowList, SavedView, User, ViewFilter, ViewList,
+  ApiKey, AssistantStatus, StudioScope, StudioSession, StudioStatusInfo, StudioSummary, OAuthClient, OAuthScope, BusinessUnit, PendingChange, SecurityChange, Team, Conversation, ConversationSummary, Proposal, EnvironmentInfo, ExportableCatalogs, ExportPreview, ExportRequest, ImportResult, ModuleInfo, PackageImport, ModulePreview, WebhookDelivery, WebhookSummary, Paged, PlanPreview, ReportResult, ReportSummary, Role, Row, RowList, SavedView, User, ViewFilter, ViewList,
 } from './types';
 
 const enc = encodeURIComponent;
@@ -312,6 +312,21 @@ export const assistantApi = {
   apply: (id: number, reviewHash?: string) =>
     api<{ changeSetId: number; proposal: Proposal }>(`/assistant/requests/${id}/apply`, { method: 'POST', body: { reviewHash } }),
   discard: (id: number) => api<Proposal>(`/assistant/requests/${id}/discard`, { method: 'POST' }),
+};
+
+/** Spec 035: ERP AI Studio. El sondeo pasa `after` (pasos nuevos, sin compilar la propuesta). */
+export const studioApi = {
+  status: (signal?: AbortSignal) => api<StudioStatusInfo>('/studio', { signal }),
+  sessions: (signal?: AbortSignal) => api<StudioSummary[]>('/studio/sessions', { signal }),
+  tools: (signal?: AbortSignal) => api<{ name: string; scope: StudioScope }[]>('/studio/tools', { signal }),
+  session: (id: number, after?: number, signal?: AbortSignal) =>
+    api<StudioSession>(`/studio/sessions/${id}${after === undefined ? '' : `?after=${after}`}`, { signal }),
+  start: (prompt: string, scopes: StudioScope[]) => api<StudioSession>('/studio/sessions', { method: 'POST', body: { prompt, scopes } }),
+  cancel: (id: number) => api<StudioSession>(`/studio/sessions/${id}/cancel`, { method: 'POST' }),
+  discard: (id: number) => api<StudioSession>(`/studio/sessions/${id}/discard`, { method: 'POST' }),
+  /** Con la huella de lo revisado; si el modelo cambió, 409. */
+  apply: (id: number, reviewHash: string) =>
+    api<{ changeSetId: number; session: StudioSession }>(`/studio/sessions/${id}/apply`, { method: 'POST', body: { reviewHash } }),
 };
 
 /** Spec 015: equipo (dueño de registros); la unidad es el nombre de una existente. */

@@ -169,12 +169,30 @@ public sealed partial class SandboxFactory(ServiceBlueprint blueprint, Db db, IC
         var diff = ModelDiff.Compute(model, boards, await target.GetAsync(ct), await target.GetDashboardsAsync(ct),
             "ERP AI Studio: copia del modelo", null, apps, await target.GetAppsAsync(ct));
         if (diff.Plan.Operations.Count == 0) return;
-        var error = await ApplyAsync(sandbox, admin, System.Text.Json.Nodes.JsonNode.Parse(System.Text.Json.JsonSerializer.Serialize(diff.Plan,
-            sandbox.GetRequiredService<System.Text.Json.JsonSerializerOptions>()))!, ct);
-        if (error is not null)
+        // Spec 035: un plan admite PlanCompiler.MaxOperations. Con más catálogos la copia va por tramos: el prefijo más largo
+        // (hasta el máximo) que compila solo contra lo que ya tiene la copia (un documento cita su catálogo de partidas, que
+        // puede crearse después en el mismo plan: un corte arbitrario no compila). El compilador es puro: probar es barato.
+        var options = sandbox.GetRequiredService<System.Text.Json.JsonSerializerOptions>();
+        var ops = diff.Plan.Operations;
+        for (var start = 0; start < ops.Count;)
         {
-            log.LogWarning("No se pudo copiar el modelo al entorno aislado: {Error}", error);
-            throw new SandboxUnavailable("No se pudo copiar el modelo al entorno aislado: " + error);
+            target.Invalidate();
+            var current = await target.GetAsync(ct);
+            var currentBoards = await target.GetDashboardsAsync(ct);
+            var currentApps = await target.GetAppsAsync(ct);
+            IReadOnlySet<string> roles;
+            await using (var cn = await sandbox.GetRequiredService<Db>().OpenAsync(ct)) roles = await PlanService.LoadRolesAsync(cn, null);
+            var take = Math.Min(PlanCompiler.MaxOperations, ops.Count - start);
+            while (take > 1 && !PlanCompiler.Compile(diff.Plan with { Operations = ops.Skip(start).Take(take).ToList() }, current, roles, currentBoards, currentApps).Preview.Valid)
+                take--;
+            var part = diff.Plan with { Operations = ops.Skip(start).Take(take).ToList() };
+            var error = await ApplyAsync(sandbox, admin, System.Text.Json.Nodes.JsonNode.Parse(System.Text.Json.JsonSerializer.Serialize(part, options))!, ct);
+            if (error is not null)
+            {
+                log.LogWarning("No se pudo copiar el modelo al entorno aislado: {Error}", error);
+                throw new SandboxUnavailable("No se pudo copiar el modelo al entorno aislado: " + error);
+            }
+            start += take;
         }
     }
 

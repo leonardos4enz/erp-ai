@@ -40,7 +40,7 @@ en orden, no en paralelo: casi todas tocan el núcleo del motor (`PlanCompiler`,
 | 032 Rediseño del inicio de sesión | Implementado ([spec](specs/032-login/spec.md)) |
 | 033 ERP AI Studio: herramientas, bucle agéntico y entorno aislado | Implementado ([spec](specs/033-ai-studio/spec.md)) |
 | 034 Endurecimiento 5 (auditoría 6) | Implementado ([spec](specs/034-endurecimiento-5/spec.md)) |
-| 035 ERP AI Studio: pantalla | Planeado |
+| 035 ERP AI Studio: pantalla | Implementado ([spec](specs/035-ai-studio-pantalla/spec.md)) |
 | 036 Servidor MCP por persona | Planeado |
 | 037 Módulo de Ventas | Planeado |
 | 038 CFDI 4.0 con PAC | Planeado |
@@ -485,11 +485,20 @@ los respetaba. Con ella, la pantalla de Studio pasa a la 035, el servidor MCP a 
   catálogo está clasificada (A-07, R-032-6). Studio cobra lo reservado al cancelar o vencer (A-05) y recuerda la falla de
   la copia (A-06). **Estabilidad de CI:** modo `--lento`, primitivas de espera y guardia de receptores.
 
-### 035 — ERP AI Studio: pantalla (planeada)
-Configuración › ERP AI Studio (capacidad *modelador*): pedido con alcances, plan del agente, pasos con herramienta y resultado
-(resumidos y expandibles), avance en vivo (`GET /api/studio/sessions/{id}?after=n`), cancelar, propuesta final con vista
-previa, avisos, pruebas, fallas y riesgos, y «Revisar y aplicar» con la huella. Accesible, claro/oscuro, móvil razonable,
-captura de referencia. Sin cambios de contrato salvo lo que la pantalla pida. La auditoría 6 ya se hizo (origen de la 034).
+### 035 — ERP AI Studio: pantalla
+Configuración › ERP AI Studio (capacidad *modelador*) sobre el motor de la 033, endurecido en la 034.
+- **Estado:** implementado en la [spec 035](specs/035-ai-studio-pantalla/spec.md). Pedido con alcances (`datos` apagado con
+  aviso de que los registros viajan a Anthropic; `aislado` no disponible con su motivo), avance en vivo sondeando solo los
+  pasos nuevos (`?after=n`, que ya no compila la propuesta: R-033-10), pasos expandibles con entrada y salida como texto,
+  consumo contra los topes, cancelar, historial, propuesta con «Lo que el agente informa» como afirmación suya (R-033-11),
+  avisos y la vista previa del Modelador, «Revisar y aplicar» con la huella (409 recarga la propuesta), descargar el plan en
+  un entorno con aprobación y descartar. Al cerrar o vencer una sesión se borra lo que leyeron las herramientas de `datos`
+  (R-033-4). Las fechas del contrato de Studio salen en UTC.
+- **Pendiente (diferido con razón):** retomar una sesión interrumpida o ajustar una propuesta (hoy, sesión nueva); cancelar
+  durante la creación de la copia aislada (R-033-11, segunda mitad); el texto del modelo que cite registros (R-035-1).
+  La captura `navegacion.spec.ts › configuracion-*` quedó desactualizada desde la 027 (sin «Imágenes») y pasa por la
+  tolerancia: regenerarla desde una corrida completa en la spec de pendientes.
+- **Encontrado y corregido en VERIFY:** la copia aislada no se creaba con más de 100 operaciones (F-06, motor de la 033).
 
 ### 036 — Servidor MCP por persona (planeada)
 Servidor MCP remoto para que cada persona conecte su Claude al ERP con exactamente sus permisos: OAuth *authorization code*
@@ -540,7 +549,7 @@ En este orden, por decisión del dueño (2026-10-25):
 3. ~~**032 — Rediseño del inicio de sesión**~~ (pedido del dueño antes de Ventas). Implementado (ver arriba).
 4. ~~**033 — ERP AI Studio (motor)**~~ (pedido del dueño, 2026-10-27). Implementado (ver arriba).
 5. ~~**034 — Endurecimiento 5**~~ (auditoría 6). Implementado (ver arriba).
-6. **035 — ERP AI Studio: pantalla.**
+6. ~~**035 — ERP AI Studio: pantalla.**~~ Implementado (ver arriba).
 7. **036 — Servidor MCP por persona** (auditoría 7 al cerrarla).
 8. **037 — Módulo de Ventas:** clientes, cotización, pedido, salida de almacén con costo de ventas (póliza de salidas),
    factura y cobranza. Usa `merge` para extender Producto e Inventario, avisos (límite de crédito) y rutas de tres niveles;

@@ -727,6 +727,11 @@ public static class Bootstrap
             CreatedAt datetime2(3) NOT NULL DEFAULT SYSUTCDATETIME(),
             CONSTRAINT UX_StudioStep_Seq UNIQUE (SessionId, Seq)
         );
+        -- Spec 035 (R-033-4; revisión adversarial F-01): lo que leyeron las herramientas de «datos» en sesiones ya cerradas
+        -- antes de la 035 también se borra (idempotente; las nuevas se purgan al cerrar). La lista es StudioTools.DataTools.
+        UPDATE meta.StudioStep SET OutputJson = NULL
+         WHERE Tool IN ('leer_registros', 'leer_registro') AND OutputJson IS NOT NULL
+           AND SessionId IN (SELECT Id FROM meta.StudioSession WHERE Status NOT IN ('queued', 'running'));
 
         -- Constitución II.4: la auditoría es de solo inserción, incluso para la propia aplicación.
         IF OBJECT_ID('meta.TR_AuditLog_Immutable') IS NULL

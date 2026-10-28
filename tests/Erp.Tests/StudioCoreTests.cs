@@ -23,6 +23,17 @@ public class StudioCoreTests
         ?? throw new Xunit.Sdk.XunitException($"{t.Name}: la ruta {t.Method} {t.Route} no está en el inventario.");
 
     [Fact]
+    public void Las_herramientas_de_datos_son_las_que_purga_el_arranque()
+    {
+        // Spec 035 (F-01): Bootstrap purga sesiones viejas con la lista escrita en SQL; si cambia el catálogo, cambia ahí también.
+        Assert.Equal(["leer_registros", "leer_registro"], StudioTools.DataTools);
+        var root = new DirectoryInfo(AppContext.BaseDirectory);
+        while (!File.Exists(Path.Combine(root.FullName, "src", "Erp.Api", "Infrastructure", "Bootstrap.cs"))) root = root.Parent!;
+        var bootstrap = File.ReadAllText(Path.Combine(root.FullName, "src", "Erp.Api", "Infrastructure", "Bootstrap.cs"));
+        Assert.Contains("WHERE Tool IN ('leer_registros', 'leer_registro') AND OutputJson IS NOT NULL", bootstrap);
+    }
+
+    [Fact]
     public void Las_herramientas_del_entorno_real_usan_rutas_que_no_escriben()
     {
         var real = StudioTools.All.Where(t => t.Target == ToolTarget.Real).ToList();

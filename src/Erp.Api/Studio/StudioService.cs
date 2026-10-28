@@ -144,7 +144,7 @@ public sealed class StudioService(Db db, MetadataStore store, PlanService plans,
         return (await cn.QueryAsync<(int Id, string Prompt, string Status, DateTime CreatedAt, DateTime? FinishedAt, int Steps, long CostMicros)>("""
             SELECT TOP 30 Id, Prompt, Status, CreatedAt, FinishedAt, Steps, CostMicros FROM meta.StudioSession WHERE UserId = @Id ORDER BY Id DESC
             """, new { user.Id })).Select(r => new StudioSummaryDto(r.Id, r.Prompt.Length <= 80 ? r.Prompt : r.Prompt[..77].TrimEnd() + "…",
-            r.Status, r.CreatedAt, r.FinishedAt, r.Steps, r.CostMicros / 1_000_000m)).ToList();
+            r.Status, Utc(r.CreatedAt), Utc(r.FinishedAt), r.Steps, r.CostMicros / 1_000_000m)).ToList();
     }
 
     public async Task<StudioSessionDto> GetAsync(int id, int? after, UserContext user, CancellationToken ct)
@@ -160,7 +160,8 @@ public sealed class StudioService(Db db, MetadataStore store, PlanService plans,
                  WHERE SessionId = @id AND Seq > @after ORDER BY Seq
                 """, new { id, after = after ?? 0 })).ToList();
         }
-        return await ToDtoAsync(row, steps, ct);
+        // Spec 035 (R-033-10): sondear con `after` no compila la propuesta (sin plan, vista previa ni huella).
+        return await ToDtoAsync(row, steps, compile: after is null, ct);
     }
 
     public async Task<StudioSessionDto> CancelAsync(int id, HttpContext http, CancellationToken ct)
@@ -259,6 +260,8 @@ public sealed class StudioService(Db db, MetadataStore store, PlanService plans,
                  WHERE Status = 'running' AND LeaseUntil < SYSUTCDATETIME()
                 """, transaction: tx)).ToList();
             foreach (var e in expired)
+                await StudioTools.PurgeDataAsync(cn, tx, e.Id); // spec 035 (R-033-4)
+            foreach (var e in expired)
                 await Audit.WriteAsync(cn, tx, new DefaultHttpContext(), AuditActions.StudioFinish, entity: "studio", recordId: e.Id.ToString(),
                     after: new { status = StudioStatus.Interrupted }, userId: e.UserId,
                     username: await cn.ExecuteScalarAsync<string>("SELECT Username FROM meta.[User] WHERE Id = @UserId", new { e.UserId }, tx));
@@ -293,10 +296,10 @@ public sealed class StudioService(Db db, MetadataStore store, PlanService plans,
 
     // ---------- Lectura ----------
 
-    private async Task<StudioSessionDto> ToDtoAsync(Row r, IReadOnlyList<StepRow> steps, CancellationToken ct)
+    private async Task<StudioSessionDto> ToDtoAsync(Row r, IReadOnlyList<StepRow> steps, bool compile, CancellationToken ct)
     {
         ChangePlan? plan = null;
-        if (r.PlanJson is not null)
+        if (r.PlanJson is not null && compile)
         {
             try { plan = JsonSerializer.Deserialize<ChangePlan>(r.PlanJson, json); }
             catch (JsonException ex) { log.LogWarning("Sesión de Studio {Id} con plan ilegible: {Message}", r.Id, ex.Message); }
@@ -325,17 +328,22 @@ public sealed class StudioService(Db db, MetadataStore store, PlanService plans,
             Id = r.Id, Prompt = r.Prompt, Scopes = ParseScopes(r.Scopes).Order(StringComparer.Ordinal).ToList(), Status = r.Status,
             Error = r.ErrorCode is null || r.Status is StudioStatus.Cancelled ? null : FailureMessage(r.ErrorCode, r.Summary),
             Model = r.Model, Steps = r.Steps, ToolCalls = r.ToolCalls, InputTokens = r.InputTokens, OutputTokens = r.OutputTokens,
-            CostUsd = r.CostMicros / 1_000_000m, CreatedAt = r.CreatedAt, StartedAt = r.StartedAt, FinishedAt = r.FinishedAt,
+            CostUsd = r.CostMicros / 1_000_000m, CreatedAt = Utc(r.CreatedAt), StartedAt = Utc(r.StartedAt), FinishedAt = Utc(r.FinishedAt),
             Summary = r.Summary, Report = r.ReportJson is null ? null : JsonNode.Parse(r.ReportJson),
             Plan = plan, Preview = preview, Warnings = warnings, ReviewHash = reviewHash,
             CanApply = reviewHash is not null && environment.DirectChanges,
             BlockedReason = r.Status == StudioStatus.Proposed && !environment.DirectChanges
                 ? "Este entorno exige la aprobación de otro administrador: la propuesta no se aplica aquí. Los cambios al modelo llegan como paquete desde Configuración › Entornos."
                 : null,
-            AppliedAt = r.AppliedAt, ChangeSetId = r.ChangeSetId,
-            Trail = steps.Select(s => new StudioStepDto(s.Seq, s.Kind, s.Tool, s.Status, s.Summary, Parse(s.InputJson), Parse(s.OutputJson), s.DurationMs, s.CreatedAt)).ToList(),
+            AppliedAt = Utc(r.AppliedAt), ChangeSetId = r.ChangeSetId,
+            Trail = steps.Select(s => new StudioStepDto(s.Seq, s.Kind, s.Tool, s.Status, s.Summary, Parse(s.InputJson), Parse(s.OutputJson), s.DurationMs, Utc(s.CreatedAt))).ToList(),
         };
     }
+
+    // Spec 035: las fechas se guardan en UTC (SYSUTCDATETIME) y se leen sin zona; sin marcarlas, la pantalla las mostraba
+    // como hora local.
+    private static DateTime Utc(DateTime d) => DateTime.SpecifyKind(d, DateTimeKind.Utc);
+    private static DateTime? Utc(DateTime? d) => d is { } v ? Utc(v) : null;
 
     private static JsonNode? Parse(string? text)
     {
