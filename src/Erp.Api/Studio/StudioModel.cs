@@ -9,7 +9,8 @@ namespace Erp.Api.Studio;
 public abstract record StudioBlock;
 public sealed record StudioText(string Text) : StudioBlock;
 public sealed record StudioToolUse(string Id, string Name, JsonElement Input) : StudioBlock;
-public sealed record StudioToolResult(string ToolUseId, string Content, bool IsError) : StudioBlock;
+/// <summary>Spec 036: <paramref name="Tool"/> es el nombre del catálogo (para purgar lo leído); no viaja al proveedor.</summary>
+public sealed record StudioToolResult(string ToolUseId, string Content, bool IsError, string? Tool = null) : StudioBlock;
 /// <summary>El razonamiento del modelo se devuelve tal cual en el turno siguiente (la firma no se toca).</summary>
 public sealed record StudioThinking(string Thinking, string Signature) : StudioBlock;
 public sealed record StudioRedactedThinking(string Data) : StudioBlock;
@@ -26,13 +27,17 @@ public sealed record StudioReply(IReadOnlyList<StudioBlock> Content, string? Sto
 /// </summary>
 public interface IStudioModel
 {
-    Task<StudioReply> NextAsync(AssistantCredential credential, StudioRequest request, CancellationToken ct);
+    /// <summary>
+    /// Spec 036: <paramref name="onText"/> recibe el texto a medida que el modelo lo escribe (para el estado en vivo); la
+    /// respuesta completa es la que cuenta.
+    /// </summary>
+    Task<StudioReply> NextAsync(AssistantCredential credential, StudioRequest request, Func<string, Task>? onText, CancellationToken ct);
 }
 
 /// <summary>Claude por el SDK oficial (tool use, bucle manual), con el cliente y la clave del asistente de la 011.</summary>
 public sealed class AnthropicStudioModel(AnthropicAssistantModel provider, AssistantOptions options) : IStudioModel
 {
-    public async Task<StudioReply> NextAsync(AssistantCredential credential, StudioRequest request, CancellationToken ct)
+    public async Task<StudioReply> NextAsync(AssistantCredential credential, StudioRequest request, Func<string, Task>? onText, CancellationToken ct)
     {
         var parameters = new MessageCreateParams
         {
@@ -54,7 +59,8 @@ public sealed class AnthropicStudioModel(AnthropicAssistantModel provider, Assis
         };
         try
         {
-            var response = await provider.Client(credential).Messages.Create(parameters, ct);
+            // Spec 036: en streaming, para el texto en vivo; el agregador del SDK arma el mensaje completo.
+            var response = await global::Anthropic.SseAggregatorExtensions.Aggregate(Tap(provider.Client(credential).Messages.CreateStreaming(parameters, ct), onText));
             var content = new List<StudioBlock>();
             foreach (var block in response.Content)
             {
@@ -68,7 +74,20 @@ public sealed class AnthropicStudioModel(AnthropicAssistantModel provider, Assis
                 u.CacheReadInputTokens ?? 0, u.CacheCreationInputTokens ?? 0);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        // Revisión adversarial 036 (F-04): lo que falla al escribir el estado en vivo (lease perdido, base) no es del proveedor.
+        catch (StudioLeaseLost) { throw; }
+        catch (Exception ex) when (ex is Microsoft.Data.SqlClient.SqlException) { throw; }
         catch (Exception ex) { throw provider.Fail(ex); }
+    }
+
+    private static async IAsyncEnumerable<RawMessageStreamEvent> Tap(IAsyncEnumerable<RawMessageStreamEvent> events, Func<string, Task>? onText)
+    {
+        await foreach (var e in events)
+        {
+            if (onText is not null && e.TryPickContentBlockDelta(out var delta) && delta.Delta.TryPickText(out var text) && text.Text.Length > 0)
+                await onText(text.Text);
+            yield return e;
+        }
     }
 
     private static MessageParam ToParam(StudioMessage m)

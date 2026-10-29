@@ -25,7 +25,11 @@ public sealed class FakeStudioModel : IStudioModel
     public readonly ConcurrentDictionary<string, Func<Turn, Task<StudioReply>>> Scripts = new();
     public readonly ConcurrentQueue<(string Tag, string Text, IReadOnlyList<string> Tools)> Requests = new();
 
-    public Task<StudioReply> NextAsync(AssistantCredential credential, StudioRequest request, CancellationToken ct)
+    /// <summary>Spec 036: el texto de la respuesta llega en trozos de este tamaño, con esta pausa entre trozos (estado en vivo).</summary>
+    public int ChunkChars = 20;
+    public int ChunkDelayMs;
+
+    public async Task<StudioReply> NextAsync(AssistantCredential credential, StudioRequest request, Func<string, Task>? onText, CancellationToken ct)
     {
         var first = string.Concat(request.Messages[0].Blocks.OfType<StudioText>().Select(t => t.Text));
         var tag = Regex.Match(first, @"\[guion:([a-z0-9-]+)\]").Groups[1].Value;
@@ -33,7 +37,15 @@ public sealed class FakeStudioModel : IStudioModel
         var last = request.Messages[^1];
         var results = last.FromUser ? last.Blocks.OfType<StudioToolResult>().ToList() : [];
         var turn = new Turn(request, request.Messages.Count(m => !m.FromUser), results, ct);
-        return Scripts.TryGetValue(tag, out var script) ? script(turn) : Task.FromResult(Reply.Text("Sin guion."));
+        var reply = await (Scripts.TryGetValue(tag, out var script) ? script(turn) : Task.FromResult(Reply.Text("Sin guion.")));
+        if (onText is not null)
+            foreach (var text in reply.Content.OfType<StudioText>())
+                for (var i = 0; i < text.Text.Length; i += ChunkChars)
+                {
+                    if (ChunkDelayMs > 0) await Task.Delay(ChunkDelayMs, ct);
+                    await onText(text.Text.Substring(i, Math.Min(ChunkChars, text.Text.Length - i)));
+                }
+        return reply;
     }
 
     public int Calls(string tag) => Requests.Count(r => r.Tag == tag);
@@ -104,6 +116,11 @@ public partial class StudioTests(StudioTests.Host host) : IClassFixture<StudioTe
             s["Studio:LeaseSeconds"] = "4";
             s["Studio:SessionsPerDay"] = "100";
             s["Studio:CostPerDayUsd"] = "20";
+            // Spec 036.
+            s["Studio:MaxTurns"] = "4";
+            s["Studio:IdentitySeconds"] = "1";
+            s["Studio:MaxStreamsPerUser"] = "2";
+            s["Studio:StreamPollMs"] = "200";
         }
 
         protected override void ConfigureServices(IServiceCollection services) => services.AddSingleton<IStudioModel>(Llm);
@@ -333,7 +350,8 @@ public partial class StudioTests(StudioTests.Host host) : IClassFixture<StudioTe
         Assert.Equal("Agrego Prioridad y la regla de monto.", s.Str("summary"));
         Assert.Single(s["report"]!.Arr("risks"));
         var kinds = Trail(s).Select(x => x.Str("kind")).ToList();
-        Assert.Equal("text", kinds[0]);
+        // Spec 036: el pedido es el primer paso de la conversación.
+        Assert.Equal(["user", "text"], kinds.Take(2));
         Assert.Equal(2, kinds.Count(k => k == "deliver"));
         Assert.Equal("error", Trail(s).First(x => x.Str("kind") == "deliver").Str("status"));
         Assert.True(s["costUsd"]!.GetValue<decimal>() > 0);
@@ -348,14 +366,16 @@ public partial class StudioTests(StudioTests.Host host) : IClassFixture<StudioTe
     }
 
     [Fact]
-    public async Task H2_CA1_sin_entregar_se_le_pide_una_vez_y_queda_respondida()
+    public async Task H2_CA1_una_respuesta_sin_herramientas_termina_el_turno_sin_empujon()
     {
+        // Spec 036 (CLARIFY 7): en un chat, contestar es un final válido; la 033 pedía «entregar» una vez más (otra llamada).
         using var ana = await host.LoginAsync("st-ana", Pwd);
-        host.Llm.Scripts["charla"] = t => Task.FromResult(Reply.Text(t.Index == 0 ? "Hola." : "Eso no es un cambio al modelo."));
+        host.Llm.Scripts["charla"] = t => Task.FromResult(Reply.Text(t.Index == 0 ? "Hola." : "No debería llamarse otra vez."));
         var s = await WaitAsync(ana, (await StartAsync(ana, "charla", "¿Qué hora es?")).Id());
         Assert.Equal("answered", s.Str("status"));
-        Assert.Equal(2, host.Llm.Calls("charla"));
-        Assert.Contains(StudioPrompt.Nudge, host.Llm.Sent("charla"));
+        Assert.Equal("Hola.", s.Str("summary"));
+        Assert.Equal(1, host.Llm.Calls("charla"));
+        Assert.True(s["canSend"]!.GetValue<bool>(), s.Json());
     }
 
     [Fact]
@@ -410,7 +430,7 @@ public partial class StudioTests(StudioTests.Host host) : IClassFixture<StudioTe
     }
 
     [Fact]
-    public async Task H2_CA3_cancelar_detiene_la_sesion_y_borra_la_base_aislada()
+    public async Task H2_CA3_cancelar_detiene_la_sesion_y_la_base_aislada_se_borra_sin_uso()
     {
         using var gil = await host.LoginAsync("st-gil", Pwd);
         var waiting = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -430,7 +450,11 @@ public partial class StudioTests(StudioTests.Host host) : IClassFixture<StudioTe
         var s = await WaitAsync(gil, id);
         Assert.Equal("cancelled", s.Str("status"));
         Assert.Equal(2, host.Llm.Calls("cancelar"));
-        await WaitForAsync(() => DatabaseExistsAsync(sandbox!), e => !e, "base aislada borrada");
+        // Spec 036 (H4 CA1, CA2): detener no cierra la conversación; la copia queda para el turno siguiente y, sin uso, se borra.
+        Assert.True(await DatabaseExistsAsync(sandbox!));
+        await host.ExecAsync($"UPDATE meta.StudioSession SET LastActivityAt = DATEADD(hour, -2, SYSUTCDATETIME()) WHERE Id = {id}");
+        await WaitForAsync(() => DatabaseExistsAsync(sandbox!), e => !e, "base aislada borrada sin uso");
+        Assert.Null(await host.ScalarAsync<string?>($"SELECT SandboxDb FROM meta.StudioSession WHERE Id = {id}"));
         Assert.Equal(409, (await gil.PostAsync($"/api/studio/sessions/{id}/cancel")).Status);
         Assert.Equal(1, await host.ScalarAsync<int>($"SELECT COUNT(*) FROM meta.AuditLog WHERE Action = 'studio.cancel' AND RecordId = '{id}'"));
     }
@@ -564,7 +588,7 @@ public partial class StudioTests(StudioTests.Host host) : IClassFixture<StudioTe
         // El anfitrión sí tiene clave de firma y clave de Anthropic (control).
         Assert.NotNull(host.Services.GetRequiredService<Erp.Api.Environments.EnvironmentOptions>().SigningKey);
         Assert.True(host.Services.GetRequiredService<AssistantOptions>().Configured);
-        await using var sandbox = await factory.CreateAsync(900_020, CancellationToken.None);
+        await using var sandbox = await factory.CreateAsync(900_020, Guid.NewGuid(), CancellationToken.None);
         try
         {
             Assert.Null(sandbox.Services.GetRequiredService<Erp.Api.Environments.EnvironmentOptions>().SigningKey);
@@ -639,7 +663,7 @@ public partial class StudioTests(StudioTests.Host host) : IClassFixture<StudioTe
         var name = factory.NameFor(900_021);
         await host.ExecAsync($"CREATE DATABASE [{name}]");
         await host.ExecAsync($"EXEC('CREATE TABLE [{name}].dbo.Restos (Id int)')");
-        await using var sandbox = await factory.CreateAsync(900_021, CancellationToken.None);
+        await using var sandbox = await factory.CreateAsync(900_021, Guid.NewGuid(), CancellationToken.None);
         try
         {
             Assert.Null(await host.ScalarAsync<int?>($"SELECT OBJECT_ID(N'[{name}].dbo.Restos')"));
@@ -692,8 +716,11 @@ public partial class StudioTests(StudioTests.Host host) : IClassFixture<StudioTe
         Assert.EndsWith("_SBX", name);
         Assert.NotEqual(host.RealDb, name);
         Assert.Equal(2, s["report"]!.Arr("tested").Count);
-        // La copia ya no existe y la base real no tiene ni el catálogo ni los registros de prueba.
-        await WaitForAsync(() => DatabaseExistsAsync(name!), e => !e, "base aislada borrada al terminar");
+        // Spec 036: la copia queda para el turno siguiente (se borra sin uso); la base real no tiene ni el catálogo ni los
+        // registros de prueba.
+        Assert.True(await DatabaseExistsAsync(name!));
+        await host.ExecAsync($"UPDATE meta.StudioSession SET LastActivityAt = DATEADD(hour, -2, SYSUTCDATETIME()) WHERE SandboxDb = N'{name}'");
+        await WaitForAsync(() => DatabaseExistsAsync(name!), e => !e, "base aislada borrada sin uso");
         Assert.Null(await host.ScalarAsync<int?>("SELECT OBJECT_ID('app.StGasto')"));
         Assert.Equal(0, await host.ScalarAsync<int>("SELECT COUNT(*) FROM meta.Entity WHERE Name = N'StGasto'"));
         Assert.Equal(tareas, await host.ScalarAsync<int>("SELECT COUNT(*) FROM app.StTarea"));
@@ -993,8 +1020,10 @@ public class StudioProviderTests(StudioProviderTests.Host host) : IClassFixture<
                 if (node is not null) Bodies.Enqueue(node);
                 var (status, reply) = node is not null && Replies.TryDequeue(out var next) ? next(node)
                     : (500, (object)new { type = "error", error = new { type = "api_error", message = "sin guion" } });
-                var json = JsonSerializer.SerializeToUtf8Bytes(reply);
-                var response = $"HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {json.Length}\r\nrequest-id: req_prueba\r\n\r\n";
+                // Spec 036: Studio pide la respuesta en streaming; el proveedor la manda como eventos SSE, como la API real.
+                var sse = status == 200 && node?["stream"]?.GetValue<bool>() == true;
+                var json = sse ? Encoding.UTF8.GetBytes(Sse(JsonSerializer.SerializeToNode(reply)!)) : JsonSerializer.SerializeToUtf8Bytes(reply);
+                var response = $"HTTP/1.1 {status} X\r\nContent-Type: {(sse ? "text/event-stream" : "application/json")}\r\nContent-Length: {json.Length}\r\nrequest-id: req_prueba\r\n\r\n";
                 await stream.WriteAsync(Encoding.ASCII.GetBytes(response));
                 await stream.WriteAsync(json);
             }
@@ -1006,6 +1035,55 @@ public class StudioProviderTests(StudioProviderTests.Host host) : IClassFixture<
             _stop.Cancel();
             _fake?.Stop();
         }
+    }
+
+    /// <summary>
+    /// Spec 036: un mensaje como la API lo manda en streaming: inicio con el uso de entrada, cada bloque en trozos (texto,
+    /// razonamiento y su firma, entrada de herramienta como JSON parcial) y el cierre con el motivo y los tokens de salida.
+    /// </summary>
+    public static string Sse(JsonNode msg)
+    {
+        var sb = new StringBuilder();
+        void Ev(string type, JsonObject data) { data["type"] = type; sb.Append($"event: {type}\ndata: {data.ToJsonString()}\n\n"); }
+        var start = msg.DeepClone().AsObject();
+        start["content"] = new JsonArray();
+        start["stop_reason"] = null;
+        start["usage"]!["output_tokens"] = 1;
+        Ev("message_start", new JsonObject { ["message"] = start });
+        var i = 0;
+        foreach (var b in msg["content"]!.AsArray())
+        {
+            var block = b!.AsObject();
+            switch (block["type"]!.GetValue<string>())
+            {
+                case "text":
+                    Ev("content_block_start", new JsonObject { ["index"] = i, ["content_block"] = new JsonObject { ["type"] = "text", ["text"] = "" } });
+                    var text = block["text"]!.GetValue<string>();
+                    for (var k = 0; k < text.Length; k += 7)
+                        Ev("content_block_delta", new JsonObject { ["index"] = i, ["delta"] = new JsonObject { ["type"] = "text_delta", ["text"] = text.Substring(k, Math.Min(7, text.Length - k)) } });
+                    break;
+                case "thinking":
+                    Ev("content_block_start", new JsonObject { ["index"] = i, ["content_block"] = new JsonObject { ["type"] = "thinking", ["thinking"] = "", ["signature"] = "" } });
+                    Ev("content_block_delta", new JsonObject { ["index"] = i, ["delta"] = new JsonObject { ["type"] = "thinking_delta", ["thinking"] = block["thinking"]!.GetValue<string>() } });
+                    Ev("content_block_delta", new JsonObject { ["index"] = i, ["delta"] = new JsonObject { ["type"] = "signature_delta", ["signature"] = block["signature"]!.GetValue<string>() } });
+                    break;
+                case "tool_use":
+                    Ev("content_block_start", new JsonObject { ["index"] = i, ["content_block"] = new JsonObject
+                    {
+                        ["type"] = "tool_use", ["id"] = block["id"]!.DeepClone(), ["name"] = block["name"]!.DeepClone(), ["input"] = new JsonObject(),
+                    } });
+                    Ev("content_block_delta", new JsonObject { ["index"] = i, ["delta"] = new JsonObject { ["type"] = "input_json_delta", ["partial_json"] = block["input"]!.ToJsonString() } });
+                    break;
+            }
+            Ev("content_block_stop", new JsonObject { ["index"] = i++ });
+        }
+        Ev("message_delta", new JsonObject
+        {
+            ["delta"] = new JsonObject { ["stop_reason"] = msg["stop_reason"]!.DeepClone(), ["stop_sequence"] = null },
+            ["usage"] = new JsonObject { ["output_tokens"] = msg["usage"]!["output_tokens"]!.DeepClone() },
+        });
+        Ev("message_stop", new JsonObject());
+        return sb.ToString();
     }
 
     private static object Message(object[] content, string stop, int input = 100, int output = 20, int cacheRead = 0, int cacheWrite = 0) => new

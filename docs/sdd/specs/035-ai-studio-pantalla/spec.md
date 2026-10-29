@@ -79,6 +79,7 @@ guardados después de la sesión y que la pantalla no recompile el plan en cada 
 6. **Ubicación:** grupo «Modelo» de Configuración, después del Explorador (la usa quien diseña el modelo), icono `Bot`.
 
 ## Fuera de alcance (anotado en el roadmap)
-- El servidor MCP por persona (036).
+- El servidor MCP por persona (038; antes 036).
+- La pantalla como chat de varios turnos: la pidió el dueño al revisar esta (2026-10-29); motor en la 036, pantalla en la 037.
 - Retomar una sesión interrumpida o pedir ajustes sobre una propuesta (hoy se pide una sesión nueva).
 - Que cancelar interrumpa la creación de la copia aislada (R-033-11, segunda mitad).

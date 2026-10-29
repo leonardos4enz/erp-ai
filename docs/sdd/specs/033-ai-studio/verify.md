@@ -20,7 +20,8 @@ criterios: ~3 300 líneas con la pantalla y seguridad/concurrencia junto con UI 
 producto nuevas en `src/Erp.Api/Studio`, la ruta y el inventario vivo) y la **034** la pantalla. Renumeración del roadmap:
 035 servidor MCP, 036 Ventas, 037 CFDI 4.0; auditoría 6 al cerrar la 033 (trabajo agéntico y delegación de identidad) y 7
 al cerrar la 035 (punto de entrada OAuth). (La auditoría 6 abrió la 034 — Endurecimiento 5 —: pantalla 035, MCP 036 y
-auditoría 7 al cerrarla, Ventas 037, CFDI 4.0 038.)
+auditoría 7 al cerrarla, Ventas 037, CFDI 4.0 038. La 036 —Studio como chat— los recorrió: MCP 038 con la auditoría 7,
+Ventas 039, CFDI 4.0 040.)
 
 ## 1. Pruebas unitarias e integración
 `dotnet test`: **740 correctas** (643 + 97). Nuevas:

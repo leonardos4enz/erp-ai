@@ -75,6 +75,8 @@ public static class AuditActions
     public const string StudioCancel = "studio.cancel";
     public const string StudioDiscard = "studio.discard";
     public const string StudioApply = "studio.apply";
+    /// <summary>Spec 036: mensaje de seguimiento en una conversación de Studio (turno y longitud; nunca el texto).</summary>
+    public const string StudioMessage = "studio.message";
 }
 
 public static class Audit

@@ -100,3 +100,4 @@ y cada sesión queda como registro de una sola entrega. Al cerrar la spec:
 | 033 | [ERP AI Studio: herramientas, bucle agéntico y entorno aislado](specs/033-ai-studio/spec.md) | Implementado |
 | 034 | [Endurecimiento 5: nadie actúa sobre quien tiene más, y el catálogo de Studio con los permisos exactos](specs/034-endurecimiento-5/spec.md) | Implementado |
 | 035 | [ERP AI Studio: pantalla](specs/035-ai-studio-pantalla/spec.md) | Implementado |
+| 036 | [ERP AI Studio como chat: motor conversacional y streaming](specs/036-ai-studio-chat/spec.md) | Implementado |

@@ -26,11 +26,13 @@ public sealed class SandboxUnavailable(string message, Exception? inner = null) 
 /// Una copia desechable del entorno: otra base con el modelo (sin datos, usuarios, empresas reales, claves ni destinos de
 /// webhooks) y un proveedor de servicios propio. Las mismas rutas de la API corren aquí como su administrador.
 /// </summary>
-public sealed class Sandbox(string database, ServiceProvider services, UserContext admin) : IAsyncDisposable
+public sealed class Sandbox(string database, ServiceProvider services, UserContext admin, Guid token) : IAsyncDisposable
 {
     public string Database { get; } = database;
     public IServiceProvider Services => services;
     public UserContext Admin { get; } = admin;
+    /// <summary>Spec 036: la marca de la conversación que la creó (<c>meta.StudioSandboxMarker</c>).</summary>
+    public Guid Token { get; } = token;
 
     public ValueTask DisposeAsync() => services.DisposeAsync();
 }
@@ -73,9 +75,69 @@ public sealed partial class SandboxFactory(ServiceBlueprint blueprint, Db db, IC
 
     public string NameFor(int sessionId) => NameFor(RealDb, sessionId);
 
-    public async Task<Sandbox> CreateAsync(int sessionId, CancellationToken ct)
+    /// <summary>
+    /// Spec 036 (H4 CA1): la copia que creó esta conversación (su base existe y su marca es <paramref name="token"/>), lista
+    /// para otro turno sin volver a copiar el modelo. Null si no está o no es suya: entonces se crea otra (033 F-09).
+    /// </summary>
+    public async Task<Sandbox?> OpenAsync(int sessionId, Guid token, CancellationToken ct)
     {
         var name = NameFor(sessionId);
+        var master = new SqlConnectionStringBuilder(db.ConnectionString) { InitialCatalog = "master" }.ConnectionString;
+        await using (var cn = new SqlConnection(master))
+        {
+            await cn.OpenAsync(ct);
+            if (await cn.ExecuteScalarAsync<int?>("SELECT DB_ID(@name)", new { name }) is null) return null;
+        }
+        var provider = Build(name);
+        try
+        {
+            Guid? mark;
+            await using (var cn = await provider.GetRequiredService<Db>().OpenAsync(ct))
+                mark = await cn.ExecuteScalarAsync<Guid?>("IF OBJECT_ID('meta.StudioSandboxMarker') IS NOT NULL SELECT TOP 1 Token FROM meta.StudioSandboxMarker");
+            if (mark != token) { await provider.DisposeAsync(); return null; }
+            return new Sandbox(name, provider, await AdminAsync(provider, ct), token);
+        }
+        catch (Exception ex) when (ex is SqlException or InvalidOperationException)
+        {
+            log.LogWarning("No se pudo reabrir la copia aislada {Db}: {Message}", name, ex.Message);
+            await provider.DisposeAsync();
+            return null;
+        }
+    }
+
+    /// <summary>Spec 036: <paramref name="token"/> queda como marca en la copia y en la sesión (para reabrirla en otro turno).</summary>
+    public async Task<Sandbox> CreateAsync(int sessionId, Guid token, CancellationToken ct)
+    {
+        var name = NameFor(sessionId);
+        var provider = Build(name);
+        try
+        {
+            // F-09: una base con ese nombre (huérfana sin barrer, o un id repetido tras restaurar) no se reutiliza.
+            await DropAsync(name);
+            try { await Bootstrap.RunAsync(provider, provider.GetRequiredService<IConfiguration>(), log); }
+            catch (SqlException ex)
+            {
+                log.LogWarning("No se pudo crear la base aislada {Db}: {Message}", name, ex.Message);
+                throw new SandboxUnavailable("El entorno aislado no está disponible en este servidor (no se pudo crear la base de prueba).", ex);
+            }
+            await CopyRolesAsync(provider, ct);
+            var admin = await AdminAsync(provider, ct);
+            await CopyModelAsync(provider, admin, ct);
+            await using (var cn = await provider.GetRequiredService<Db>().OpenAsync(ct))
+                await cn.ExecuteAsync("CREATE TABLE meta.StudioSandboxMarker (Token uniqueidentifier NOT NULL); INSERT meta.StudioSandboxMarker VALUES (@token);", new { token });
+            return new Sandbox(name, provider, admin, token);
+        }
+        catch
+        {
+            await provider.DisposeAsync();
+            await DropAsync(name);
+            throw;
+        }
+    }
+
+    /// <summary>Los mismos servicios sobre la base <paramref name="name"/>, sin trabajos en segundo plano ni secretos.</summary>
+    private ServiceProvider Build(string name)
+    {
         var cs = new SqlConnectionStringBuilder(db.ConnectionString) { InitialCatalog = name }.ConnectionString;
         var settings = new ConfigurationBuilder().AddConfiguration(config).AddInMemoryCollection(new Dictionary<string, string?>
         {
@@ -109,32 +171,14 @@ public sealed partial class SandboxFactory(ServiceBlueprint blueprint, Db db, IC
         services.AddSingleton<Microsoft.AspNetCore.DataProtection.IDataProtectionProvider>(
             new Microsoft.AspNetCore.DataProtection.EphemeralDataProtectionProvider());
         var provider = services.BuildServiceProvider();
-        try
+        // Defensa en profundidad: la copia nunca habla con la base real.
+        var target = new SqlConnectionStringBuilder(provider.GetRequiredService<Db>().ConnectionString).InitialCatalog;
+        if (!string.Equals(target, Validate(name, RealDb), StringComparison.Ordinal))
         {
-            // Defensa en profundidad: la copia nunca habla con la base real.
-            var target = new SqlConnectionStringBuilder(provider.GetRequiredService<Db>().ConnectionString).InitialCatalog;
-            if (!string.Equals(target, Validate(name, RealDb), StringComparison.Ordinal))
-                throw new InvalidOperationException("La copia aislada apunta a otra base.");
-
-            // F-09: una base con ese nombre (huérfana sin barrer, o un id repetido tras restaurar) no se reutiliza.
-            await DropAsync(name);
-            try { await Bootstrap.RunAsync(provider, settings, log); }
-            catch (SqlException ex)
-            {
-                log.LogWarning("No se pudo crear la base aislada {Db}: {Message}", name, ex.Message);
-                throw new SandboxUnavailable("El entorno aislado no está disponible en este servidor (no se pudo crear la base de prueba).", ex);
-            }
-            await CopyRolesAsync(provider, ct);
-            var admin = await AdminAsync(provider, ct);
-            await CopyModelAsync(provider, admin, ct);
-            return new Sandbox(name, provider, admin);
+            provider.Dispose();
+            throw new InvalidOperationException("La copia aislada apunta a otra base.");
         }
-        catch
-        {
-            await provider.DisposeAsync();
-            await DropAsync(name);
-            throw;
-        }
+        return provider;
     }
 
     /// <summary>Solo los nombres (el plan puede citarlos en seguridad, procesos o webhooks); sin permisos ni usuarios.</summary>
@@ -217,6 +261,31 @@ public sealed partial class SandboxFactory(ServiceBlueprint blueprint, Db db, IC
         body["baseHash"] = preview.Body!["baseHash"]?.DeepClone();
         var applied = await routes.SendAsync(sandbox, admin, new RouteCall("POST", "/api/model/plan/apply", Body: body), allowWrites: true, ct, credential, caller);
         return applied.Ok ? null : applied.Error;
+    }
+
+    /// <summary>
+    /// Revisión adversarial 036 (F-03): borra la copia solo si lleva la marca <paramref name="token"/> (o si no se puede leer
+    /// la marca porque la base no terminó de crearse). Otra instancia pudo crear ya, con el mismo nombre, la del turno siguiente.
+    /// </summary>
+    public async Task DropIfOwnedAsync(string name, Guid? token)
+    {
+        Validate(name, RealDb);
+        var cs = new SqlConnectionStringBuilder(db.ConnectionString) { InitialCatalog = "master" }.ConnectionString;
+        try
+        {
+            await using var cn = new SqlConnection(cs);
+            await cn.OpenAsync();
+            if (await cn.ExecuteScalarAsync<int?>("SELECT DB_ID(@name)", new { name }) is null) return;
+            var quoted = Identifiers.Quote(name);
+            var mark = await cn.ExecuteScalarAsync<Guid?>($"IF OBJECT_ID(N'{quoted}.meta.StudioSandboxMarker') IS NOT NULL SELECT TOP 1 Token FROM {quoted}.meta.StudioSandboxMarker");
+            if (mark is not null && mark != token)
+            {
+                log.LogInformation("La copia aislada {Db} es de otro turno: no se borra", name);
+                return;
+            }
+        }
+        catch (SqlException ex) { log.LogWarning("No se pudo leer la marca de la copia aislada {Db}: {Message}", name, ex.Message); }
+        await DropAsync(name);
     }
 
     public async Task DropAsync(string name)

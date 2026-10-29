@@ -160,10 +160,19 @@ public static class StudioTools
     /// <summary>Spec 035 (R-033-4): las que devuelven registros; sus salidas se borran al cerrar la sesión.</summary>
     public static readonly IReadOnlyList<string> DataTools = All.Where(t => t.Scope == StudioScopes.Data).Select(t => t.Name).ToList();
 
-    /// <summary>Spec 035 (R-033-4): borra lo que devolvieron las herramientas de <see cref="DataTools"/>, en la transacción del cierre.</summary>
-    public static Task PurgeDataAsync(System.Data.Common.DbConnection cn, System.Data.Common.DbTransaction tx, int sessionId) =>
-        cn.ExecuteAsync("UPDATE meta.StudioStep SET OutputJson = NULL WHERE SessionId = @sessionId AND Tool IN @DataTools AND OutputJson IS NOT NULL",
+    /// <summary>
+    /// Spec 035 (R-033-4): borra lo que devolvieron las herramientas de <see cref="DataTools"/>, en la transacción del cierre.
+    /// Spec 036 (H4 CA3): también en el historial que verá el modelo en el turno siguiente (queda un aviso en su lugar).
+    /// </summary>
+    public static async Task PurgeDataAsync(System.Data.Common.DbConnection cn, System.Data.Common.DbTransaction tx, int sessionId)
+    {
+        await cn.ExecuteAsync("UPDATE meta.StudioStep SET OutputJson = NULL WHERE SessionId = @sessionId AND Tool IN @DataTools AND OutputJson IS NOT NULL",
             new { sessionId, DataTools }, tx);
+        foreach (var (id, content) in await cn.QueryAsync<(long, string)>(
+                     "SELECT Id, ContentJson FROM meta.StudioMessage WHERE SessionId = @sessionId AND HasData = 1", new { sessionId }, tx))
+            await cn.ExecuteAsync("UPDATE meta.StudioMessage SET ContentJson = @content, HasData = 0 WHERE Id = @id",
+                new { id, content = StudioTranscript.Purge(content, DataTools) ?? content }, tx);
+    }
 
     // ---------- Definición ----------
 

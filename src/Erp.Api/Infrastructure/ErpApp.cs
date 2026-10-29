@@ -91,6 +91,8 @@ public static class ErpApp
         services.AddSingleton<Erp.Api.Studio.StudioToolRunner>();
         services.AddScoped<Erp.Api.Studio.StudioAgent>();
         services.AddScoped<Erp.Api.Studio.StudioService>();
+        services.AddSingleton<Erp.Api.Studio.StudioSignals>(); // spec 036
+        services.AddScoped<Erp.Api.Studio.StudioStream>();
         services.AddHostedService<Erp.Api.Studio.StudioDispatcher>();
 
         // ---------- Autenticación: cookie (ADR-0002) ----------

@@ -4,7 +4,7 @@
 (2026-10-27, solo lectura al cerrar la 033, commit `ad0534b`): una escalada de privilegios alta y no relacionada con Studio
 (A-01), huecos del catálogo de herramientas que deben cerrarse antes del servidor MCP (A-02 a A-04, R-033-5), una fuga menor
 en la bitácora (A-07, R-032-6), dos fallas de contabilidad de Studio (A-05, A-06) y riesgos marcados para auditoría sin
-prueba. El dueño quiere que el MCP (ahora 036) opere con los permisos actuales de cada persona y nunca más. Va antes de la
+prueba. El dueño quiere que el MCP (ahora 038) opere con los permisos actuales de cada persona y nunca más. Va antes de la
 pantalla de Studio (ahora 035). Suma la estabilidad de CI que la 033 dejó pendiente (R-030-5).
 
 ## Problema

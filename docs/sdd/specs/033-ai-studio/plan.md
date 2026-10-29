@@ -102,7 +102,7 @@ otra → «Ocurrió un error inesperado.» (detalle al log). La salida al modelo
 `<datos_no_confiables herramienta="…">JSON</datos_no_confiables>` con el codificador por omisión de System.Text.Json
 (escapa `<`, `>` y `&`: un texto no puede cerrar el delimitador) y recortada a `Studio:MaxToolResultChars`.
 
-**Lista para la 036 (MCP; antes 035):** `StudioTools` + `ToolRunner` no dependen del bucle ni de la sesión: reciben la identidad, los
+**Lista para la 038 (MCP; antes 035 y 036):** `StudioTools` + `ToolRunner` no dependen del bucle ni de la sesión: reciben la identidad, los
 alcances y la entrada. El servidor MCP los llamará con el usuario del token y los alcances consentidos (`modelo`, `datos`,
 `aislado`), y `GET /api/studio/tools` ya da el `inputSchema` de cada una en JSON Schema.
 

@@ -18,7 +18,7 @@
 depender del momento») en verde. Los hallazgos de la auditoría 6 se reconfirmaron en el código antes de escribir la spec
 (A-01: `RequireGrantableRolesAsync` sale con `changed.Length == 0`; R-009-1: `EnvironmentOptions.Create` sin validación;
 A-02 a A-07 en `src/Erp.Api/Studio/*` y `AuditFilter.cs`). Roadmap renumerado: pantalla de Studio 035, MCP 036 (auditoría
-7 al cerrarla), Ventas 037, CFDI 4.0 038; referencias corregidas en ADR-0008, `riesgos.md` y la spec 033 (spec, plan y
+7 al cerrarla), Ventas 037, CFDI 4.0 038 (la 036 los recorrió: MCP 038, Ventas 039, CFDI 4.0 040); referencias corregidas en ADR-0008, `riesgos.md` y la spec 033 (spec, plan y
 verify). CLARIFY: un solo criterio de división (7 historias); la estabilidad de CI entra (no es código de producto:
 ~340 líneas de producto y ~600 de pruebas e infraestructura).
 

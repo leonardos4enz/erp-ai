@@ -13,7 +13,7 @@ permiso y que la IA no actúe con privilegios propios ni aplique sin una persona
    endpoint y la identidad recargada de la persona (sello de seguridad, empresa). La capacidad no se declara en la
    herramienta: es la de la ruta (029), y la ruta aplica `RecordFilter`, `FieldAccess`, empresa y `viewer` como para el
    navegador. En el entorno real el despachador niega toda ruta que escriba; aplicar lo hace la persona por la ruta de
-   siempre. Así el agente nunca tiene privilegios propios (II.8) y el servidor MCP de la 036 reutiliza el mismo catálogo.
+   siempre. Así el agente nunca tiene privilegios propios (II.8) y el servidor MCP de la 038 reutiliza el mismo catálogo.
    Desde la 034 el despachador también vuelve a aplicar los alcances de la credencial (OAuth o clave de API) con la misma
    función que `UseBearerScope`, los límites de frecuencia de la ruta y, en la copia aislada, la capacidad publicada de la
    herramienta para la persona (no la del administrador de la copia).

@@ -320,7 +320,9 @@ function SessionView({ id, status, dataTools, onChanged }: { id: number; status:
   if (!s) return <LoadingBlock />;
 
   const meters = consumption(s, status.limits, now);
-  const last = s.trail[s.trail.length - 1];
+  // Spec 036: el pedido llega como paso «user»; esta pantalla ya lo muestra arriba (la 037 la reemplaza por el chat).
+  const steps = s.trail.filter((x) => x.kind !== 'user');
+  const last = steps[steps.length - 1];
   const file = planFile(s);
   const hasOutcome = s.status === 'proposed' || s.status === 'answered' || s.status === 'applied' || s.status === 'discarded';
 
@@ -367,14 +369,14 @@ function SessionView({ id, status, dataTools, onChanged }: { id: number; status:
       </article>
 
       <section className="card card-pad stack" aria-labelledby={`pasos-${s.id}`}>
-        <h2 className="section-title" id={`pasos-${s.id}`}><ListChecks size={15} aria-hidden /> Pasos del agente ({s.trail.length})</h2>
+        <h2 className="section-title" id={`pasos-${s.id}`}><ListChecks size={15} aria-hidden /> Pasos del agente ({steps.length})</h2>
         {/* Anuncia el último paso mientras trabaja (H2 CA1). */}
         <div className="sr-only" aria-live="polite">{active && last ? `Paso ${last.seq}: ${stepTitle(last)}. ${last.summary}` : ''}</div>
-        {s.trail.length === 0 ? (
+        {steps.length === 0 ? (
           <p className="subtle" style={{ margin: 0 }}>{active ? 'Todavía no hay pasos.' : 'La sesión no registró pasos.'}</p>
         ) : (
           <ol className="studio-steps">
-            {s.trail.map((step) => <Step key={step.seq} step={step} dataTools={dataTools} />)}
+            {steps.map((step) => <Step key={step.seq} step={step} dataTools={dataTools} />)}
           </ol>
         )}
       </section>
@@ -418,7 +420,7 @@ function SessionView({ id, status, dataTools, onChanged }: { id: number; status:
   );
 }
 
-const KIND_ICON: Record<StudioStep['kind'], LucideIcon> = { text: MessageSquareText, tool: Wrench, deliver: PackageCheck, limit: CircleSlash, error: XCircle };
+const KIND_ICON: Record<StudioStep['kind'], LucideIcon> = { user: MessageSquareText, text: MessageSquareText, tool: Wrench, deliver: PackageCheck, limit: CircleSlash, error: XCircle };
 
 function stepTitle(step: StudioStep) {
   if (step.kind === 'text') return 'El agente escribe';

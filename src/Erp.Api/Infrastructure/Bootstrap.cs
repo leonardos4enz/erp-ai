@@ -733,6 +733,33 @@ public static class Bootstrap
          WHERE Tool IN ('leer_registros', 'leer_registro') AND OutputJson IS NOT NULL
            AND SessionId IN (SELECT Id FROM meta.StudioSession WHERE Status NOT IN ('queued', 'running'));
 
+        -- Spec 036: Studio como chat. Varios turnos por sesión (conversación), la propuesta separada del estado del turno,
+        -- el estado en vivo que lee el flujo SSE, la marca de la copia aislada que se conserva entre turnos y el historial
+        -- exacto que se manda al modelo.
+        IF COL_LENGTH('meta.StudioSession', 'Turns') IS NULL ALTER TABLE meta.StudioSession ADD Turns int NOT NULL DEFAULT 1;
+        IF COL_LENGTH('meta.StudioSession', 'PlanStatus') IS NULL
+        BEGIN
+            ALTER TABLE meta.StudioSession ADD PlanStatus nvarchar(10) NULL;
+            EXEC('UPDATE meta.StudioSession SET PlanStatus = Status WHERE PlanJson IS NOT NULL AND Status IN (''proposed'', ''applied'', ''discarded'')');
+        END
+        IF COL_LENGTH('meta.StudioSession', 'LiveJson') IS NULL ALTER TABLE meta.StudioSession ADD LiveJson nvarchar(max) NULL;
+        IF COL_LENGTH('meta.StudioSession', 'SandboxToken') IS NULL ALTER TABLE meta.StudioSession ADD SandboxToken uniqueidentifier NULL;
+        IF COL_LENGTH('meta.StudioSession', 'TurnStartedAt') IS NULL ALTER TABLE meta.StudioSession ADD TurnStartedAt datetime2(3) NULL;
+        IF COL_LENGTH('meta.StudioSession', 'LastActivityAt') IS NULL
+            ALTER TABLE meta.StudioSession ADD LastActivityAt datetime2(3) NOT NULL CONSTRAINT DF_StudioSession_Activity DEFAULT SYSUTCDATETIME();
+        IF COL_LENGTH('meta.StudioStep', 'Turn') IS NULL ALTER TABLE meta.StudioStep ADD Turn int NOT NULL DEFAULT 1;
+        IF OBJECT_ID('meta.StudioMessage') IS NULL
+        CREATE TABLE meta.StudioMessage (
+            Id bigint IDENTITY PRIMARY KEY,
+            SessionId int NOT NULL REFERENCES meta.StudioSession(Id),
+            Seq int NOT NULL,
+            FromUser bit NOT NULL,
+            ContentJson nvarchar(max) NOT NULL,
+            HasData bit NOT NULL DEFAULT 0,
+            CreatedAt datetime2(3) NOT NULL DEFAULT SYSUTCDATETIME(),
+            CONSTRAINT UX_StudioMessage_Seq UNIQUE (SessionId, Seq)
+        );
+
         -- Constitución II.4: la auditoría es de solo inserción, incluso para la propia aplicación.
         IF OBJECT_ID('meta.TR_AuditLog_Immutable') IS NULL
             EXEC('CREATE TRIGGER meta.TR_AuditLog_Immutable ON meta.AuditLog INSTEAD OF UPDATE, DELETE AS

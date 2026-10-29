@@ -758,8 +758,9 @@ export type StudioScope = 'modelo' | 'datos' | 'aislado';
 export interface StudioSummary { id: number; title: string; status: StudioSessionStatus; createdAt: string; finishedAt?: string; steps: number; costUsd: number }
 /** Un paso del agente: texto del modelo, herramienta, entrega o tope. Entrada y salida son datos no confiables. */
 export interface StudioStep {
-  seq: number; kind: 'text' | 'tool' | 'deliver' | 'limit' | 'error'; tool?: string | null; status: 'ok' | 'error' | 'denied';
-  summary: string; input?: unknown; output?: unknown; durationMs: number; at: string;
+  /** Spec 036: `user` es un mensaje de la persona (`output.text`); `turn`, el turno de la conversación. */
+  seq: number; kind: 'user' | 'text' | 'tool' | 'deliver' | 'limit' | 'error'; tool?: string | null; status: 'ok' | 'error' | 'denied';
+  summary: string; input?: unknown; output?: unknown; durationMs: number; at: string; turn?: number;
 }
 export interface StudioTest { description: string; ok: boolean; detail?: string | null }
 export interface StudioReport { tested: StudioTest[]; failures: string[]; risks: string[] }

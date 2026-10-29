@@ -28,6 +28,19 @@ public sealed record StudioOptions
     public int PollSeconds { get; init; } = 2;
     public int LeaseSeconds { get; init; } = 120;
     public int RenewSeconds { get; init; } = 10;
+    /// <summary>Spec 036: mensajes de la persona por conversación (los demás topes de la sesión son de la conversación).</summary>
+    public int MaxTurns { get; init; } = 20;
+    /// <summary>Spec 036: la copia aislada sin uso por este tiempo se borra (H4 CA2).</summary>
+    public int SandboxIdleMinutes { get; init; } = 60;
+    /// <summary>Spec 036: cada cuánto, a lo más, se escribe el estado en vivo del turno.</summary>
+    public int LiveMs { get; init; } = 250;
+    /// <summary>Spec 036: duración de un flujo SSE; la pantalla se reconecta con <c>Last-Event-ID</c>.</summary>
+    public int StreamSeconds { get; init; } = 300;
+    /// <summary>Spec 036: relectura del flujo sin señal del mismo proceso (el trabajador está en otra instancia).</summary>
+    public int StreamPollMs { get; init; } = 1000;
+    public int MaxStreamsPerUser { get; init; } = 3;
+    /// <summary>Spec 036: cada cuánto el flujo revisa que la persona siga activa y con su sello.</summary>
+    public int IdentitySeconds { get; init; } = 5;
 
     public long MaxCostMicros => Micros(MaxCostUsd);
     public long CostPerDayMicros => Micros(CostPerDayUsd);
@@ -71,6 +84,13 @@ public sealed record StudioOptions
             PollSeconds = Math.Clamp(s.GetValue("PollSeconds", 2), 1, 60),
             LeaseSeconds = Math.Clamp(s.GetValue("LeaseSeconds", 120), 5, 3600),
             RenewSeconds = Math.Clamp(s.GetValue("RenewSeconds", 10), 1, 600),
+            MaxTurns = Math.Clamp(s.GetValue("MaxTurns", 20), 1, 200),
+            SandboxIdleMinutes = Math.Clamp(s.GetValue("SandboxIdleMinutes", 60), 1, 24 * 60),
+            LiveMs = Math.Clamp(s.GetValue("LiveMs", 250), 50, 5000),
+            StreamSeconds = Math.Clamp(s.GetValue("StreamSeconds", 300), 5, 3600),
+            StreamPollMs = Math.Clamp(s.GetValue("StreamPollMs", 1000), 100, 10_000),
+            MaxStreamsPerUser = Math.Clamp(s.GetValue("MaxStreamsPerUser", 3), 1, 20),
+            IdentitySeconds = Math.Clamp(s.GetValue("IdentitySeconds", 5), 1, 300),
         };
     }
 }

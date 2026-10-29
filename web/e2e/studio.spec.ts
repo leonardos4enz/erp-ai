@@ -38,22 +38,46 @@ test.beforeAll(async () => {
         res.end(JSON.stringify({ type: 'model', id: 'claude-sonnet-5-5', display_name: 'Claude Sonnet 5.5', created_at: '2026-01-01T00:00:00Z' }));
         return;
       }
-      const body = JSON.parse(raw) as { messages: { role: string; content: unknown }[] };
+      const body = JSON.parse(raw) as { stream?: boolean; messages: { role: string; content: unknown }[] };
       const tag = /\[guion:([a-z0-9-]+)\]/.exec(JSON.stringify(body.messages[0]?.content))?.[1] ?? '';
       const turn = body.messages.filter((m) => m.role === 'assistant').length;
       received.push({ tag, turn });
       const next = scripts[tag]?.(turn) ?? { blocks: [say('Sin guion.')] };
       if (next.hold) { held.push(res); return; }
-      const reply = JSON.stringify({
+      const message = {
         id: `msg_e2e_${received.length}`, type: 'message', role: 'assistant', model: 'claude-sonnet-5-5', content: next.blocks,
         stop_reason: next.blocks.some((b) => b.type === 'tool_use') ? 'tool_use' : 'end_turn', stop_sequence: null,
         usage: { input_tokens: 1500, output_tokens: 250 },
-      });
-      setTimeout(() => res.end(reply), next.delayMs ?? 0);
+      };
+      // Spec 036: Studio pide la respuesta en streaming (SSE), como la API real.
+      setTimeout(() => (body.stream ? streamMessage(res, message) : res.end(JSON.stringify(message))), next.delayMs ?? 0);
     });
   });
   await new Promise<void>((r) => server.listen(PORTS.asistente, '127.0.0.1', r));
 });
+
+/** Spec 036: la respuesta como eventos SSE de la API de mensajes (texto en trozos, entrada de herramienta como JSON parcial). */
+function streamMessage(res: ServerResponse, msg: { content: Block[]; stop_reason: string; usage: { input_tokens: number; output_tokens: number } } & Record<string, unknown>) {
+  res.setHeader('content-type', 'text/event-stream');
+  const ev = (type: string, data: object) => res.write(`event: ${type}
+data: ${JSON.stringify({ type, ...data })}
+
+`);
+  ev('message_start', { message: { ...msg, content: [], stop_reason: null, usage: { input_tokens: msg.usage.input_tokens, output_tokens: 1 } } });
+  msg.content.forEach((b, index) => {
+    if (b.type === 'text') {
+      ev('content_block_start', { index, content_block: { type: 'text', text: '' } });
+      for (let i = 0; i < b.text.length; i += 20) ev('content_block_delta', { index, delta: { type: 'text_delta', text: b.text.slice(i, i + 20) } });
+    } else {
+      ev('content_block_start', { index, content_block: { type: 'tool_use', id: b.id, name: b.name, input: {} } });
+      ev('content_block_delta', { index, delta: { type: 'input_json_delta', partial_json: JSON.stringify(b.input) } });
+    }
+    ev('content_block_stop', { index });
+  });
+  ev('message_delta', { delta: { stop_reason: msg.stop_reason, stop_sequence: null }, usage: { output_tokens: msg.usage.output_tokens } });
+  ev('message_stop', {});
+  res.end();
+}
 
 // ---------------- Sesiones de API ----------------
 const apis: Record<string, APIRequestContext> = {};
@@ -188,7 +212,9 @@ test('H2 CA1 CA2: el avance llega en vivo con pasos expandibles y consumo contra
   scripts.vivo = steps(
     { blocks: [say('Voy a revisar el catálogo de tareas.'), tool('listar_catalogos')], delayMs: 1500 },
     { blocks: [tool('ver_catalogo', { entity: 'StE2eTarea' })], delayMs: 1500 },
-    { blocks: [tool('compilar_plan', { plan: PLAN_PESO })], delayMs: 1500 },
+    // Spec 036 (VERIFY): con --lento, el estado «Trabajando» del historial (abajo) duraba menos que las lecturas retrasadas; este
+    // paso lo sostiene lo suficiente para mirarlo (carrera de la prueba, R-030-5).
+    { blocks: [tool('compilar_plan', { plan: PLAN_PESO })], delayMs: 5000 },
     { blocks: [tool('aislado_aplicar_plan', { plan: PLAN_PESO }), tool('aislado_crear', { entity: 'StE2eTarea', values: { Nombre: 'Negativa', Peso: -1 } }),
       tool('aislado_crear', { entity: 'StE2eTarea', values: { Nombre: 'Positiva', Peso: 2.5 } })], delayMs: 1000 },
     deliver({

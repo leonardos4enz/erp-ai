@@ -83,7 +83,8 @@ le den lo que la persona no ve.
    todo probado en integración) y la **034 — ERP AI Studio: pantalla** (Configuración › ERP AI Studio, capacidad
    *modelador*: pedido, plan, pasos expandibles, avance en vivo, propuesta y «Revisar y aplicar»; claro/oscuro, móvil,
    accesible) consume el contrato de esta. Se renumera: **035 servidor MCP**, **036 Ventas**, **037 CFDI 4.0**. (La auditoría 6
-   abrió la **034 — Endurecimiento 5** antes de la pantalla: pantalla **035**, MCP **036**, Ventas **037**, CFDI 4.0 **038**.)
+   abrió la **034 — Endurecimiento 5** antes de la pantalla: pantalla **035**, MCP **036**, Ventas **037**, CFDI 4.0 **038**. La 036 —
+   Studio como chat— se dividió en motor y pantalla de chat (037): MCP **038**, Ventas **039**, CFDI 4.0 **040**.)
 2. **Entorno aislado: base aparte, no transacción revertida.** Una transacción que se revierte sobre la base real deja
    `ALTER TABLE` con bloqueo de esquema (Sch-M) sobre tablas reales mientras el agente prueba (bloquea a todos los que leen
    esa tabla), consume identidades, encola webhooks y automatizaciones reales dentro de la transacción y obliga a que todo el
@@ -100,12 +101,12 @@ le den lo que la persona no ve.
    (`Studio:InputUsdPerMTok`, `Studio:OutputUsdPerMTok`; por omisión los públicos de Sonnet 5.5: 2 y 10).
 6. **Leer registros es opt-in** (alcance `datos`): la 011 nunca mandó registros al proveedor; Studio solo lo hace si la
    persona lo pide para esa sesión, con su alcance de lectura.
-7. **Lista para la 036 (MCP; antes 035):** el catálogo y el despachador no dependen del bucle: el servidor MCP expondrá las mismas
+7. **Lista para la 038 (MCP; antes 035 y 036):** el catálogo y el despachador no dependen del bucle: el servidor MCP expondrá las mismas
    herramientas con la identidad del token y sus alcances (`modelo`, `datos`, `aislado`), sin código nuevo por herramienta.
 
 ## Fuera de alcance (anotado en el roadmap)
 - La pantalla ERP AI Studio (**035**; era la 034 antes del Endurecimiento 5).
-- El servidor MCP remoto con OAuth *authorization code* + PKCE, consentimiento por alcances y revocación (**036**).
+- El servidor MCP remoto con OAuth *authorization code* + PKCE, consentimiento por alcances y revocación (**038**; antes 036).
 - Probar en el entorno aislado como otro rol o usuario; copiar datos de ejemplo del entorno real.
 - Entregar como paquete del 009 firmado (hoy: Plan de Cambios; en un entorno con aprobación se exporta desde el entorno de
   pruebas como siempre).

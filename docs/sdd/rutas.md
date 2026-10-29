@@ -9,7 +9,7 @@ sin compuerta, si es costosa sin límite o si aplica lo revisado sin huella. `we
 Capacidades: **anónima** (lista blanca) · **sesión** (lo propio del usuario) · **registros** (el motor exige permiso del
 catálogo, alcance por registro y seguridad por campo) · **modelador** · **usuarios** · **auditoría** · **superusuario**.
 
-Total: 149 rutas.
+Total: 151 rutas.
 
 | Método | Ruta | Capacidad | Efecto | Compuerta | Costosa | Huella |
 |---|---|---|---|---|---|---|
@@ -141,6 +141,8 @@ Total: 149 rutas.
 | POST | `/api/studio/sessions/{id:int}/apply` | modelador | modelo | cambio directo |  | reviewHash |
 | POST | `/api/studio/sessions/{id:int}/cancel` | modelador | sesión |  |  |  |
 | POST | `/api/studio/sessions/{id:int}/discard` | modelador | sesión |  |  |  |
+| POST | `/api/studio/sessions/{id:int}/messages` | modelador | sesión |  | otro turno del agente, que llama al modelo de lenguaje por pasos (Studio:MaxTurns, los topes de la conversación, Studio:CostPerDayUsd y una conversación activa por persona) |  |
+| GET | `/api/studio/sessions/{id:int}/stream` | modelador |  |  | una conexión abierta (SSE) que sigue la conversación (Studio:MaxStreamsPerUser y Studio:StreamSeconds) |  |
 | GET | `/api/studio/tools` | modelador |  |  |  |  |
 | GET | `/api/users/lookup` | sesión |  |  |  |  |
 | GET | `/api/views/{entity}/` | registros |  |  |  |  |

@@ -4,7 +4,7 @@
 - [x] `git rev-list --count origin/main..main` = 0 (`ad0534b`).
 - [x] Última corrida de CI en `main` (`ad0534b`): verde.
 - [x] Hallazgos de la auditoría 6 reconfirmados en el código (A-01 a A-07, R-009-1, R-033-5).
-- [x] Roadmap renumerado (035 pantalla de Studio, 036 MCP, 037 Ventas, 038 CFDI 4.0) y referencias en ADR-0008, riesgos y spec 033.
+- [x] Roadmap renumerado (035 pantalla de Studio, 036 MCP, 037 Ventas, 038 CFDI 4.0; la 036 los recorrió: MCP 038, Ventas 039, CFDI 4.0 040) y referencias en ADR-0008, riesgos y spec 033.
 
 ## 1. H1 — Nadie actúa sobre quien tiene más (A-01)
 - [x] `RequireActOnAsync` en `UpdateUserCore`: contraseña, activación, unidad o empresas sobre un destino con capacidades

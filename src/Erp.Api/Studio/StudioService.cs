@@ -12,16 +12,20 @@ namespace Erp.Api.Studio;
 
 public sealed record StudioStartBody(string? Prompt, IReadOnlyList<string>? Scopes);
 public sealed record StudioApplyBody(string? ReviewHash);
+/// <summary>Spec 036: mensaje de seguimiento en una conversación.</summary>
+public sealed record StudioMessageBody(string? Text);
 
 public sealed record StudioLimits(int MaxSteps, int MaxToolCalls, long MaxTokens, int MaxMinutes, decimal MaxCostUsd, decimal CostPerDayUsd,
-    int SessionsPerDay, int MaxPromptChars);
+    int SessionsPerDay, int MaxPromptChars, int MaxTurns);
 
 public sealed record StudioStatusDto(bool Configured, string? Model, bool SandboxAvailable, StudioLimits Limits, int SessionsToday,
     decimal CostTodayUsd, int? Active, bool DirectChanges);
 
-public sealed record StudioSummaryDto(int Id, string Title, string Status, DateTime CreatedAt, DateTime? FinishedAt, int Steps, decimal CostUsd);
+public sealed record StudioSummaryDto(int Id, string Title, string Status, DateTime CreatedAt, DateTime? FinishedAt, int Steps, decimal CostUsd,
+    int Turns, DateTime UpdatedAt);
 
-public sealed record StudioStepDto(int Seq, string Kind, string? Tool, string Status, string Summary, JsonNode? Input, JsonNode? Output, int DurationMs, DateTime At);
+public sealed record StudioStepDto(int Seq, string Kind, string? Tool, string Status, string Summary, JsonNode? Input, JsonNode? Output, int DurationMs, DateTime At,
+    int Turn);
 
 public sealed record StudioReport(IReadOnlyList<JsonNode?> Tested, IReadOnlyList<string> Failures, IReadOnlyList<string> Risks);
 
@@ -52,6 +56,13 @@ public sealed record StudioSessionDto
     public DateTime? AppliedAt { get; init; }
     public int? ChangeSetId { get; init; }
     public IReadOnlyList<StudioStepDto> Trail { get; init; } = [];
+    /// <summary>Spec 036: mensajes de la persona en la conversación.</summary>
+    public int Turns { get; init; } = 1;
+    /// <summary>Spec 036: la propuesta vigente (<c>proposed</c>), aplicada o descartada; null sin propuesta.</summary>
+    public string? PlanStatus { get; init; }
+    /// <summary>Spec 036: si la persona puede mandar otro mensaje ahora, y si no, por qué.</summary>
+    public bool CanSend { get; init; }
+    public string? SendBlockedReason { get; init; }
 }
 
 /// <summary>
@@ -61,7 +72,7 @@ public sealed record StudioSessionDto
 /// </summary>
 public sealed class StudioService(Db db, MetadataStore store, PlanService plans, StudioOptions options, AssistantOptions assistant,
     AssistantKeys keys, RouteDispatcher routes, SandboxFactory sandboxes, JsonSerializerOptions json, EnvironmentOptions environment,
-    ILogger<StudioService> log)
+    StudioSignals signals, ILogger<StudioService> log)
 {
     public static IReadOnlySet<string> ParseScopes(string? scopes) =>
         new HashSet<string>((scopes ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries).Append(StudioScopes.Model), StringComparer.Ordinal);
@@ -86,15 +97,22 @@ public sealed class StudioService(Db db, MetadataStore store, PlanService plans,
         var configured = (await keys.InfoAsync(ct)).Source is not null;
         return new(configured, configured ? assistant.Model : null, options.Sandbox,
             new(options.MaxSteps, options.MaxToolCalls, options.MaxTokens, options.MaxMinutes, options.MaxCostUsd, options.CostPerDayUsd,
-                options.SessionsPerDay, options.MaxPromptChars),
+                options.SessionsPerDay, options.MaxPromptChars, options.MaxTurns),
             sessions, cost / 1_000_000m, active, environment.DirectChanges);
     }
 
-    private static async Task<(int Sessions, long CostMicros)> TodayAsync(DbConnection cn, DbTransaction? tx, int userId) =>
+    /// <summary>
+    /// Sesiones pedidas en 24 horas y el costo del día. Revisión adversarial 036 (F-01): el costo cuenta toda conversación
+    /// con actividad en 24 horas (no solo las creadas): seguir conversaciones de días anteriores no rodea el tope. Cuenta de
+    /// más lo gastado en ellas antes de ayer (a favor del tope).
+    /// </summary>
+    internal static async Task<(int Sessions, long CostMicros)> TodayAsync(DbConnection cn, DbTransaction? tx, int userId, int? except = null) =>
         await cn.QuerySingleAsync<(int, long)>("""
-            SELECT COUNT(*), ISNULL(SUM(CostMicros + ReservedMicros), 0) FROM meta.StudioSession
-             WHERE UserId = @userId AND CreatedAt > DATEADD(day, -1, SYSUTCDATETIME())
-            """, new { userId }, tx);
+            SELECT ISNULL(SUM(CASE WHEN CreatedAt > DATEADD(day, -1, SYSUTCDATETIME()) THEN 1 ELSE 0 END), 0),
+                   ISNULL(SUM(CostMicros + ReservedMicros), 0) FROM meta.StudioSession
+             WHERE UserId = @userId AND (@except IS NULL OR Id <> @except)
+               AND (CreatedAt > DATEADD(day, -1, SYSUTCDATETIME()) OR LastActivityAt > DATEADD(day, -1, SYSUTCDATETIME()))
+            """, new { userId, except }, tx);
 
     public async Task<StudioSessionDto> StartAsync(StudioStartBody body, HttpContext http, CancellationToken ct)
     {
@@ -131,6 +149,8 @@ public sealed class StudioService(Db db, MetadataStore store, PlanService plans,
                 INSERT meta.StudioSession (UserId, CompanyId, SecurityStamp, Prompt, Scopes, Status, Model)
                 OUTPUT inserted.Id VALUES (@UserId, @CompanyId, @Stamp, @prompt, @Scopes, 'queued', @Model)
                 """, new { UserId = user.Id, CompanyId = user.Company?.Id, Stamp = user.SecurityStamp, prompt, Scopes = string.Join(' ', scopes), assistant.Model }, tx);
+            // Spec 036: el pedido es el primer mensaje de la conversación (paso «user» y primer mensaje del historial).
+            await UserMessageAsync(cn, tx, id, 1, prompt);
             await Audit.WriteAsync(cn, tx, http, AuditActions.StudioStart, entity: "studio", recordId: id.ToString(),
                 after: new { scopes = scopes.Prepend(StudioScopes.Model).ToArray(), model = assistant.Model });
             await tx.CommitAsync(ct);
@@ -138,13 +158,89 @@ public sealed class StudioService(Db db, MetadataStore store, PlanService plans,
         return await GetAsync(id, null, user, ct);
     }
 
+    private const string Working = "El agente está trabajando en esta conversación: espera a que termine o detenlo.";
+
+    /// <summary>
+    /// Spec 036 (H1): un mensaje de seguimiento encola otro turno de la conversación. Bajo el bloqueo de la fila y el de la
+    /// persona (el mismo de pedir una sesión): dueña, sin turno en curso, sin otra conversación en curso, topes de la
+    /// conversación y del día. El mensaje toma la identidad y la empresa actuales de quien lo manda (H1 CA4).
+    /// </summary>
+    public async Task<StudioSessionDto> SendAsync(int id, StudioMessageBody body, HttpContext http, CancellationToken ct)
+    {
+        var user = http.CurrentUser();
+        if (await keys.GetAsync(ct) is null)
+            throw new AppException(StatusCodes.Status503ServiceUnavailable, "ERP AI Studio usa la clave del asistente: un administrador debe guardarla en Configuración › Asistente IA.");
+        var text = body.Text?.Trim() ?? "";
+        if (text.Length == 0) throw Invalid("text", "Escribe tu mensaje.");
+        if (text.Length > options.MaxPromptChars) throw Invalid("text", $"El mensaje admite hasta {options.MaxPromptChars} caracteres.");
+
+        await using (var cn = await db.OpenAsync(ct))
+        await using (var tx = await cn.BeginTransactionAsync(ct))
+        {
+            await LockAsync(cn, tx, user.Id);
+            var s = (await cn.QueryAsync<(string Status, int Turns, int Steps, int ToolCalls, long Tokens, long CostMicros, int Messages)>("""
+                SELECT Status, Turns, Steps, ToolCalls, InputTokens + OutputTokens, CostMicros,
+                       (SELECT COUNT(*) FROM meta.StudioMessage m WHERE m.SessionId = s.Id)
+                  FROM meta.StudioSession s WITH (UPDLOCK, ROWLOCK) WHERE Id = @id AND UserId = @UserId
+                """, new { id, UserId = user.Id }, tx)).SingleOrDefault();
+            if (s.Status is null) throw new NotFound("La sesión no existe.");
+            if (StudioStatus.Active(s.Status)) throw new Conflict(Working);
+            if (s.Messages == 0) throw new Conflict("Esta sesión es anterior al chat de ERP AI Studio: empieza una conversación nueva.");
+            if (await cn.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM meta.StudioSession WHERE UserId = @UserId AND Id <> @id AND Status IN ('queued', 'running')",
+                    new { id, UserId = user.Id }, tx) > 0)
+                throw new Conflict("Tienes otra conversación de ERP AI Studio en curso: espera a que termine o detenla.");
+            // H2 CA2: lo que ya no cabe se rechaza antes de encolar (el turno fallaría sin hacer nada).
+            string? limit = s.Turns >= options.MaxTurns ? $"Esta conversación llegó al tope de {options.MaxTurns} mensajes: empieza una nueva."
+                : s.Steps >= options.MaxSteps ? $"Esta conversación llegó al tope de {options.MaxSteps} pasos: empieza una nueva."
+                : s.ToolCalls >= options.MaxToolCalls ? $"Esta conversación llegó al tope de {options.MaxToolCalls} herramientas: empieza una nueva."
+                : s.Tokens + options.MaxTokensPerCall > options.MaxTokens ? $"Esta conversación llegó al tope de {options.MaxTokens:N0} tokens: empieza una nueva."
+                : s.CostMicros >= options.MaxCostMicros ? $"Esta conversación llegó a su costo máximo ({options.MaxCostUsd} USD): empieza una nueva."
+                : (await TodayAsync(cn, tx, user.Id)).CostMicros >= options.CostPerDayMicros ? $"Alcanzaste el costo máximo de {options.CostPerDayUsd} USD de ERP AI Studio en 24 horas."
+                : null;
+            if (limit is not null) throw new AppException(StatusCodes.Status429TooManyRequests, limit);
+
+            var turn = s.Turns + 1;
+            await cn.ExecuteAsync("""
+                UPDATE meta.StudioSession SET Status = 'queued', Turns = @turn, SecurityStamp = @Stamp, CompanyId = @CompanyId, ErrorCode = NULL,
+                       CancelRequested = 0, LastActivityAt = SYSUTCDATETIME()
+                 WHERE Id = @id
+                """, new { id, turn, Stamp = user.SecurityStamp, CompanyId = user.Company?.Id }, tx);
+            await UserMessageAsync(cn, tx, id, turn, text);
+            await Audit.WriteAsync(cn, tx, http, AuditActions.StudioMessage, entity: "studio", recordId: id.ToString(),
+                after: new { turn, length = text.Length });
+            await tx.CommitAsync(ct);
+        }
+        signals.Pulse(id);
+        return await GetAsync(id, int.MaxValue, user, ct);
+    }
+
+    /// <summary>
+    /// Spec 036 (H1 CA2): el mensaje de la persona como paso «user» del turno y como mensaje del historial. Solo con la sesión
+    /// no activa y su fila bloqueada (o recién creada): ningún trabajador escribe a la vez.
+    /// </summary>
+    private static async Task UserMessageAsync(DbConnection cn, DbTransaction tx, int id, int turn, string text)
+    {
+        await cn.ExecuteAsync("""
+            INSERT meta.StudioStep (SessionId, Seq, Kind, Tool, InputJson, OutputJson, Status, Summary, DurationMs, Turn)
+            SELECT @id, ISNULL(MAX(Seq), 0) + 1, 'user', NULL, NULL, @output, 'ok', @summary, 0, @turn FROM meta.StudioStep WITH (UPDLOCK, HOLDLOCK) WHERE SessionId = @id;
+            INSERT meta.StudioMessage (SessionId, Seq, FromUser, ContentJson, HasData)
+            SELECT @id, ISNULL(MAX(Seq), 0) + 1, 1, @content, 0 FROM meta.StudioMessage WITH (UPDLOCK, HOLDLOCK) WHERE SessionId = @id;
+            """, new
+        {
+            id, turn, output = new JsonObject { ["text"] = text }.ToJsonString(), summary = StudioAgent.Cut(text, 400),
+            content = StudioTranscript.Serialize([new StudioText(StudioPrompt.Request(text))]),
+        }, tx);
+    }
+
     public async Task<IReadOnlyList<StudioSummaryDto>> ListAsync(UserContext user, CancellationToken ct)
     {
         await using var cn = await db.OpenAsync(ct);
-        return (await cn.QueryAsync<(int Id, string Prompt, string Status, DateTime CreatedAt, DateTime? FinishedAt, int Steps, long CostMicros)>("""
-            SELECT TOP 30 Id, Prompt, Status, CreatedAt, FinishedAt, Steps, CostMicros FROM meta.StudioSession WHERE UserId = @Id ORDER BY Id DESC
+        // Spec 036: como un chat, la conversación con actividad más reciente primero.
+        return (await cn.QueryAsync<(int Id, string Prompt, string Status, DateTime CreatedAt, DateTime? FinishedAt, int Steps, long CostMicros, int Turns, DateTime LastActivityAt)>("""
+            SELECT TOP 30 Id, Prompt, Status, CreatedAt, FinishedAt, Steps, CostMicros, Turns, LastActivityAt FROM meta.StudioSession
+             WHERE UserId = @Id ORDER BY LastActivityAt DESC, Id DESC
             """, new { user.Id })).Select(r => new StudioSummaryDto(r.Id, r.Prompt.Length <= 80 ? r.Prompt : r.Prompt[..77].TrimEnd() + "…",
-            r.Status, Utc(r.CreatedAt), Utc(r.FinishedAt), r.Steps, r.CostMicros / 1_000_000m)).ToList();
+            r.Status, Utc(r.CreatedAt), Utc(r.FinishedAt), r.Steps, r.CostMicros / 1_000_000m, r.Turns, Utc(r.LastActivityAt))).ToList();
     }
 
     public async Task<StudioSessionDto> GetAsync(int id, int? after, UserContext user, CancellationToken ct)
@@ -156,7 +252,7 @@ public sealed class StudioService(Db db, MetadataStore store, PlanService plans,
             row = (await cn.QueryAsync<Row>(SelectRow + " WHERE Id = @id AND UserId = @UserId", new { id, UserId = user.Id })).SingleOrDefault()
                   ?? throw new NotFound("La sesión no existe.");
             steps = (await cn.QueryAsync<StepRow>("""
-                SELECT Seq, Kind, Tool, Status, Summary, InputJson, OutputJson, DurationMs, CreatedAt FROM meta.StudioStep
+                SELECT Seq, Kind, Tool, Status, Summary, InputJson, OutputJson, DurationMs, CreatedAt, Turn FROM meta.StudioStep
                  WHERE SessionId = @id AND Seq > @after ORDER BY Seq
                 """, new { id, after = after ?? 0 })).ToList();
         }
@@ -167,11 +263,14 @@ public sealed class StudioService(Db db, MetadataStore store, PlanService plans,
     public async Task<StudioSessionDto> CancelAsync(int id, HttpContext http, CancellationToken ct)
     {
         var user = http.CurrentUser();
+        Guid? stopLease;
         await using (var cn = await db.OpenAsync(ct))
         await using (var tx = await cn.BeginTransactionAsync(ct))
         {
-            var status = await cn.ExecuteScalarAsync<string?>("SELECT Status FROM meta.StudioSession WITH (UPDLOCK, ROWLOCK) WHERE Id = @id AND UserId = @UserId",
-                new { id, UserId = user.Id }, tx) ?? throw new NotFound("La sesión no existe.");
+            var (status, lease) = (await cn.QueryAsync<(string, Guid?)>("SELECT Status, LeaseToken FROM meta.StudioSession WITH (UPDLOCK, ROWLOCK) WHERE Id = @id AND UserId = @UserId",
+                new { id, UserId = user.Id }, tx)).SingleOrDefault();
+            if (status is null) throw new NotFound("La sesión no existe.");
+            stopLease = lease;
             if (status == StudioStatus.Queued)
                 await cn.ExecuteAsync("UPDATE meta.StudioSession SET Status = 'cancelled', ErrorCode = 'cancelled', FinishedAt = SYSUTCDATETIME() WHERE Id = @id", new { id }, tx);
             else if (status == StudioStatus.Running)
@@ -181,6 +280,9 @@ public sealed class StudioService(Db db, MetadataStore store, PlanService plans,
             await Audit.WriteAsync(cn, tx, http, AuditActions.StudioCancel, entity: "studio", recordId: id.ToString(), after: new { status });
             await tx.CommitAsync(ct);
         }
+        // Spec 036 (H5 CA4): si el turno corre en este proceso, se corta ya (no al renovar el lease). Revisión adversarial 036
+        // (F-08): solo el turno que se pidió detener (su lease), no uno que empiece después.
+        if (stopLease is { } l) signals.Stop(id, l);
         return await GetAsync(id, null, user, ct);
     }
 
@@ -190,10 +292,14 @@ public sealed class StudioService(Db db, MetadataStore store, PlanService plans,
         await using (var cn = await db.OpenAsync(ct))
         await using (var tx = await cn.BeginTransactionAsync(ct))
         {
-            var status = await cn.ExecuteScalarAsync<string?>("SELECT Status FROM meta.StudioSession WITH (UPDLOCK, ROWLOCK) WHERE Id = @id AND UserId = @UserId",
-                new { id, UserId = user.Id }, tx) ?? throw new NotFound("La sesión no existe.");
-            if (status != StudioStatus.Proposed) throw new Conflict("Solo se descarta una propuesta vigente.");
-            await cn.ExecuteAsync("UPDATE meta.StudioSession SET Status = 'discarded' WHERE Id = @id", new { id }, tx);
+            var (status, planStatus) = (await cn.QueryAsync<(string, string?)>("SELECT Status, PlanStatus FROM meta.StudioSession WITH (UPDLOCK, ROWLOCK) WHERE Id = @id AND UserId = @UserId",
+                new { id, UserId = user.Id }, tx)).SingleOrDefault();
+            if (status is null) throw new NotFound("La sesión no existe.");
+            // Spec 036: la propuesta vigente (PlanStatus), nunca mientras un turno corre.
+            if (StudioStatus.Active(status)) throw new Conflict(Working);
+            if (planStatus != StudioStatus.Proposed) throw new Conflict("Solo se descarta una propuesta vigente.");
+            // Revisión adversarial 036 (F-07): el error de un turno anterior no se arrastra al nuevo estado.
+            await cn.ExecuteAsync("UPDATE meta.StudioSession SET Status = 'discarded', PlanStatus = 'discarded', ErrorCode = NULL, LastActivityAt = SYSUTCDATETIME() WHERE Id = @id", new { id }, tx);
             await Audit.WriteAsync(cn, tx, http, AuditActions.StudioDiscard, entity: "studio", recordId: id.ToString());
             await tx.CommitAsync(ct);
         }
@@ -211,8 +317,10 @@ public sealed class StudioService(Db db, MetadataStore store, PlanService plans,
         {
             var row = (await cn.QueryAsync<Row>(SelectRow + " WITH (UPDLOCK, ROWLOCK) WHERE Id = @id AND UserId = @UserId", new { id, UserId = user.Id }, tx))
                 .SingleOrDefault() ?? throw new NotFound("La sesión no existe.");
-            if (row.Status != StudioStatus.Proposed || row.PlanJson is null)
-                throw new Conflict(row.Status switch
+            // Spec 036 (H3 CA2): la propuesta vigente, y nunca mientras un turno corre (podría reemplazarla).
+            if (StudioStatus.Active(row.Status)) throw new Conflict(Working);
+            if (row.PlanStatus != StudioStatus.Proposed || row.PlanJson is null)
+                throw new Conflict(row.PlanStatus switch
                 {
                     StudioStatus.Applied => "Esta propuesta ya se aplicó.",
                     StudioStatus.Discarded => "Esta propuesta se descartó.",
@@ -231,7 +339,7 @@ public sealed class StudioService(Db db, MetadataStore store, PlanService plans,
                     Assistant.ReviewHash.Of(row.PlanJson, compiled.Preview, PlanWarnings.For(plan, model), baseHash), StringComparison.OrdinalIgnoreCase))
                 throw new Conflict("El modelo cambió desde que revisaste la propuesta: revisa la vista previa actualizada antes de aplicarla.");
             changeSetId = await plans.ApplyInTransactionAsync(cn, tx, plan, http);
-            await cn.ExecuteAsync("UPDATE meta.StudioSession SET Status = 'applied', AppliedAt = SYSUTCDATETIME(), ChangeSetId = @changeSetId WHERE Id = @id",
+            await cn.ExecuteAsync("UPDATE meta.StudioSession SET Status = 'applied', PlanStatus = 'applied', ErrorCode = NULL, AppliedAt = SYSUTCDATETIME(), ChangeSetId = @changeSetId, LastActivityAt = SYSUTCDATETIME() WHERE Id = @id",
                 new { id, changeSetId }, tx);
             await Audit.WriteAsync(cn, tx, http, AuditActions.StudioApply, entity: "studio", recordId: id.ToString(),
                 after: new { changeSetId, operations = plan.Operations.Count });
@@ -249,14 +357,15 @@ public sealed class StudioService(Db db, MetadataStore store, PlanService plans,
     /// </summary>
     internal async Task<int> ExpireAsync(CancellationToken ct)
     {
-        List<(int Id, int UserId, string? SandboxDb)> expired;
+        List<(int Id, int UserId, string? SandboxDb, Guid? SandboxToken)> expired;
         await using (var cn = await db.OpenAsync(ct))
         await using (var tx = await cn.BeginTransactionAsync(ct))
         {
-            expired = (await cn.QueryAsync<(int, int, string?)>("""
+            expired = (await cn.QueryAsync<(int, int, string?, Guid?)>("""
                 UPDATE meta.StudioSession SET Status = 'interrupted', ErrorCode = 'interrupted', FinishedAt = SYSUTCDATETIME(),
-                       LeaseToken = NULL, LeaseUntil = NULL, CostMicros = CostMicros + ReservedMicros, ReservedMicros = 0
-                OUTPUT inserted.Id, inserted.UserId, inserted.SandboxDb
+                       LeaseToken = NULL, LeaseUntil = NULL, CostMicros = CostMicros + ReservedMicros, ReservedMicros = 0,
+                       LiveJson = NULL, SandboxDb = NULL, SandboxToken = NULL, LastActivityAt = SYSUTCDATETIME()
+                OUTPUT inserted.Id, inserted.UserId, deleted.SandboxDb, deleted.SandboxToken
                  WHERE Status = 'running' AND LeaseUntil < SYSUTCDATETIME()
                 """, transaction: tx)).ToList();
             foreach (var e in expired)
@@ -270,7 +379,7 @@ public sealed class StudioService(Db db, MetadataStore store, PlanService plans,
         foreach (var e in expired)
         {
             log.LogWarning("La sesión de Studio {Id} quedó sin trabajador y se marcó interrumpida", e.Id);
-            if (e.SandboxDb is not null) await sandboxes.DropAsync(e.SandboxDb);
+            if (e.SandboxDb is not null) await sandboxes.DropIfOwnedAsync(e.SandboxDb, e.SandboxToken);
         }
         return expired.Count;
     }
@@ -278,11 +387,44 @@ public sealed class StudioService(Db db, MetadataStore store, PlanService plans,
     internal async Task<StudioClaim?> ClaimAsync(CancellationToken ct)
     {
         await using var cn = await db.OpenAsync(ct);
-        return (await cn.QueryAsync<StudioClaim>("""
+        var row = (await cn.QueryAsync<ClaimRow>("""
             WITH next AS (SELECT TOP 1 * FROM meta.StudioSession WITH (READPAST, UPDLOCK, ROWLOCK) WHERE Status = 'queued' ORDER BY Id)
-            UPDATE next SET Status = 'running', LeaseToken = NEWID(), LeaseUntil = DATEADD(second, @lease, SYSUTCDATETIME()), StartedAt = SYSUTCDATETIME()
-            OUTPUT inserted.Id, inserted.UserId, inserted.CompanyId, inserted.SecurityStamp, inserted.Prompt, inserted.Scopes, inserted.LeaseToken, inserted.StartedAt
+            UPDATE next SET Status = 'running', LeaseToken = NEWID(), LeaseUntil = DATEADD(second, @lease, SYSUTCDATETIME()),
+                   StartedAt = ISNULL(StartedAt, SYSUTCDATETIME()), TurnStartedAt = SYSUTCDATETIME(), CancelRequested = 0, ErrorCode = NULL,
+                   LiveJson = NULL, LastActivityAt = SYSUTCDATETIME()
+            OUTPUT inserted.Id, inserted.UserId, inserted.CompanyId, inserted.SecurityStamp, inserted.Prompt, inserted.Scopes, inserted.LeaseToken,
+                   inserted.StartedAt, inserted.Turns AS Turn, inserted.TurnStartedAt, inserted.Steps, inserted.ToolCalls, inserted.InputTokens,
+                   inserted.OutputTokens, inserted.CostMicros, inserted.SandboxToken
             """, new { lease = options.LeaseSeconds })).SingleOrDefault();
+        return row is null ? null : new StudioClaim(row.Id, row.UserId, row.CompanyId, row.SecurityStamp, row.Prompt, row.Scopes, row.LeaseToken, row.StartedAt)
+        {
+            Turn = row.Turn, TurnStartedAt = row.TurnStartedAt, Steps = row.Steps, ToolCalls = row.ToolCalls, InputTokens = row.InputTokens,
+            OutputTokens = row.OutputTokens, CostMicros = row.CostMicros, SandboxToken = row.SandboxToken,
+        };
+    }
+
+    private sealed record ClaimRow(int Id, int UserId, int? CompanyId, Guid SecurityStamp, string Prompt, string Scopes, Guid LeaseToken, DateTime StartedAt,
+        int Turn, DateTime TurnStartedAt, int Steps, int ToolCalls, long InputTokens, long OutputTokens, long CostMicros, Guid? SandboxToken);
+
+    /// <summary>
+    /// Spec 036 (H4 CA2): suelta y borra las copias aisladas sin uso por <c>Studio:SandboxIdleMinutes</c> y, si se indica una
+    /// conversación que empieza un turno, las demás copias de su persona (una viva por persona).
+    /// </summary>
+    internal async Task<int> ReleaseSandboxesAsync(int? keepFor, CancellationToken ct)
+    {
+        List<(string Name, Guid? Token)> released;
+        await using (var cn = await db.OpenAsync(ct))
+            released = (await cn.QueryAsync<(string, Guid?)>("""
+                UPDATE meta.StudioSession SET SandboxDb = NULL, SandboxToken = NULL
+                OUTPUT deleted.SandboxDb, deleted.SandboxToken
+                 WHERE SandboxDb IS NOT NULL AND Status NOT IN ('queued', 'running')
+                   AND (LastActivityAt < DATEADD(minute, -@idle, SYSUTCDATETIME())
+                        OR (@keep IS NOT NULL AND Id <> @keep AND UserId = (SELECT UserId FROM meta.StudioSession WHERE Id = @keep)))
+                """, new { idle = options.SandboxIdleMinutes, keep = keepFor })).ToList();
+        // Revisión adversarial 036 (F-03): solo la copia con la marca de esa conversación (otra instancia pudo crear ya la del
+        // turno siguiente con el mismo nombre).
+        foreach (var (name, token) in released) await sandboxes.DropIfOwnedAsync(name, token);
+        return released.Count;
     }
 
     internal async Task<int> SweepAsync(CancellationToken ct)
@@ -290,7 +432,8 @@ public sealed class StudioService(Db db, MetadataStore store, PlanService plans,
         return await sandboxes.SweepAsync(async () =>
         {
             await using var cn = await db.OpenAsync(ct);
-            return (await cn.QueryAsync<int>("SELECT Id FROM meta.StudioSession WHERE Status = 'running'")).ToHashSet();
+            // Spec 036: se conservan las copias de los turnos en curso y las asignadas a una conversación (que vencen aparte).
+            return (await cn.QueryAsync<int>("SELECT Id FROM meta.StudioSession WHERE Status = 'running' OR SandboxDb IS NOT NULL")).ToHashSet();
         }, ct);
     }
 
@@ -307,7 +450,9 @@ public sealed class StudioService(Db db, MetadataStore store, PlanService plans,
         PlanPreview? preview = null;
         IReadOnlyList<string> warnings = [];
         string? reviewHash = null;
-        if (plan is not null && r.Status == StudioStatus.Proposed)
+        // Spec 036: se compila la propuesta vigente (PlanStatus), no la de un turno que corre.
+        var vigente = r.PlanStatus == StudioStatus.Proposed && !StudioStatus.Active(r.Status);
+        if (plan is not null && vigente)
         {
             // La propuesta vigente se recompila al leerla: si el modelo cambió, la vista previa (y la huella) lo reflejan.
             var model = await store.GetAsync(ct);
@@ -332,11 +477,13 @@ public sealed class StudioService(Db db, MetadataStore store, PlanService plans,
             Summary = r.Summary, Report = r.ReportJson is null ? null : JsonNode.Parse(r.ReportJson),
             Plan = plan, Preview = preview, Warnings = warnings, ReviewHash = reviewHash,
             CanApply = reviewHash is not null && environment.DirectChanges,
-            BlockedReason = r.Status == StudioStatus.Proposed && !environment.DirectChanges
+            BlockedReason = vigente && !environment.DirectChanges
                 ? "Este entorno exige la aprobación de otro administrador: la propuesta no se aplica aquí. Los cambios al modelo llegan como paquete desde Configuración › Entornos."
                 : null,
             AppliedAt = Utc(r.AppliedAt), ChangeSetId = r.ChangeSetId,
-            Trail = steps.Select(s => new StudioStepDto(s.Seq, s.Kind, s.Tool, s.Status, s.Summary, Parse(s.InputJson), Parse(s.OutputJson), s.DurationMs, Utc(s.CreatedAt))).ToList(),
+            Trail = steps.Select(ToStep).ToList(),
+            Turns = r.Turns, PlanStatus = r.PlanStatus,
+            CanSend = SendBlocked(r) is null, SendBlockedReason = SendBlocked(r),
         };
     }
 
@@ -352,7 +499,7 @@ public sealed class StudioService(Db db, MetadataStore store, PlanService plans,
         catch (JsonException) { return JsonValue.Create(text); }
     }
 
-    private static string FailureMessage(string code, string? summary) => code switch
+    internal static string FailureMessage(string code, string? summary) => code switch
     {
         "limit_steps" or "limit_tools" or "limit_tokens" or "limit_cost" or "limit_day" or "limit_time" => summary ?? "Se alcanzó un tope de la sesión.",
         "identity" => "La sesión se detuvo: tu cuenta cambió (contraseña, estado o permisos).",
@@ -370,14 +517,29 @@ public sealed class StudioService(Db db, MetadataStore store, PlanService plans,
 
     private const string SelectRow = """
         SELECT Id, Prompt, Scopes, Status, ErrorCode, Model, Steps, ToolCalls, InputTokens, OutputTokens, CostMicros, CreatedAt, StartedAt,
-               FinishedAt, Summary, ReportJson, PlanJson, AppliedAt, ChangeSetId FROM meta.StudioSession
+               FinishedAt, Summary, ReportJson, PlanJson, AppliedAt, ChangeSetId, Turns, PlanStatus,
+               (SELECT COUNT(*) FROM meta.StudioMessage m WHERE m.SessionId = meta.StudioSession.Id) AS Messages FROM meta.StudioSession
         """;
 
     private sealed record Row(int Id, string Prompt, string Scopes, string Status, string? ErrorCode, string Model, int Steps, int ToolCalls,
         long InputTokens, long OutputTokens, long CostMicros, DateTime CreatedAt, DateTime? StartedAt, DateTime? FinishedAt, string? Summary,
-        string? ReportJson, string? PlanJson, DateTime? AppliedAt, int? ChangeSetId);
+        string? ReportJson, string? PlanJson, DateTime? AppliedAt, int? ChangeSetId, int Turns, string? PlanStatus, int Messages);
 
-    private sealed record StepRow(int Seq, string Kind, string? Tool, string Status, string Summary, string? InputJson, string? OutputJson, int DurationMs, DateTime CreatedAt);
+    /// <summary>Spec 036: por qué no se puede mandar otro mensaje ahora (lo mismo que comprueba <see cref="SendAsync"/>, sin el día).</summary>
+    private string? SendBlocked(Row r) =>
+        StudioStatus.Active(r.Status) ? Working
+        : r.Messages == 0 ? "Esta sesión es anterior al chat de ERP AI Studio: empieza una conversación nueva."
+        : r.Turns >= options.MaxTurns ? $"Esta conversación llegó al tope de {options.MaxTurns} mensajes: empieza una nueva."
+        : r.Steps >= options.MaxSteps ? $"Esta conversación llegó al tope de {options.MaxSteps} pasos: empieza una nueva."
+        : r.ToolCalls >= options.MaxToolCalls ? $"Esta conversación llegó al tope de {options.MaxToolCalls} herramientas: empieza una nueva."
+        : r.InputTokens + r.OutputTokens + options.MaxTokensPerCall > options.MaxTokens ? $"Esta conversación llegó al tope de {options.MaxTokens:N0} tokens: empieza una nueva."
+        : r.CostMicros >= options.MaxCostMicros ? $"Esta conversación llegó a su costo máximo ({options.MaxCostUsd} USD): empieza una nueva."
+        : null;
+
+    internal static StudioStepDto ToStep(StepRow s) =>
+        new(s.Seq, s.Kind, s.Tool, s.Status, s.Summary, Parse(s.InputJson), Parse(s.OutputJson), s.DurationMs, Utc(s.CreatedAt), s.Turn);
+
+    internal sealed record StepRow(int Seq, string Kind, string? Tool, string Status, string Summary, string? InputJson, string? OutputJson, int DurationMs, DateTime CreatedAt, int Turn);
 }
 
 /// <summary>Spec 033 (H2 CA5): reclama sesiones con lease, marca las interrumpidas y barre las copias aisladas huérfanas.</summary>
@@ -396,8 +558,11 @@ public sealed class StudioDispatcher(IServiceScopeFactory scopes, StudioOptions 
                 using var scope = scopes.CreateScope();
                 var svc = scope.ServiceProvider.GetRequiredService<StudioService>();
                 await svc.ExpireAsync(stoppingToken);
+                await svc.ReleaseSandboxesAsync(null, stoppingToken); // spec 036: copias sin uso
                 while (Volatile.Read(ref running) < options.Workers && await svc.ClaimAsync(stoppingToken) is { } claim)
                 {
+                    // Spec 036 (H4 CA2): una copia viva por persona.
+                    await svc.ReleaseSandboxesAsync(claim.Id, stoppingToken);
                     Interlocked.Increment(ref running);
                     runs.Add(Task.Run(async () =>
                     {

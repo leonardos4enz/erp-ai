@@ -51,6 +51,7 @@ public static class AuditFilter
         AuditActions.AssistantKey, AuditActions.UnitChange, AuditActions.TeamChange, AuditActions.SecurityRequest,
         AuditActions.SecurityApprove, AuditActions.SecurityReject, AuditActions.FileChange, AuditActions.StudioStart,
         AuditActions.StudioFinish, AuditActions.StudioCancel, AuditActions.StudioDiscard, AuditActions.StudioApply,
+        AuditActions.StudioMessage,
     ];
 
     public static bool IsRecordAction(string action) =>
