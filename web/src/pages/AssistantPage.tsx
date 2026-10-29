@@ -338,6 +338,8 @@ function KeyForm({ onSaved, label = 'Clave de API de Anthropic', currentWorkspac
   const [error, setError] = useState<{ apiKey?: string; workspaceId?: string; general?: string }>({});
   async function save(e: FormEvent) {
     e.preventDefault();
+    // Regresión (037, corrida completa): «Guardar y probar» se deshabilita mientras espera y el foco caía en body al rechazo.
+    const form = e.currentTarget as HTMLFormElement;
     setSaving(true);
     setError({});
     try {
@@ -345,9 +347,11 @@ function KeyForm({ onSaved, label = 'Clave de API de Anthropic', currentWorkspac
       setKey('');
       onSaved();
     } catch (err) {
+      const onWorkspace = err instanceof ApiError && !!err.fieldErrors.workspaceId && !err.fieldErrors.apiKey;
       if (err instanceof ApiError && (err.fieldErrors.apiKey || err.fieldErrors.workspaceId))
         setError({ apiKey: err.fieldErrors.apiKey?.join(' '), workspaceId: err.fieldErrors.workspaceId?.join(' ') });
       else setError({ general: err instanceof ApiError ? problemText(err) : 'No se pudo guardar la clave. Revisa tu conexión.' });
+      form.querySelectorAll('input')[onWorkspace ? 1 : 0]?.focus();
     } finally {
       setSaving(false);
     }

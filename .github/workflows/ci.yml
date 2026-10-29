@@ -118,4 +118,6 @@ jobs:
             web/e2e/.results
             web/e2e/.report-primera
             web/e2e/.results-primera
+          # CI de la 037: upload-artifact@v4 omite las carpetas que empiezan con punto; sin esto solo subía el log.
+          include-hidden-files: true
           retention-days: 14

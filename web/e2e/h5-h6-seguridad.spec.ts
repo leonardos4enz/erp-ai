@@ -16,6 +16,11 @@ test.beforeAll(async () => {
 });
 
 test('H5: crear un usuario desde la UI', async ({ page }) => {
+  // Regresión (CI de la 037): las empresas llegaban con el diálogo abierto y el efecto de apertura borraba lo escrito.
+  // Se retiene su respuesta hasta llenar el formulario, como en una red lenta.
+  let release!: () => void;
+  const held = new Promise<void>((r) => { release = r; });
+  await page.route('**/api/admin/companies', async (route) => { await held; await route.continue(); });
   await page.goto('/admin/security');
   await page.getByRole('button', { name: 'Nuevo usuario' }).click();
   const dialog = page.getByRole('dialog');
@@ -23,6 +28,12 @@ test('H5: crear un usuario desde la UI', async ({ page }) => {
   await dialog.getByRole('textbox', { name: /^Nombre/ }).fill('Capturista UI');
   await dialog.getByLabel(/^Contraseña/).fill(capturista.password);
   await dialog.getByRole('checkbox', { name: /^Usuario ·/ }).check(); // rol "Usuario"
+  const companies = page.waitForResponse('**/api/admin/companies');
+  release();
+  await companies;
+  await expect(dialog.getByRole('textbox', { name: /^Usuario/ })).toHaveValue(capturista.username);
+  await expect(dialog.getByLabel(/^Contraseña/)).toHaveValue(capturista.password);
+  await expect(dialog.getByRole('checkbox', { name: /^Usuario ·/ })).toBeChecked();
   await expectAccessible(page);
   await dialog.getByRole('button', { name: 'Crear usuario' }).click();
   await expect(page.getByRole('cell', { name: /ui-capturista/ })).toBeVisible();

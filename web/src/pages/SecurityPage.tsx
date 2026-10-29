@@ -15,7 +15,9 @@ type Tab = 'users' | 'roles' | 'teams' | 'units' | 'requests';
 /** Spec 015: un cambio que amplía acceso en un entorno con aprobación de seguridad queda como solicitud (202). */
 const PENDING_TEXT = 'Solicitud enviada: otro administrador debe aprobarla en Seguridad › Solicitudes';
 
-const isAdminRole = (r: Role) => !!r.isSuperuser || r.canManageModel || r.canManageUsers || r.canViewAudit;
+const NO_COMPANIES: Company[] = [];
+
+const isAdminRole =(r: Role) => !!r.isSuperuser || r.canManageModel || r.canManageUsers || r.canViewAudit;
 
 /** Unidades con sangría por nivel (el servidor las devuelve en orden de árbol). */
 function UnitSelect({ label, units, value, onChange, error, hint, exclude, emptyLabel = '— Sin unidad —' }: {
@@ -63,6 +65,9 @@ function UserDialog({ user, roles, companies, units, open, onClose, onSaved }: {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
   const [local, setLocal] = useState<Record<string, string>>({});
+  // Regresión (CI de la 037): las empresas pueden llegar con el diálogo abierto; no deben borrar lo escrito.
+  const defaultCompanyIds = useMemo(() => companies.filter((c) => c.isDefault).map((c) => c.id), [companies]);
+  const companiesTouched = useRef(false);
 
   useEffect(() => {
     if (!open) return;
@@ -72,10 +77,15 @@ function UserDialog({ user, roles, companies, units, open, onClose, onSaved }: {
     setIsActive(user?.isActive ?? true);
     setRoleIds(user?.roleIds ?? []);
     setUnit(user?.unit ?? '');
-    setCompanyIds(user?.companyIds ?? companies.filter((c) => c.isDefault).map((c) => c.id));
+    setCompanyIds(user?.companyIds ?? []);
+    companiesTouched.current = false;
     setError(null);
     setLocal({});
-  }, [open, user, companies]);
+  }, [open, user]);
+
+  useEffect(() => {
+    if (open && !user && !companiesTouched.current) setCompanyIds(defaultCompanyIds);
+  }, [open, user, defaultCompanyIds]);
 
   async function save() {
     const e: Record<string, string> = {};
@@ -156,7 +166,7 @@ function UserDialog({ user, roles, companies, units, open, onClose, onSaved }: {
                 <Checkbox
                   key={c.id}
                   checked={companyIds.includes(c.id)}
-                  onChange={(v) => setCompanyIds((ids) => (v ? [...ids, c.id] : ids.filter((x) => x !== c.id)))}
+                  onChange={(v) => { companiesTouched.current = true; setCompanyIds((ids) => (v ? [...ids, c.id] : ids.filter((x) => x !== c.id))); }}
                   label={<>{c.name}<span className="subtle"> · {c.code} · {c.baseCurrency}{c.isActive ? '' : ' · inactiva'}</span></>}
                 />
               ))}
@@ -226,7 +236,7 @@ function UsersTab({ roles, units }: { roles: Role[]; units: BusinessUnit[] }) {
           </div>
         </div>
       )}
-      <UserDialog open={open} user={editing} roles={roles} companies={companies ?? []} units={units} onClose={() => setOpen(false)} onSaved={() => { setOpen(false); reload(); }} />
+      <UserDialog open={open} user={editing} roles={roles} companies={companies ?? NO_COMPANIES} units={units} onClose={() => setOpen(false)} onSaved={() => { setOpen(false); reload(); }} />
     </>
   );
 }

@@ -5,11 +5,11 @@
 - cierre: 2026-10-29 15:40
 - unitarias: 852 (+16: 659 de Erp.Tests, sin cambios; 135 de integración, +1; Vitest 58, +15)
 - e2e: 402 (+13: studio.spec.ts reescrito, de 15 a 28 pruebas)
-- corridas completas: 2 (9 min 14 s, 402 en verde, antes de las correcciones de la revisión exploratoria; 9 min 19 s, 402 en verde, con el código final salvo la línea de foco de F-14)
+- corridas completas: 4 (tras CI: 385 + 1 falla F-16; 402 en verde con F-15 y F-16. Antes del push: 9 min 14 s, 402 en verde, antes de las correcciones de la revisión exploratoria; 9 min 19 s, 402 en verde, con el código final salvo la línea de foco de F-14)
 - corridas parciales: 25 (studio.spec.ts al iterar ×6 y con las correcciones ×6; --veces=3 --lento ×6, cuatro en verde; contra el código anterior ×6)
 - contra el código anterior: 9 (F-01 ×2 con dotnet test, F-02 en node, F-03, F-05, F-07, F-11, F-12 y F-13 en studio.spec.ts)
-- hallazgos: 1/3/8
-- categorías: motor-api=1, seguridad=2, concurrencia=2, accesibilidad=4, visual=1, UI=2
+- hallazgos: 1/4/9
+- categorías: motor-api=1, seguridad=2, concurrencia=3, accesibilidad=5, visual=1, UI=2
 - revisión adversarial: 8 hallazgos (1 alto, 2 medios, 5 bajos; 2 descartados al comprobarlos)
 - riesgos: R-037-1, R-037-2, R-037-3
 
@@ -96,6 +96,8 @@ catálogo ya creado: artefacto del simulador, no de la pantalla).
 | F-11 | Baja | visual | (Exploratoria) La fuente monoespaciada convertía `>=` en «≥» en los bloques de código. | `font-variant-ligatures: none` en el código. | `studio.spec.ts › H3 CA1 H2 CA2` (`fontVariantLigatures`) |
 | F-12 | Baja | accesibilidad | (IMPLEMENT, `--lento`) Si el turno terminaba antes de la primera lectura, no se anunciaba cómo terminó. Y (exploratoria) la fecha de «Propuesta aplicada» terminaba en «p.m..». | El estado final se escribe siempre (una región `aria-live` no lee lo que tiene al montarse); sin el punto extra. | `studio.spec.ts › H4 CA2: un turno que falla…` (anuncio) · `› H5 CA2 CA3: …` (fecha) |
 | F-14 | Baja | accesibilidad | (`--veces=3 --lento`, intermitente) Al detener, «Detener respuesta» se deshabilita mientras espera al servidor y el foco caía en `body` hasta que respondía. | El foco pasa al compositor antes de esperar (como F-07). | `studio.spec.ts › H4 CA1 CA2 CA3` (`toBeFocused` tras detener; falló 1 de 3 vueltas lentas antes de corregir) |
+| F-15 | Media | concurrencia | (CI de `e7b5500`, reproducible) En Seguridad › Usuarios, si la lista de empresas llegaba con el diálogo «Nuevo usuario» abierto, el efecto de apertura (que dependía de `companies`) borraba usuario, nombre y contraseña: «Crear usuario» solo mostraba «Requerido». Le pasa a cualquiera con red lenta; anterior a la 037 (la 010), lo destapó el runner más lento. | El diálogo se limpia solo al abrirse; las empresas predeterminadas se completan al llegar sin tocar lo escrito ni lo que la persona marcó; lista vacía estable. | `h5-h6-seguridad.spec.ts › H5: crear un usuario desde la UI` (retiene `/api/admin/companies` hasta llenar el formulario; con el código anterior falla: usuario vacío) |
+| F-16 | Baja | accesibilidad | (Corrida completa tras F-15, intermitente) En el asistente (011), «Guardar y probar» se deshabilita mientras espera y, si el servidor rechazaba la clave (400), el foco caía en `body` (guardia de la suite). | Tras el rechazo, el foco va al campo con el error. | `asistente.spec.ts › H3 CA4: sin clave…` (`toBeFocused` en el campo; con el código anterior falla siempre: «inactive») |
 | F-13 | Baja | UI | (Exploratoria) En móvil había dos encabezados «ERP AI Studio» y dos íconos de panel iguales (el menú de la app y las conversaciones). | En ≤ 900 px el título queda para el lector de pantalla y el botón usa otro ícono. | `studio.spec.ts › H6 CA1 CA2: en móvil…` · capturas `studio-*-movil` |
 
 Carrera de la prueba (no del producto), corregida en la prueba: `H5 CA2 CA3` esperaba al fin del turno, pero no a la
@@ -110,6 +112,9 @@ lectura con la huella antes del cambio ajeno.
 - F-11, F-12 (fecha), F-13: `studio.spec.ts` quitando cada corrección (script de una corrida por hallazgo): fallan
   `H3 CA1 H2 CA2` (ligaduras), `H5 CA2 CA3` (doble punto) y `H6 CA1 CA2` (título visible en móvil). F-12 (anuncio) falló
   en la corrida 8 antes de corregirse.
+- F-15: `h5-h6-seguridad.spec.ts` con la prueba nueva y `SecurityPage.tsx` sin cambiar (falla: `Expected: "ui-capturista"`,
+  `Received: ""`).
+- F-16: `asistente.spec.ts` con `AssistantPage.tsx` de `e7b5500` (falla: el campo no tiene el foco).
 
 ### Lista de comprobación
 **Flujo**
@@ -139,7 +144,24 @@ lectura con la huella antes del cambio ajeno.
 - [x] Hermanos del hallazgo F-01 (`grep StopReason`): el asistente de la 011, corregido con la misma prueba
 - [x] Alcance congelado: ramas, renombrar y borrar conversaciones, razonamiento visible y resaltado de código quedan en el roadmap
 
-## 5. Riesgos residuales
+## 5. CI (segunda corrida completa)
+Corrida [40958150085](https://github.com/leonardos4enz/erp-ai/actions/runs/40958150085) de `e7b5500`: **en rojo**. Unitarias,
+build, Vitest, auditoría e integración en verde; E2E 397 en verde, 1 falla y 4 sin correr (las siguientes del mismo archivo
+en serie): `h5-h6-seguridad.spec.ts › H5: crear un usuario desde la UI`, también sobre base nueva (reproducible). La spec se
+reabrió:
+- En local pasaba sola y en las dos completas; con `--veces=3` (lento) falló en la primera vuelta. El contexto del error
+  mostró el diálogo con los campos vacíos y la casilla del rol marcada: F-15.
+- Prueba con la respuesta de empresas retenida: falla con el código anterior (usuario vacío) sin necesidad de `--lento`;
+  con la corrección, `h5-h6-seguridad.spec.ts --veces=3` en verde (3 × 6). Los otros diálogos con efecto de apertura
+  dependen del registro que abren, no de listas que llegan tarde (`UnitDialog` recibe `units`, ya cargada al abrir).
+- El artefacto `playwright-report` pesaba 18 KB: `upload-artifact@v4` omite las carpetas que empiezan con punto
+  (`.report`, `.results`) y solo subía el log. `ci.yml` agrega `include-hidden-files: true`.
+- Primera completa con F-15: 385 en verde, 1 falla y 16 sin correr: `asistente.spec.ts › H3 CA4`, foco en `body` tras el
+  rechazo de la clave (F-16, intermitente, de la 011). Corregido con prueba; `asistente.spec.ts --veces=3` en verde (3 × 19).
+- Completa con F-15 y F-16: **402 en verde** (9 min 16 s). El resultado de CI de este commit lo anota la spec siguiente al
+  abrir (regla de apertura).
+
+## 6. Riesgos residuales
 Registrados en [riesgos.md](../../riesgos.md#037): R-037-1 (editar y reintentar son mensajes nuevos), R-037-2 (lo leído
 con `datos` en memoria tras un 401 a mitad de turno) y R-037-3 (la entrega vigente se reconoce por su entrada). Se cerró
 R-035-2 (ya no hay sondeo).

@@ -157,10 +157,13 @@ test('H3 CA4: sin clave el asistente lo explica; solo el administrador la guarda
   await field.fill('corta');
   await page.getByRole('button', { name: 'Guardar y probar' }).click();
   await expect(page.getByText('Pega la clave completa de Anthropic')).toBeVisible();
+  // Regresión (037, corrida completa): el botón se deshabilita mientras espera; tras el rechazo el foco va al campo, no a body.
+  await expect(field).toBeFocused();
   verified.marca();
   await field.fill('sk-ant-clave-que-el-proveedor-rechaza-99');
   await page.getByRole('button', { name: 'Guardar y probar' }).click();
   await expect(page.getByText('Anthropic rechazó la clave')).toBeVisible();
+  await expect(field).toBeFocused();
   expect(await verified.siguiente()).toBe('Bearer sk-ant-clave-que-el-proveedor-rechaza-99');
   expect((await (await admin.get('/api/assistant')).json()).configured).toBe(false);
 
