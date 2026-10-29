@@ -322,6 +322,10 @@ export const studioApi = {
   session: (id: number, after?: number, signal?: AbortSignal) =>
     api<StudioSession>(`/studio/sessions/${id}${after === undefined ? '' : `?after=${after}`}`, { signal }),
   start: (prompt: string, scopes: StudioScope[]) => api<StudioSession>('/studio/sessions', { method: 'POST', body: { prompt, scopes } }),
+  /** Spec 036: mensaje de seguimiento (202, sin compilar). */
+  send: (id: number, text: string) => api<StudioSession>(`/studio/sessions/${id}/messages`, { method: 'POST', body: { text } }),
+  /** Spec 036: flujo SSE; la pantalla lo lee con `fetch` (spec 037, CLARIFY 4). */
+  streamUrl: (id: number, after: number) => `/api/studio/sessions/${id}/stream?after=${after}`,
   cancel: (id: number) => api<StudioSession>(`/studio/sessions/${id}/cancel`, { method: 'POST' }),
   discard: (id: number) => api<StudioSession>(`/studio/sessions/${id}/discard`, { method: 'POST' }),
   /** Con la huella de lo revisado; si el modelo cambió, 409. */

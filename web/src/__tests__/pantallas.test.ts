@@ -34,7 +34,7 @@ export const PANTALLAS: Record<string, Pantalla> = {
   'admin/environments': { sinCaptura: 'paquetes e historial de la corrida; entornos.spec.ts (riesgo R-030-3)' },
   'admin/companies': { sinCaptura: 'empresas y tipos de cambio de la corrida; multiempresa.spec.ts (riesgo R-030-3)' },
   'admin/assistant': { sinCaptura: 'conversación simulada; asistente.spec.ts compara sus márgenes con Entornos (011 F-05)' },
-  'admin/studio': { capturas: ['studio.spec.ts/studio-propuesta-light.png', 'studio.spec.ts/studio-propuesta-dark.png', 'studio.spec.ts/studio-propuesta-movil.png'] },
+  'admin/studio': { capturas: ['light', 'dark', 'movil'].flatMap((t) => [`studio.spec.ts/studio-chat-${t}.png`, `studio.spec.ts/studio-bienvenida-${t}.png`]) },
   'admin/audit': { sinCaptura: 'bitácora con fechas de la corrida; seguridad.spec.ts (riesgo R-030-3)' },
   '*': { sinCaptura: 'página de «no encontrado» de una línea' },
 };

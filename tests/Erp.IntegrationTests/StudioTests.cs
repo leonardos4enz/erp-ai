@@ -1140,6 +1140,33 @@ public class StudioProviderTests(StudioProviderTests.Host host) : IClassFixture<
         Assert.Equal(100_200, s["inputTokens"]!.GetValue<long>());
     }
 
+    /// <summary>
+    /// Regresión (spec 037, E2E «H4 CA2»): el motivo de parada del SDK es un enum envuelto; su <c>ToString()</c> no da
+    /// <c>max_tokens</c> ni <c>refusal</c>, así que una respuesta cortada o rechazada contaba como contestada.
+    /// </summary>
+    [Fact]
+    public async Task El_adaptador_real_reconoce_una_respuesta_cortada_y_un_rechazo()
+    {
+        using var admin = await host.AdminAsync();
+        while (host.Replies.TryDequeue(out _)) { }
+        foreach (var (stop, error) in new[] { ("max_tokens", "quedó incompleta"), ("refusal", "no pudo atender") })
+        {
+            host.Replies.Enqueue(_ => (200, Message([new { type = "text", text = "Empiezo y me corto" }], stop)));
+            var res = await admin.PostAsync("/api/studio/sessions", new { prompt = $"Algo ({stop})" });
+            Assert.True(res.Status == 202, res.Text);
+            var s = await WaitForAsync(async () => (await admin.GetAsync($"/api/studio/sessions/{res.Body!.Id()}")).Body!,
+                x => x.Str("status") is not ("queued" or "running"), "sesión terminada", seconds: 60);
+            Assert.True(s.Str("status") == "failed", s.Json());
+            Assert.Contains(error, s.Str("error"));
+        }
+        // El asistente (011) leía el motivo igual: una propuesta cortada se intentaba leer como completa.
+        host.Replies.Enqueue(_ => (200, Message([new { type = "text", text = "{\"explanation\": \"Empiezo" }], "max_tokens")));
+        var a = await admin.PostAsync("/api/assistant/requests", new { prompt = "Algo que no cabe" });
+        Assert.True(a.Body?.Str("status") == "failed", a.Text);
+        // El otro caso de esta clase cuenta las peticiones que recibe el proveedor.
+        while (host.Bodies.TryDequeue(out _)) { }
+    }
+
     [Fact]
     public async Task Una_clave_rechazada_por_el_proveedor_deja_la_sesion_fallida_con_su_motivo()
     {

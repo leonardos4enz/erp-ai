@@ -42,7 +42,7 @@ en orden, no en paralelo: casi todas tocan el núcleo del motor (`PlanCompiler`,
 | 034 Endurecimiento 5 (auditoría 6) | Implementado ([spec](specs/034-endurecimiento-5/spec.md)) |
 | 035 ERP AI Studio: pantalla | Implementado ([spec](specs/035-ai-studio-pantalla/spec.md)) |
 | 036 ERP AI Studio como chat: motor conversacional y streaming | Implementado ([spec](specs/036-ai-studio-chat/spec.md)) |
-| 037 ERP AI Studio: pantalla de chat | Planeado |
+| 037 ERP AI Studio: pantalla de chat | Implementado ([spec](specs/037-ai-studio-chat-pantalla/spec.md)) |
 | 038 Servidor MCP por persona | Planeado |
 | 039 Módulo de Ventas | Planeado |
 | 040 CFDI 4.0 con PAC | Planeado |
@@ -522,7 +522,7 @@ claude.ai. En CLARIFY se dividió (seguridad y concurrencia junto con UI nueva, 
 - **Pendiente (diferido con razón):** la pantalla de chat (037); razonamiento extendido visible; ramas de la conversación;
   cambiar de alcances a mitad; borrar o renombrar conversaciones.
 
-### 037 — ERP AI Studio: pantalla de chat (planeada)
+### 037 — ERP AI Studio: pantalla de chat
 Reemplaza la pantalla de la 035 con un chat que se comporta como el de Claude web, aplicando el
 [análisis de la 036](specs/036-ai-studio-chat/analisis-claude-web.md) con la identidad de ERP AI (tokens, claro/oscuro,
 Lucide): barra de conversaciones a la izquierda, columna de ~736 px, compositor fijo abajo que crece de 1 a 16 líneas
@@ -531,6 +531,16 @@ texto en vivo con fundido por palabra, herramientas en línea plegables (entrada
 editar el último mensaje, copiar, la propuesta revisable y aplicable desde el chat (huella; R-033-4 y el texto del modelo
 como datos: subconjunto de Markdown construido con elementos de React, sin HTML ni enlaces activos), móvil, `aria-live`,
 foco y movimiento reducido. Consume el contrato de la 036 (`…/messages`, `…/stream`).
+- **Estado:** implementado en la [spec 037](specs/037-ai-studio-chat-pantalla/spec.md), sin cambios del motor ni rutas
+  nuevas. Barra de conversaciones por actividad (panel en ≤ 900 px), bienvenida con saludo, sugerencias y alcances,
+  compositor de 1 línea a 384 px (Enter/Shift+Enter; enviar ↔ detener), el mensaje enviado sube arriba y la respuesta
+  crece sin mover la vista, «Ir al final», flujo SSE con `fetch` y reconexión con espera creciente («Reconectando…», «Sin
+  conexión»), texto en vivo a ~240 car/s con fundido por palabra, herramientas plegables con entrada, salida y error,
+  Markdown seguro propio (sin HTML, enlaces ni imágenes), detener, reintentar, editar el último mensaje (como mensaje
+  nuevo), copiar, propuesta en el chat (vigente o reemplazada; aplicar con huella, descargar, descartar) y consumo en un
+  panel; `role="log"`, estado en `aria-live`, movimiento reducido.
+- **Pendiente (diferido con razón):** ramas (editar un mensaje que no sea el último), renombrar y borrar conversaciones,
+  razonamiento visible, cambiar alcances a mitad, resaltado de sintaxis en el código.
 
 ### 038 — Servidor MCP por persona (planeada; antes 036)
 Servidor MCP remoto para que cada persona conecte su Claude al ERP con exactamente sus permisos: OAuth *authorization code*
@@ -583,7 +593,7 @@ En este orden, por decisión del dueño (2026-10-25):
 5. ~~**034 — Endurecimiento 5**~~ (auditoría 6). Implementado (ver arriba).
 6. ~~**035 — ERP AI Studio: pantalla.**~~ Implementado (ver arriba).
 7. ~~**036 — ERP AI Studio como chat: motor**~~ (pedido del dueño, 2026-10-29). Implementado (ver arriba).
-8. **037 — ERP AI Studio: pantalla de chat.**
+8. ~~**037 — ERP AI Studio: pantalla de chat.**~~ Implementado (ver arriba).
 9. **038 — Servidor MCP por persona** (auditoría 7 al cerrarla).
 10. **039 — Módulo de Ventas:** clientes, cotización, pedido, salida de almacén con costo de ventas (póliza de salidas),
    factura y cobranza. Usa `merge` para extender Producto e Inventario, avisos (límite de crédito) y rutas de tres niveles;

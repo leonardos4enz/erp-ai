@@ -70,7 +70,8 @@ public sealed class AnthropicStudioModel(AnthropicAssistantModel provider, Assis
                 else if (block.TryPickToolUse(out var use)) content.Add(new StudioToolUse(use.ID, use.Name, JsonSerializer.SerializeToElement(use.Input)));
             }
             var u = response.Usage;
-            return new StudioReply(content, response.StopReason?.ToString(), u.InputTokens, u.OutputTokens,
+            // Spec 037 (regresión): el motivo es un enum envuelto del SDK; su `ToString()` no es el valor de la API.
+            return new StudioReply(content, response.StopReason?.Raw(), u.InputTokens, u.OutputTokens,
                 u.CacheReadInputTokens ?? 0, u.CacheCreationInputTokens ?? 0);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }

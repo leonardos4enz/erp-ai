@@ -748,6 +748,8 @@ export interface Conversation { id: number; turns: Proposal[] }
 export interface StudioLimits {
   maxSteps: number; maxToolCalls: number; maxTokens: number; maxMinutes: number; maxCostUsd: number; costPerDayUsd: number;
   sessionsPerDay: number; maxPromptChars: number;
+  /** Spec 036: mensajes de la persona por conversación. */
+  maxTurns: number;
 }
 export interface StudioStatusInfo {
   configured: boolean; model: string | null; sandboxAvailable: boolean; limits: StudioLimits; sessionsToday: number;
@@ -755,7 +757,12 @@ export interface StudioStatusInfo {
 }
 export type StudioSessionStatus = 'queued' | 'running' | 'proposed' | 'answered' | 'failed' | 'cancelled' | 'interrupted' | 'applied' | 'discarded';
 export type StudioScope = 'modelo' | 'datos' | 'aislado';
-export interface StudioSummary { id: number; title: string; status: StudioSessionStatus; createdAt: string; finishedAt?: string; steps: number; costUsd: number }
+export interface StudioSummary {
+  id: number; title: string; status: StudioSessionStatus; createdAt: string; finishedAt?: string; steps: number; costUsd: number;
+  /** Spec 036: la lista viene ordenada por `updatedAt` (última actividad). */
+  turns: number; updatedAt: string;
+}
+export type StudioPlanStatus = 'proposed' | 'applied' | 'discarded';
 /** Un paso del agente: texto del modelo, herramienta, entrega o tope. Entrada y salida son datos no confiables. */
 export interface StudioStep {
   /** Spec 036: `user` es un mensaje de la persona (`output.text`); `turn`, el turno de la conversación. */
@@ -771,7 +778,16 @@ export interface StudioSession {
   /** Solo en la lectura completa (sin `after`): con `after` no se compila (spec 035, R-033-10). */
   plan?: ChangePlan | null; preview?: PlanPreview | null; warnings: string[]; reviewHash?: string | null;
   canApply: boolean; blockedReason?: string | null; appliedAt?: string | null; changeSetId?: number | null; trail: StudioStep[];
+  /** Spec 036: mensajes de la persona; la propuesta vigente (o aplicada/descartada); si se puede mandar otro mensaje y por qué no. */
+  turns: number; planStatus?: StudioPlanStatus | null; canSend: boolean; sendBlockedReason?: string | null;
 }
+/** Spec 036: eventos del flujo SSE (`…/stream`). */
+export interface StudioLive { kind: 'waiting' | 'text' | 'tool' | 'none'; text?: string; tool?: string; input?: unknown }
+export interface StudioStreamSession {
+  status: StudioSessionStatus; turns: number; steps: number; toolCalls: number; inputTokens: number; outputTokens: number; costUsd: number;
+  planStatus?: StudioPlanStatus | null; error?: string | null;
+}
+export type StudioEndReason = 'idle' | 'timeout' | 'identity' | 'gone';
 
 /* ---------- Spec 015: unidades, equipos y solicitudes de cambios de seguridad ---------- */
 

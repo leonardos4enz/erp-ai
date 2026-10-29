@@ -95,7 +95,8 @@ public sealed class AnthropicAssistantModel : IAssistantModel, IDisposable
         {
             var response = await Client(credential).Messages.Create(parameters, ct);
             var text = string.Concat(response.Content.Select(b => b.Value).OfType<TextBlock>().Select(t => t.Text));
-            return new ModelReply(text, response.StopReason?.ToString(), response.Usage.InputTokens, response.Usage.OutputTokens);
+            // Spec 037 (regresión): el motivo es un enum envuelto del SDK; su `ToString()` no es el valor de la API.
+            return new ModelReply(text, response.StopReason?.Raw(), response.Usage.InputTokens, response.Usage.OutputTokens);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (Exception ex) { throw Fail(ex); }
