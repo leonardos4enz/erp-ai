@@ -79,6 +79,8 @@ public static class StudioTools
 {
     public const string Deliver = "entregar";
     public const int RecordsPage = 20;
+    /// <summary>Spec 038 (H5 CA2): tamaño de página máximo que se puede pedir (un cliente en <i>code mode</i> pagina en bucle).</summary>
+    public const int MaxPageSize = 100;
     /// <summary>Como el asistente de la 011 (<c>ProposalParser</c>).</summary>
     public const int MaxOperations = 100;
 
@@ -108,7 +110,7 @@ public static class StudioTools
         Real("funciones_expresion", "Funciones del lenguaje de expresiones con su firma y descripción.",
             Schema(), "GET", "/api/model/expressions/functions", (r, c, i) => new()),
         Real("validar_expresion", "Valida una expresión (fórmula, regla, condición) en el ámbito de un catálogo, con campos de borrador opcionales.",
-            Schema(("entity", "string", "Catálogo", true), ("expression", "string", "Expresión", true), ("fields", "array", "Campos nuevos aún sin aplicar (Field[])", false)),
+            Schema(("entity", "string", "Catálogo", true), ("expression", "string", "Expresión", true), ("fields", "array:object", "Campos nuevos aún sin aplicar (Field[])", false)),
             "POST", "/api/model/expressions/check", (r, c, i) => new(Body: new JsonObject
             {
                 ["entity"] = Req(i, "entity"), ["expression"] = Req(i, "expression", 2000), ["fields"] = i["fields"]?.DeepClone(),
@@ -116,10 +118,11 @@ public static class StudioTools
         new("compilar_plan", "Compila un Plan de Cambios contra el modelo real sin aplicarlo: errores por operación, pasos y avisos de seguridad.",
             "modelo", ToolTarget.Real, Schema(("plan", "object", "Plan de Cambios { description, operations }", true)), "POST", "/api/model/plan/preview", false,
             (r, c, i, ct) => r.CompileAsync(c, PlanOf(i), ct)),
-        Real("leer_registros", $"Registros de un catálogo, como los ve la persona ({RecordsPage} por página).",
-            Schema(("entity", "string", "Catálogo", true), ("search", "string", "Texto a buscar", false), ("page", "integer", "Página (1…)", false)),
+        Real("leer_registros", $"Registros de un catálogo, como los ve la persona ({RecordsPage} por página si no se pide otro tamaño, hasta {MaxPageSize}).",
+            Schema(("entity", "string", "Catálogo", true), ("search", "string", "Texto a buscar", false), ("page", "integer", "Página (1…)", false),
+                ("pageSize", "integer", $"Registros por página (1…{MaxPageSize})", false)),
             "GET", "/api/data/{entity}/", (r, c, i) => new(RouteValues: V(("entity", Req(i, "entity"))),
-                Query: Q(("pageSize", RecordsPage.ToString()), ("page", Page(i)), ("search", Opt(i, "search")))), scope: StudioScopes.Data),
+                Query: Q(("pageSize", PageSize(i)), ("page", Page(i)), ("search", Opt(i, "search")))), scope: StudioScopes.Data),
         Real("leer_registro", "Un registro de un catálogo, como lo ve la persona.",
             Schema(("entity", "string", "Catálogo", true), ("id", "integer", "Id del registro", true)), "GET", "/api/data/{entity}/{id:long}",
             (r, c, i) => new(RouteValues: V(("entity", Req(i, "entity")), ("id", Id(i)))), scope: StudioScopes.Data),
@@ -137,7 +140,7 @@ public static class StudioTools
             StudioScopes.Sandbox, ToolTarget.Sandbox,
             Schema(("entity", "string", "Catálogo", true), ("id", "integer", "Id", true), ("transition", "string", "Nombre de la transición", true),
                 ("values", "object", "Valores que pide la transición", false), ("comment", "string", "Comentario", false),
-                ("acceptWarnings", "array", "Nombres de avisos que se confirman", false)),
+                ("acceptWarnings", "array:string", "Nombres de avisos que se confirman", false)),
             "POST", "/api/data/{entity}/{id:long}/transition", false, (r, c, i, ct) => r.SandboxTransitionAsync(c, i, ct)),
         Sbx("aislado_leer", "Lee un registro de la copia aislada (campos calculados, estado y avisos).",
             Schema(("entity", "string", "Catálogo", true), ("id", "integer", "Id", true)), "GET", "/api/data/{entity}/{id:long}",
@@ -150,8 +153,8 @@ public static class StudioTools
 
         new(Deliver, "Termina el trabajo y entrega la propuesta para que la persona la revise y la aplique: el Plan de Cambios (o nada si no hay cambios), un resumen, lo que probaste con su resultado, lo que falló y los riesgos que ves.",
             StudioScopes.Model, ToolTarget.Server, Schema(("summary", "string", "Resumen en español, texto plano", true), ("plan", "object", "Plan de Cambios final (omítelo si no propones cambios)", false),
-                ("tested", "array", "Pruebas: [{ description, ok, detail? }]", false), ("failures", "array", "Lo que falló o quedó sin resolver (texto)", false),
-                ("risks", "array", "Riesgos que la persona debe revisar (texto)", false)),
+                ("tested", "array:object", "Pruebas: [{ description, ok, detail? }]", false), ("failures", "array:string", "Lo que falló o quedó sin resolver (texto)", false),
+                ("risks", "array:string", "Riesgos que la persona debe revisar (texto)", false)),
             null, null, false, null),
     ];
 
@@ -189,15 +192,20 @@ public static class StudioTools
     private static JsonObject Schema(params (string Name, string Type, string Description, bool Required)[] props)
     {
         var properties = new JsonObject();
+        // Spec 038 (H5 CA1): arreglos con el tipo de sus elementos («array:object»), enteros desde 1 y sin propiedades de más,
+        // para que un cliente MCP en code mode genere tipos fiables.
         foreach (var p in props)
-            properties[p.Name] = p.Type == "array"
-                ? new JsonObject { ["type"] = "array", ["description"] = p.Description }
-                : new JsonObject { ["type"] = p.Type, ["description"] = p.Description };
+            properties[p.Name] = p.Type.StartsWith("array", StringComparison.Ordinal)
+                ? new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = p.Type.Split(':') is [_, var item] ? item : "object" }, ["description"] = p.Description }
+                : p.Type == "integer"
+                    ? new JsonObject { ["type"] = "integer", ["minimum"] = 1, ["description"] = p.Description }
+                    : new JsonObject { ["type"] = p.Type, ["description"] = p.Description };
         return new JsonObject
         {
             ["type"] = "object",
             ["properties"] = properties,
             ["required"] = new JsonArray(props.Where(p => p.Required).Select(p => (JsonNode)JsonValue.Create(p.Name)!).ToArray()),
+            ["additionalProperties"] = false,
         };
     }
 
@@ -221,6 +229,11 @@ public static class StudioTools
 
     internal static string Id(JsonObject i) =>
         long.TryParse(Req(i, "id", 20), out var id) && id > 0 ? id.ToString() : throw new ToolInputException("«id» debe ser un número entero positivo.");
+
+    private static string PageSize(JsonObject i) =>
+        Opt(i, "pageSize", 4) is { } p
+            ? int.TryParse(p, out var n) && n is > 0 and <= MaxPageSize ? n.ToString() : throw new ToolInputException($"«pageSize» va de 1 a {MaxPageSize}.")
+            : RecordsPage.ToString();
 
     private static string? Page(JsonObject i) =>
         Opt(i, "page", 6) is { } p ? (int.TryParse(p, out var n) && n is > 0 and <= 10_000 ? n.ToString() : throw new ToolInputException("«page» no es válida.")) : null;

@@ -77,6 +77,13 @@ public static class AuditActions
     public const string StudioApply = "studio.apply";
     /// <summary>Spec 036: mensaje de seguimiento en una conversación de Studio (turno y longitud; nunca el texto).</summary>
     public const string StudioMessage = "studio.message";
+    /// <summary>
+    /// Spec 038: conexión MCP creada (al canjear el código: cliente y alcances), revocada (por la persona, por el cliente o al
+    /// reconectar) y revocada por reuso de un código o de un <i>refresh token</i>. Nunca los tokens.
+    /// </summary>
+    public const string McpConnect = "mcp.connect";
+    public const string McpRevoke = "mcp.revoke";
+    public const string McpReuse = "mcp.reuse";
 }
 
 public static class Audit

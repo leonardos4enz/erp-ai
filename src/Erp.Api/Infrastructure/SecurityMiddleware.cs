@@ -27,7 +27,7 @@ public static class SecurityMiddleware
 
     /// <summary>¿La petición se autenticó con una credencial de integración (clave de API o token OAuth) y no con la sesión?</summary>
     public static bool IsBearerCredential(HttpContext http) =>
-        http.User.Identity?.AuthenticationType is Integrations.ApiKeyHandler.SchemeName or Integrations.OAuthTokenHandler.SchemeName;
+        http.User.Identity?.AuthenticationType is Integrations.ApiKeyHandler.SchemeName or Integrations.OAuthTokenHandler.SchemeName or Mcp.McpTokenHandler.SchemeName;
 
     /// <summary>
     /// Spec 008: una clave de API solo llega a datos, reportes y OData; administración, modelo y auditoría responden 403.
@@ -74,7 +74,7 @@ public static class SecurityMiddleware
 public sealed record BearerCredential(string Scheme, string? Scopes = null)
 {
     public static BearerCredential? Of(System.Security.Claims.ClaimsPrincipal user) =>
-        user.Identity?.AuthenticationType is Integrations.ApiKeyHandler.SchemeName or Integrations.OAuthTokenHandler.SchemeName
+        user.Identity?.AuthenticationType is Integrations.ApiKeyHandler.SchemeName or Integrations.OAuthTokenHandler.SchemeName or Mcp.McpTokenHandler.SchemeName
             ? new(user.Identity.AuthenticationType!, user.FindFirst(Integrations.OAuthScopes.Claim)?.Value)
             : null;
 }
@@ -89,6 +89,11 @@ public static class BearerScope
 
     public static Denial? Check(BearerCredential? credential, PathString path, string method)
     {
+        // Spec 038 (H3 CA4): el token MCP de una persona no es una credencial de la API: solo sirve en /mcp (y allí las
+        // herramientas aplican sus alcances). El despachador lo recibe nulo: la herramienta corre como la persona.
+        // Revisión adversarial F-10: «/mcp/» es la misma ruta.
+        if (credential?.Scheme == Mcp.McpTokenHandler.SchemeName && !string.Equals((path.Value ?? "").TrimEnd('/'), "/mcp", StringComparison.OrdinalIgnoreCase))
+            return new("Un token MCP solo sirve en /mcp.", "Bearer error=\"insufficient_scope\"");
         if (credential?.Scheme == Integrations.ApiKeyHandler.SchemeName && !Integrations.ApiKeyHandler.AllowedPaths.Any(p => path.StartsWithSegments(p)))
             return new("Una clave de API solo puede usar la API de datos, reportes y OData.");
         if (credential?.Scheme == Integrations.OAuthTokenHandler.SchemeName &&

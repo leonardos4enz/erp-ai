@@ -61,6 +61,9 @@ export default defineConfig({
       Security__SearchesPerMinute: '120',
       // Spec 031: tableros, reportes y OData como los recorre la suite (en producción, 120 por minuto).
       Security__AggregatesPerMinute: '1000',
+      // Spec 038: registro, canje y revocación de MCP comparten el límite por dirección del servidor de tokens (30, R-038-5);
+      // la suite los hace todos desde 127.0.0.1.
+      Security__TokenRequestsPerMinute: '1000',
       // Spec 008: el receptor de webhooks de la suite escucha en 127.0.0.1 por http; ninguna otra IP interna se permite.
       Webhooks__AllowHttp: 'true',
       Webhooks__AllowedInternalAddresses: '127.0.0.1',

@@ -9,10 +9,13 @@ sin compuerta, si es costosa sin límite o si aplica lo revisado sin huella. `we
 Capacidades: **anónima** (lista blanca) · **sesión** (lo propio del usuario) · **registros** (el motor exige permiso del
 catálogo, alcance por registro y seguridad por campo) · **modelador** · **usuarios** · **auditoría** · **superusuario**.
 
-Total: 151 rutas.
+Total: 164 rutas.
 
 | Método | Ruta | Capacidad | Efecto | Compuerta | Costosa | Huella |
 |---|---|---|---|---|---|---|
+| GET | `/.well-known/oauth-authorization-server` | anónima |  |  |  |  |
+| GET | `/.well-known/oauth-protected-resource` | anónima |  |  |  |  |
+| GET | `/.well-known/oauth-protected-resource/mcp` | anónima |  |  |  |  |
 | GET | `/api/admin/api-keys/` | superusuario |  |  |  |  |
 | POST | `/api/admin/api-keys/` | superusuario | seguridad | aprobación de seguridad |  |  |
 | PUT | `/api/admin/api-keys/{id:int}` | superusuario | seguridad | aprobación de seguridad |  |  |
@@ -119,6 +122,10 @@ Total: 151 rutas.
 | GET | `/api/explorer/usages` | modelador |  |  |  |  |
 | GET | `/api/files/{id:int}` | modelador |  |  |  |  |
 | GET | `/api/health` | anónima |  |  |  |  |
+| GET | `/api/mcp/authorize` | sesión |  |  |  |  |
+| POST | `/api/mcp/authorize` | sesión | sesión |  |  |  |
+| GET | `/api/mcp/connections` | sesión |  |  |  |  |
+| DELETE | `/api/mcp/connections/{id:int}` | sesión | sesión |  |  |  |
 | GET | `/api/model/apps` | sesión |  |  |  |  |
 | GET | `/api/model/changes` | modelador |  |  |  |  |
 | GET | `/api/model/entities` | sesión |  |  |  |  |
@@ -150,6 +157,12 @@ Total: 151 rutas.
 | DELETE | `/api/views/{entity}/{id:int}` | registros | sesión |  |  |  |
 | PUT | `/api/views/{entity}/{id:int}` | registros | sesión |  |  |  |
 | * | `/api/{**path}` | anónima |  |  |  |  |
+| DELETE | `/mcp` | sesión | ninguno |  |  |  |
+| GET | `/mcp` | sesión | ninguno |  |  |  |
+| POST | `/mcp` | sesión | ninguno |  | despacha herramientas del catálogo de Studio (Mcp:Burst y Mcp:CallsPerMinute por persona, más los del despachador) |  |
+| GET | `/oauth/authorize` | anónima |  |  |  |  |
+| POST | `/oauth/register` | anónima | configuración |  |  |  |
+| POST | `/oauth/revoke` | anónima | sesión |  |  |  |
 | DELETE | `/oauth/token` | anónima | ninguno |  |  |  |
 | GET | `/oauth/token` | anónima | ninguno |  |  |  |
 | PATCH | `/oauth/token` | anónima | ninguno |  |  |  |

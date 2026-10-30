@@ -1,0 +1,51 @@
+/* Spec 038: consentimiento de una conexión MCP y conexiones de Claude. */
+.consent-shell {
+  min-height: 100%;
+  display: grid;
+  place-items: center;
+  padding: var(--space-10) var(--space-4);
+  background: var(--bg);
+}
+.consent-panel {
+  width: 100%;
+  max-width: 520px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  padding: var(--space-8);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+}
+.consent-header h1, .consent-panel > h1 { margin: 0 0 6px; font-size: var(--text-xl); font-weight: 600; letter-spacing: -0.01em; overflow-wrap: anywhere; }
+.consent-header p { margin: 0; }
+.consent-facts { margin: 0; display: grid; gap: var(--space-3); }
+.consent-facts > div { display: grid; grid-template-columns: minmax(0, 13rem) minmax(0, 1fr); gap: var(--space-3); align-items: baseline; }
+.consent-facts dt { display: flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: var(--text-sm); }
+.consent-facts dd { margin: 0; overflow-wrap: anywhere; }
+.consent-host { font-size: var(--text-lg); }
+.consent-scopes { margin: 0; padding: var(--space-4); display: grid; gap: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-md); }
+.consent-scopes legend { padding: 0 6px; font-weight: 500; }
+.consent-scope svg { vertical-align: -2px; }
+.consent-note { margin: 0; }
+.consent-actions { display: flex; justify-content: flex-end; gap: var(--space-3); flex-wrap: wrap; }
+
+.connections-setup { display: grid; gap: var(--space-3); margin-bottom: var(--space-6); }
+.connections-setup .section-title { margin: 0; }
+.connections-steps { margin: 0; padding-left: 1.25rem; display: grid; gap: 4px; }
+.connections-setup .secret-box code { overflow-wrap: anywhere; }
+.connections-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-3); }
+.connection { display: flex; align-items: center; gap: var(--space-4); padding: var(--space-4) var(--space-5); flex-wrap: wrap; }
+.connection-main { flex: 1 1 18rem; min-width: 0; display: grid; gap: 4px; }
+.connection-title { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.connection-host { color: var(--text-muted); overflow-wrap: anywhere; }
+.connection-dates { font-size: var(--text-sm); }
+
+@media (max-width: 560px) {
+  .consent-panel { padding: var(--space-5); }
+  .consent-facts > div { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .consent-actions > * { flex: 1; }
+}
+/* El título recibe el foco al cargar (lo lee el lector de pantalla); no es interactivo: sin anillo, como .content. */
+.consent-panel h1:focus { box-shadow: none; }

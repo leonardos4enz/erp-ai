@@ -353,7 +353,7 @@ public sealed class OAuthTokenService(Db db, UserContextLoader loader, ILogger<O
 {
     public const int MaxBody = 4096;
 
-    private static readonly FormOptions Limits = new()
+    internal static readonly FormOptions Limits = new()
     {
         BufferBodyLengthLimit = MaxBody, MultipartBodyLengthLimit = MaxBody, ValueCountLimit = 10, KeyLengthLimit = 64, ValueLengthLimit = 1024,
     };
@@ -393,7 +393,11 @@ public sealed class OAuthTokenService(Db db, UserContextLoader loader, ILogger<O
         if (form.Any(kv => kv.Value.Count > 1)) return Error(http, 400, "invalid_request", "Un parámetro viene repetido.");
         var grant = form["grant_type"].ToString();
         if (grant.Length == 0) return Error(http, 400, "invalid_request", "Falta grant_type.");
-        if (grant != "client_credentials") return Error(http, 400, "unsupported_grant_type", "Solo se admite grant_type=client_credentials.");
+        // Spec 038: código de autorización y renovación son del servidor MCP (clientes públicos de personas, con PKCE).
+        if (Mcp.McpOAuthService.GrantTypes.Contains(grant))
+            return await http.RequestServices.GetRequiredService<Mcp.McpOAuthService>().TokenAsync(http, form, ct);
+        if (grant != "client_credentials")
+            return Error(http, 400, "unsupported_grant_type", "Se admiten client_credentials, authorization_code y refresh_token.");
 
         // Credenciales: Basic (preferida) o en el cuerpo; nunca las dos (§2.3.1).
         string? clientId, secret;

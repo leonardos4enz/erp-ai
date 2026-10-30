@@ -1,7 +1,7 @@
 import { api, ApiError } from './client';
 import type {
   AppSummary, SearchHit, AuditEntry, AutomationRun, AutomationRunDetail, ScheduleSummary, ChangePlan, Company, EntityOrigin, ExprFunction, FieldDef, ExchangeRate, ChangeSetSummary, DashboardResult, DashboardSummary, EntityDef, HistoryEntry, LayoutState, LookupItem, Me, PrintChoice, PrintTemplate, StoredImage,
-  ApiKey, AssistantStatus, StudioScope, StudioSession, StudioStatusInfo, StudioSummary, OAuthClient, OAuthScope, BusinessUnit, PendingChange, SecurityChange, Team, Conversation, ConversationSummary, Proposal, EnvironmentInfo, ExportableCatalogs, ExportPreview, ExportRequest, ImportResult, ModuleInfo, PackageImport, ModulePreview, WebhookDelivery, WebhookSummary, Paged, PlanPreview, ReportResult, ReportSummary, Role, Row, RowList, SavedView, User, ViewFilter, ViewList,
+  ApiKey, AssistantStatus, McpAuthorizeInfo, McpConnections, StudioScope, StudioSession, StudioStatusInfo, StudioSummary, OAuthClient, OAuthScope, BusinessUnit, PendingChange, SecurityChange, Team, Conversation, ConversationSummary, Proposal, EnvironmentInfo, ExportableCatalogs, ExportPreview, ExportRequest, ImportResult, ModuleInfo, PackageImport, ModulePreview, WebhookDelivery, WebhookSummary, Paged, PlanPreview, ReportResult, ReportSummary, Role, Row, RowList, SavedView, User, ViewFilter, ViewList,
 } from './types';
 
 const enc = encodeURIComponent;
@@ -335,3 +335,12 @@ export const studioApi = {
 
 /** Spec 015: equipo (dueño de registros); la unidad es el nombre de una existente. */
 export interface TeamInput { name: string; unit?: string | null; isActive: boolean; memberIds: number[] }
+
+/** Spec 038: consentimiento y conexiones del servidor MCP (de la persona; cada una con su sesión). */
+export const mcpApi = {
+  check: (query: string, signal?: AbortSignal) => api<McpAuthorizeInfo>(`/mcp/authorize?${query}`, { signal }),
+  decide: (query: string, approve: boolean, scopes: string[]) =>
+    api<{ redirect: string }>('/mcp/authorize', { method: 'POST', body: { query, approve, scopes } }),
+  connections: (signal?: AbortSignal) => api<McpConnections>('/mcp/connections', { signal }),
+  disconnect: (id: number) => api<void>(`/mcp/connections/${id}`, { method: 'DELETE' }),
+};

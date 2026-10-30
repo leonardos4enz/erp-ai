@@ -24,6 +24,8 @@ import { ImagesPage } from './pages/ImagesPage';
 import { ReportPage, ReportsPage } from './pages/ReportsPage';
 import { DashboardPage, DashboardsPage } from './pages/DashboardsPage';
 import { NotFoundPage, ForbiddenPage } from './pages/StatusPages';
+import { ConnectPage } from './pages/ConnectPage';
+import { ConnectionsPage } from './pages/ConnectionsPage';
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const { me, loading } = useAuth();
@@ -42,6 +44,8 @@ export function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      {/* Spec 038: consentimiento de una conexión MCP; fuera del Layout, como el inicio de sesión (vuelve aquí tras entrar). */}
+      <Route path="/conectar" element={<RequireAuth><ConnectPage /></RequireAuth>} />
       <Route
         element={
           <RequireAuth>
@@ -74,6 +78,7 @@ export function App() {
         <Route path="admin/studio" element={<Guard allow={!!(me?.canManageModel || me?.isSuperuser)}><StudioPage /></Guard>} />
         <Route path="admin/assistant" element={<Guard allow={!!(me?.canManageModel || me?.isSuperuser)}><AssistantPage /></Guard>} />
         <Route path="admin/audit" element={<Guard allow={!!(me?.canViewAudit || me?.isSuperuser)}><AuditPage /></Guard>} />
+        <Route path="conexiones" element={<ConnectionsPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>

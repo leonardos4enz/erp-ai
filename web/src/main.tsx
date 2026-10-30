@@ -6,6 +6,7 @@ import './styles/app.css';
 import './styles/explorer.css';
 import './styles/login.css';
 import './styles/studio.css';
+import './styles/mcp.css';
 import { applyInitialTheme } from './lib/theme';
 import { AuthProvider } from './auth/AuthContext';
 import { ToastProvider } from './components/Toast';

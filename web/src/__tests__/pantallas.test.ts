@@ -36,6 +36,9 @@ export const PANTALLAS: Record<string, Pantalla> = {
   'admin/assistant': { sinCaptura: 'conversación simulada; asistente.spec.ts compara sus márgenes con Entornos (011 F-05)' },
   'admin/studio': { capturas: ['light', 'dark', 'movil'].flatMap((t) => [`studio.spec.ts/studio-chat-${t}.png`, `studio.spec.ts/studio-bienvenida-${t}.png`]) },
   'admin/audit': { sinCaptura: 'bitácora con fechas de la corrida; seguridad.spec.ts (riesgo R-030-3)' },
+  // Spec 038: consentimiento de una conexión MCP y conexiones de la persona.
+  '/conectar': { capturas: ['light', 'dark', 'movil'].map((t) => `mcp.spec.ts/conectar-${t}.png`) },
+  conexiones: { capturas: ['light', 'dark', 'movil'].map((t) => `mcp.spec.ts/conexiones-${t}.png`) },
   '*': { sinCaptura: 'página de «no encontrado» de una línea' },
 };
 

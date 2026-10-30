@@ -70,6 +70,9 @@ public class RouteInventoryTests
         "GET /api/health", "POST /api/auth/login", "POST /oauth/token",
         "GET /oauth/token", "PUT /oauth/token", "PATCH /oauth/token", "DELETE /oauth/token",
         "* /api/{**path}", "* /oauth/{**path}", "* /odata/{**path}",
+        // Spec 038: metadatos OAuth del servidor MCP, registro dinámico, autorizar (lleva a la SPA) y revocar.
+        "GET /.well-known/oauth-protected-resource", "GET /.well-known/oauth-protected-resource/mcp", "GET /.well-known/oauth-authorization-server",
+        "POST /oauth/register", "GET /oauth/authorize", "POST /oauth/revoke",
     ];
 
     [Fact]

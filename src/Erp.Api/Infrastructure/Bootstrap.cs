@@ -760,6 +760,62 @@ public static class Bootstrap
             CONSTRAINT UX_StudioMessage_Seq UNIQUE (SessionId, Seq)
         );
 
+        -- Spec 038: servidor MCP por persona. Clientes públicos registrados (RFC 7591), códigos de autorización (un uso, PKCE),
+        -- conexiones (el consentimiento de una persona a un cliente, con su sello) y sus tokens (solo el SHA-256).
+        IF OBJECT_ID('meta.McpClient') IS NULL
+        CREATE TABLE meta.McpClient (
+            Id int IDENTITY PRIMARY KEY,
+            ClientId varchar(40) NOT NULL CONSTRAINT UX_McpClient_ClientId UNIQUE,
+            Name nvarchar(100) NOT NULL,
+            RedirectUris nvarchar(max) NOT NULL,
+            CreatedAt datetime2(3) NOT NULL DEFAULT SYSUTCDATETIME(),
+            CreatedIp varchar(45) NULL,
+            LastAuthorizedAt datetime2(3) NULL
+        );
+        IF OBJECT_ID('meta.McpGrant') IS NULL
+        CREATE TABLE meta.McpGrant (
+            Id int IDENTITY PRIMARY KEY,
+            ClientId int NOT NULL REFERENCES meta.McpClient(Id),
+            UserId int NOT NULL REFERENCES meta.[User](Id),
+            SecurityStamp uniqueidentifier NOT NULL,
+            Scopes nvarchar(60) NOT NULL,
+            Resource nvarchar(500) NOT NULL,
+            CreatedAt datetime2(3) NOT NULL DEFAULT SYSUTCDATETIME(),
+            LastUsedAt datetime2(3) NULL,
+            RevokedAt datetime2(3) NULL,
+            RevokedReason nvarchar(20) NULL
+        );
+        IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_McpGrant_User')
+            CREATE INDEX IX_McpGrant_User ON meta.McpGrant (UserId, RevokedAt);
+        IF OBJECT_ID('meta.McpCode') IS NULL
+        CREATE TABLE meta.McpCode (
+            Id bigint IDENTITY PRIMARY KEY,
+            CodeHash varbinary(32) NOT NULL CONSTRAINT UX_McpCode_Hash UNIQUE,
+            ClientId int NOT NULL REFERENCES meta.McpClient(Id),
+            UserId int NOT NULL REFERENCES meta.[User](Id),
+            SecurityStamp uniqueidentifier NOT NULL,
+            Scopes nvarchar(60) NOT NULL,
+            RedirectUri nvarchar(500) NOT NULL,
+            Challenge varchar(128) NOT NULL,
+            Resource nvarchar(500) NOT NULL,
+            CreatedAt datetime2(3) NOT NULL DEFAULT SYSUTCDATETIME(),
+            ExpiresAt datetime2(3) NOT NULL,
+            UsedAt datetime2(3) NULL,
+            GrantId int NULL REFERENCES meta.McpGrant(Id)
+        );
+        IF OBJECT_ID('meta.McpToken') IS NULL
+        CREATE TABLE meta.McpToken (
+            Id bigint IDENTITY PRIMARY KEY,
+            GrantId int NOT NULL REFERENCES meta.McpGrant(Id),
+            Kind char(1) NOT NULL,
+            TokenHash varbinary(32) NOT NULL CONSTRAINT UX_McpToken_Hash UNIQUE,
+            ExpiresAt datetime2(3) NOT NULL,
+            UsedAt datetime2(3) NULL,
+            CreatedAt datetime2(3) NOT NULL DEFAULT SYSUTCDATETIME()
+        );
+        IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_McpToken_Grant')
+            CREATE INDEX IX_McpToken_Grant ON meta.McpToken (GrantId, ExpiresAt);
+
         -- Constitución II.4: la auditoría es de solo inserción, incluso para la propia aplicación.
         IF OBJECT_ID('meta.TR_AuditLog_Immutable') IS NULL
             EXEC('CREATE TRIGGER meta.TR_AuditLog_Immutable ON meta.AuditLog INSTEAD OF UPDATE, DELETE AS

@@ -828,3 +828,19 @@ export interface EntityOrigin { entity: string; installedBy: PackageStamp | null
 export interface ExprFunction { name: string; min: number; max: number }
 /** Spec 026 (H2 CA4): lo local o modificado que una actualización de módulo reemplaza o quita. */
 export interface UpgradeConflict { entity: string; entityLabel: string; kind: OriginKind; name: string; reason: 'local' | 'modified'; effect: 'replaced' | 'removed' }
+
+/** Spec 038: lo que muestra la pantalla Conectar (o a dónde volver si la petición del cliente ya trae un error). */
+export interface McpAuthorizeInfo {
+  redirect?: string;
+  /** Revisión adversarial F-03: el error que vuelve al cliente; la persona decide volver (no se redirige sola). */
+  error?: string;
+  errorDescription?: string;
+  redirectHost?: string;
+  client?: { name: string; redirectHost: string; trusted: boolean };
+  user?: { username: string; displayName: string };
+  scopes?: { name: 'modelo' | 'datos'; required: boolean; requested: boolean }[];
+}
+
+/** Spec 038: una conexión MCP vigente de la persona. */
+export interface McpConnection { id: number; client: string; redirectHost: string; scopes: string[]; createdAt: string; lastUsedAt?: string | null }
+export interface McpConnections { serverUrl: string; connections: McpConnection[] }

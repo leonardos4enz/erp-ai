@@ -94,15 +94,21 @@ public static class ErpApp
         services.AddSingleton<Erp.Api.Studio.StudioSignals>(); // spec 036
         services.AddScoped<Erp.Api.Studio.StudioStream>();
         services.AddHostedService<Erp.Api.Studio.StudioDispatcher>();
+        // Spec 038: servidor MCP por persona (OAuth authorization code + PKCE; las herramientas son las de Studio).
+        services.AddSingleton(Erp.Api.Mcp.McpOptions.From(config));
+        services.AddSingleton<Erp.Api.Mcp.McpLimits>();
+        services.AddScoped<Erp.Api.Mcp.McpOAuthService>();
+        services.AddScoped<Erp.Api.Mcp.McpServer>();
 
         // ---------- Autenticación: cookie (ADR-0002) ----------
         // Spec 008: con «Authorization: Bearer» se usa la clave de API (y nunca la cookie); si no, la cookie. Spec 018: «Bearer erpat_…» es un token OAuth.
+        // Spec 038: /mcp solo con el token MCP (aunque traiga cookie) y «Bearer erpmt_…» siempre es un token MCP (que fuera de
+        // /mcp niega BearerScope).
         services.AddAuthentication("erp")
-            .AddPolicyScheme("erp", "erp", o => o.ForwardDefaultSelector = http =>
-                OAuthFormat.IsBearerToken(http.Request) ? OAuthTokenHandler.SchemeName
-                : ApiKeyHandler.IsBearer(http.Request) ? ApiKeyHandler.SchemeName : CookieAuthenticationDefaults.AuthenticationScheme)
+            .AddPolicyScheme("erp", "erp", o => o.ForwardDefaultSelector = SelectScheme)
             .AddScheme<AuthenticationSchemeOptions, ApiKeyHandler>(ApiKeyHandler.SchemeName, null)
             .AddScheme<AuthenticationSchemeOptions, OAuthTokenHandler>(OAuthTokenHandler.SchemeName, null)
+            .AddScheme<AuthenticationSchemeOptions, Erp.Api.Mcp.McpTokenHandler>(Erp.Api.Mcp.McpTokenHandler.SchemeName, null)
             .AddCookie(o =>
             {
                 o.Cookie.Name = "erp.auth";
@@ -201,6 +207,12 @@ public static class ErpApp
         });
     }
 
+    /// <summary>El esquema de autenticación de la petición (spec 008, 018 y 038).</summary>
+    public static string SelectScheme(HttpContext http) =>
+        http.Request.Path.StartsWithSegments("/mcp") || Erp.Api.Mcp.McpFormat.IsBearer(http.Request) ? Erp.Api.Mcp.McpTokenHandler.SchemeName
+        : OAuthFormat.IsBearerToken(http.Request) ? OAuthTokenHandler.SchemeName
+        : ApiKeyHandler.IsBearer(http.Request) ? ApiKeyHandler.SchemeName : CookieAuthenticationDefaults.AuthenticationScheme;
+
     public static void MapErpRoutes(this IEndpointRouteBuilder app)
     {
         app.MapAuth();
@@ -217,6 +229,7 @@ public static class ErpApp
         app.MapAssistant();
         app.MapStudio(); // spec 033
         app.MapOAuthToken(); // spec 018
+        app.MapMcp(); // spec 038
         app.MapOData();
         app.MapExplorer(); // spec 025
         app.MapFiles(); // spec 027

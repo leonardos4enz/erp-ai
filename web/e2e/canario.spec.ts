@@ -8,10 +8,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import type { APIRequestContext } from '@playwright/test';
-import { ADMIN, apiAs, applyPlan, expect, test } from './helpers';
+import { ADMIN, BASE_URL, anonApi, apiAs, applyPlan, expect, test } from './helpers';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -329,6 +329,27 @@ test('H2 CA2 (031): ordenar por una fórmula o un campo que no ve se ignora (el 
  */
 const IMPORT_CSV = Buffer.from('Nombre;Puente doble\nImportado;Puente doble visible\n');
 
+/** Spec 038: un token MCP de la persona con `datos`, como lo obtendría su Claude (registro, consentimiento, canje con PKCE). */
+async function mcpToken(person: APIRequestContext): Promise<string> {
+  const anon = await anonApi({});
+  const redirect = 'http://127.0.0.1:9/callback';
+  const reg = await anon.post('/oauth/register', { data: { client_name: 'Canario MCP', redirect_uris: [redirect] } });
+  expect(reg.status(), await reg.text()).toBe(201);
+  const clientId = (await reg.json()).client_id as string;
+  const verifier = randomBytes(32).toString('base64url');
+  const query = new URLSearchParams({ response_type: 'code', client_id: clientId, redirect_uri: redirect, scope: 'modelo datos',
+    code_challenge: createHash('sha256').update(verifier).digest('base64url'), code_challenge_method: 'S256', state: 'c' }).toString();
+  const decided = await person.post('/api/mcp/authorize', { data: { query, approve: true, scopes: ['modelo', 'datos'] } });
+  expect(decided.status(), await decided.text()).toBe(200);
+  const code = new URL((await decided.json()).redirect).searchParams.get('code')!;
+  const token = await anon.post('/oauth/token', { form: { grant_type: 'authorization_code', code, redirect_uri: redirect, client_id: clientId,
+    code_verifier: verifier, resource: `${BASE_URL}/mcp` } });
+  expect(token.status(), await token.text()).toBe(200);
+  const { access_token } = await token.json();
+  await anon.dispose();
+  return access_token;
+}
+
 test('H2 CA2: tampoco las rutas que no son GET y devuelven datos (tomadas del inventario)', async () => {
   const l = await lector();
   const { canary, ids } = state;
@@ -366,6 +387,25 @@ test('H2 CA2: tampoco las rutas que no son GET y devuelven datos (tomadas del in
       check('transición', await l.post(`/api/data/CnDoc/${ids.doc}/transition`, { data: { transition: 'cerrar', _rowVersion: await version(state.ids.doc) } })),
     // El lector no borra (403); el cuerpo del rechazo tampoco lleva el dato.
     'DELETE /api/data/{entity}/{id:long}': async () => check('borrar', await l.delete(`/api/data/CnDoc/${mine!.id}`)),
+    // Spec 038: el servidor MCP, con un token del lector con `datos` (sus herramientas de registros y de catálogos).
+    'POST /mcp': async () => {
+      const token = await mcpToken(l);
+      const mcp = await anonApi({ Authorization: `Bearer ${token}` });
+      const call = async (name: string, args: object) =>
+        check(`MCP ${name} ${JSON.stringify(args)}`, await mcp.post('/mcp', { data: { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } } }));
+      for (const search of [undefined, canary]) await call('leer_registros', { entity: 'CnDoc', search, pageSize: 100 });
+      for (const entity of ['CnSecreto', 'CnPuente']) await call('leer_registros', { entity, pageSize: 100 });
+      for (const id of [ids.doc, ids.docEmpresa, ids.secreto]) await call('leer_registro', { entity: 'CnDoc', id });
+      await call('leer_registro', { entity: 'CnSecreto', id: ids.secreto });
+      await call('listar_catalogos', {});
+      await check('MCP tools/list', await mcp.post('/mcp', { data: { jsonrpc: '2.0', id: 2, method: 'tools/list' } }));
+      await mcp.dispose();
+    },
+    'DELETE /mcp': async () => {
+      const mcp = await anonApi({ Authorization: `Bearer ${await mcpToken(l)}` });
+      await check('MCP DELETE', await mcp.delete('/mcp'));
+      await mcp.dispose();
+    },
     ...Object.fromEntries(['POST', 'PUT', 'PATCH', 'DELETE', 'MERGE'].map((method) => [`${method} /odata/{**rest}`, async () =>
       check(`OData ${method}`, await l.fetch('/odata/CnDoc', { method, data: { Nombre: canary } }))])),
   };
