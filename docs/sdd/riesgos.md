@@ -270,7 +270,7 @@ Migración (028): filas tomadas de las secciones de riesgos y pendientes de cada
 
 | ID | Riesgo | Severidad | Decisión | Prueba | Estado | Revisado |
 |---|---|---|---|---|---|---|
-| R-027-1 | Sin códigos QR ni de barras en plantillas (los pedirá el CFDI). | Baja (est.) | Diferido a 032 (CFDI) | sin prueba | Abierto | 2026-10-25 |
+| R-027-1 | Sin códigos QR ni de barras en plantillas (los pedirá el CFDI). | Baja (est.) | Diferido (sin spec: CFDI retirado del plan, 2026-10-29) | sin prueba | Abierto | 2026-10-25 |
 | R-027-2 | Sin envío por correo, adjunto automático en transiciones ni firma electrónica del PDF. | Baja (est.) | Por decidir | sin prueba | Abierto | 2026-10-25 |
 | R-027-3 | Sin tipo de campo `image`/`file` en catálogos, SVG/WebP ni diseño libre por coordenadas. | Baja (est.) | Por decidir | sin prueba | Abierto | 2026-10-25 |
 

@@ -45,7 +45,6 @@ en orden, no en paralelo: casi todas tocan el núcleo del motor (`PlanCompiler`,
 | 037 ERP AI Studio: pantalla de chat | Implementado ([spec](specs/037-ai-studio-chat-pantalla/spec.md)) |
 | 038 Servidor MCP por persona | Planeado |
 | 039 Módulo de Ventas | Planeado |
-| 040 CFDI 4.0 con PAC | Planeado |
 
 ## Diagnóstico
 | Brecha señalada | Situación actual | Spec |
@@ -365,7 +364,7 @@ la representación impresa del CFDI). Ventas pasa a la 028 y CFDI 4.0 a la 029.
   servidor SMTP/proveedor, plantillas de mensaje y bitácora); adjuntarlo automáticamente al ejecutar una transición
   (requiere el tipo de campo archivo); firma electrónica (e.firma/FIEL: certificados y custodia de llaves, otra spec);
   **tipo de campo `image`/`file` en catálogos** (DDL, captura, importación, OData, miniaturas y límites por registro: la
-  base `meta.[File]` ya existe); SVG sanitizado y WebP; códigos QR y de barras (los pedirá el CFDI, ahora 040); diseño libre por
+  base `meta.[File]` ya existe); SVG sanitizado y WebP; códigos QR y de barras (los pedía el CFDI, retirado del plan el 2026-10-29); diseño libre por
   coordenadas.
 
 ### 028 — Mejoras del proceso (retrospectiva 001)
@@ -598,9 +597,7 @@ En este orden, por decisión del dueño (2026-10-25):
 10. **039 — Módulo de Ventas:** clientes, cotización, pedido, salida de almacén con costo de ventas (póliza de salidas),
    factura y cobranza. Usa `merge` para extender Producto e Inventario, avisos (límite de crédito) y rutas de tres niveles;
    declara su módulo con `setApp` (orden 15, entre Compras e Inventario).
-11. **040 — CFDI 4.0 con PAC:** timbrado de la factura de Ventas con un proveedor autorizado, cancelación y complemento de
-   pago; el secreto del PAC fuera del código (constitución II.7). Su representación impresa usa las plantillas de la 027
-   (con un bloque de código QR nuevo).
+11. ~~**040 — CFDI 4.0 con PAC.**~~ Retirada del plan por decisión del dueño (2026-10-29). Si vuelve, se numera al abrirla.
 12. **Pólizas en moneda extranjera** (pendiente de la 020).
 13. **Revaluación de existencias** (pendiente de la 020).
 14. **Reversa de pólizas con otra póliza** (pendiente de la 020).
