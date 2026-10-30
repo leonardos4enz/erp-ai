@@ -3,13 +3,13 @@
 ## Métricas
 - inicio: 2026-10-29 22:55
 - cierre: 2026-10-30 08:40 (la sesión estuvo detenida de noche; trabajo efectivo ≈ 3 h 30 min)
-- unitarias: 916 (+64: 680 de Erp.Tests, +21; 178 de integración, +43; Vitest 58, sin cambios)
+- unitarias: 917 (+65: 681 de Erp.Tests, +22; 178 de integración, +43; Vitest 58, sin cambios)
 - e2e: 413 (+12)
 - corridas completas: 2 (1: dotnet test 1 min 45 s + E2E 8 min 50 s con 2 fallas, corregidas; 2: dotnet test 1 min 43 s + E2E 9 min 39 s, limpia)
 - corridas parciales: 5 (--veces=3 sobre mcp.spec.ts y canario.spec.ts; McpTests ×3 en integración; iteración de mcp.spec.ts, canario + oauth-odata + mcp tras las fallas)
 - contra el código anterior: 9 (F-01 y F-04…F-10 en integración contra el código sin corregir; F-03 en E2E con la redirección automática repuesta; F-02 visto en la instancia de revisión)
-- hallazgos: 0/4/8
-- categorías: seguridad=5, motor-api=3, pruebas=2, UI/UX=1, concurrencia=1
+- hallazgos: 0/4/9
+- categorías: seguridad=5, motor-api=3, pruebas=3, UI/UX=1, concurrencia=1
 - revisión adversarial: 12 hallazgos
 - riesgos: R-038-1, R-038-2, R-038-3, R-038-4, R-038-5, R-038-6, R-038-7
 
@@ -87,6 +87,7 @@ Conexiones de Claude a 375 px (sin desborde, estado vacío), oscuro. No se puls�
 | F-09 | Baja | seguridad | (Adversarial F-09) El nombre del cliente admitía caracteres de formato (bidi, ancho cero) y el sitio se mostraba en Unicode (homógrafos). | Se rechazan los de formato; el sitio se muestra y se compara en punycode. | `McpTests › F09_el_nombre_del_cliente_no_admite_caracteres_de_formato` · `McpCoreTests › Un_sitio_conocido_…` |
 | F-10 | Baja | motor-api | (Adversarial F-11) `POST /mcp/` llega a la misma ruta pero `BearerScope` negaba el token. | Se normaliza la barra final. | `McpTests › F10_mcp_con_barra_final_acepta_el_token` |
 | F-11 | Media | pruebas | La E2E completa: el canario de la 031 exige recorrer toda ruta de lectura nueva que el lector pueda llamar, y `/mcp` no estaba. | El canario obtiene un token MCP del lector (registro, consentimiento, PKCE) y recorre sus herramientas de registros; sin fuga. | `canario.spec.ts › H2 CA2…` (falló en la corrida 1) |
+| F-13 | Baja | pruebas | CI (corrida 41073327990, `74e0225`): fallaron las unitarias en Ubuntu (en Windows pasaban). En Unix `Uri.TryCreate("/relativa", Absolute)` da `file:///relativa`: la URL se rechazaba igual, pero con otro mensaje, y la prueba esperaba «absoluta». Diagnóstico por razonamiento: sin sesión de GitHub no se pudo leer el log, y Docker no estaba levantado. | `RedirectUris.Problem` exige `esquema://` en todos los sistemas. | `McpCoreTests › La_URL_de_retorno_se_valida` (`file:///…` agregado) |
 | F-12 | Baja | pruebas | La E2E completa: `mcp.spec.ts` gastaba el límite `oauth` por dirección y `oauth-odata.spec.ts` recibía 429. | `Security__TokenRequestsPerMinute` en la suite (como los demás límites); el riesgo real queda en R-038-5. | `oauth-odata.spec.ts › H2 CA1 · CA2 · CA3…` (falló en la corrida 1) |
 
 ### Contra el código anterior

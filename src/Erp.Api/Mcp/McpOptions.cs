@@ -160,7 +160,8 @@ public static class RedirectUris
     {
         if (string.IsNullOrWhiteSpace(uri) || uri.Length > MaxLength) return $"Cada URL de retorno es obligatoria y de hasta {MaxLength} caracteres.";
         if (uri.Any(char.IsControl) || uri.Contains(' ')) return "La URL de retorno no admite espacios ni caracteres de control.";
-        if (!Uri.TryCreate(uri, UriKind.Absolute, out var u)) return "La URL de retorno debe ser absoluta.";
+        // CI (Ubuntu): en Unix «/ruta» es una URI absoluta (file:///ruta); se exige «esquema://» en todos los sistemas.
+        if (!uri.Contains("://", StringComparison.Ordinal) || !Uri.TryCreate(uri, UriKind.Absolute, out var u)) return "La URL de retorno debe ser absoluta.";
         if (u.Fragment.Length > 0 || uri.Contains('#')) return "La URL de retorno no admite fragmento (#).";
         if (u.UserInfo.Length > 0) return "La URL de retorno no admite usuario ni contraseña.";
         if (u.Scheme == Uri.UriSchemeHttps) return null;
