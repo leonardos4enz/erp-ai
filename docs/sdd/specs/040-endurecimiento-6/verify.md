@@ -136,4 +136,5 @@ más de 16 uniones). Cerrados: R-018-4 y R-021-5. Ampliados: R-036-4, R-036-5, R
 la auditoría 7 pide que los decida o los pase a «Aceptado» con fecha.
 
 ## 6. CI
-PENDIENTE
+La corrida 41234884587 de `9ae139e` (integración y E2E completa en `windows-2025`, la segunda corrida completa) terminó en
+`success`.
