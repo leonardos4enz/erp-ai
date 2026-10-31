@@ -145,11 +145,14 @@ public static class ErpApp
         services.AddSingleton<Microsoft.AspNetCore.Authorization.IAuthorizationMiddlewareResultHandler, CapabilityResultHandler>();
 
         // ---------- Rate limiting ----------
+        // Spec 040 (D-01, D-02): toda partición por dirección usa ClientAddress (una IPv6 por su /64; detrás de un proxy listado
+        // en Security:ForwardedProxies, la dirección del cliente).
+        var v6 = ClientAddress.Ipv6Prefix(config);
         services.AddRateLimiter(o =>
         {
             o.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
             o.AddPolicy("login", http => RateLimitPartition.GetFixedWindowLimiter(
-                http.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                ClientAddress.Partition(http, v6, byUser: false),
                 // Configurable solo para que la suite E2E (que inicia muchas sesiones) no se bloquee a sí misma.
                 _ => new FixedWindowRateLimiterOptions
                 {
@@ -158,7 +161,7 @@ public static class ErpApp
                 }));
             // Spec 018: el servidor de tokens, por dirección, como el inicio de sesión.
             o.AddPolicy("oauth", http => RateLimitPartition.GetFixedWindowLimiter(
-                http.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                ClientAddress.Partition(http, v6, byUser: false),
                 _ => new FixedWindowRateLimiterOptions
                 {
                     PermitLimit = config.GetValue("Security:TokenRequestsPerMinute", 30),
@@ -166,7 +169,7 @@ public static class ErpApp
                 }));
             // Spec 027 (H5 CA4): generar un PDF cuesta CPU y memoria; por usuario.
             o.AddPolicy(PrintEndpoints.RatePolicy, http => RateLimitPartition.GetFixedWindowLimiter(
-                http.User.Identity?.Name ?? http.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                ClientAddress.Partition(http, v6),
                 _ => new FixedWindowRateLimiterOptions
                 {
                     PermitLimit = RatePolicies.PerMinute(config, PrintEndpoints.RatePolicy),
@@ -174,7 +177,7 @@ public static class ErpApp
                 }));
             // Spec 029 (H5 CA3): la búsqueda global consulta todos los catálogos con folio; por usuario.
             o.AddPolicy(RatePolicies.Search, http => RateLimitPartition.GetFixedWindowLimiter(
-                http.User.Identity?.Name ?? http.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                ClientAddress.Partition(http, v6),
                 _ => new FixedWindowRateLimiterOptions
                 {
                     PermitLimit = RatePolicies.PerMinute(config, RatePolicies.Search),
@@ -182,7 +185,7 @@ public static class ErpApp
                 }));
             // Spec 029 (H1 CA2): exportar e importar leen o escriben miles de filas; por usuario.
             o.AddPolicy(RatePolicies.Bulk, http => RateLimitPartition.GetFixedWindowLimiter(
-                http.User.Identity?.Name ?? http.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                ClientAddress.Partition(http, v6),
                 _ => new FixedWindowRateLimiterOptions
                 {
                     PermitLimit = RatePolicies.PerMinute(config, RatePolicies.Bulk),
@@ -190,14 +193,14 @@ public static class ErpApp
                 }));
             // Spec 031 (H6): tableros (un reporte por tarjeta), reportes y OData agregan o recorren muchas filas; por usuario.
             o.AddPolicy(RatePolicies.Aggregate, http => RateLimitPartition.GetFixedWindowLimiter(
-                http.User.Identity?.Name ?? http.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                ClientAddress.Partition(http, v6),
                 _ => new FixedWindowRateLimiterOptions
                 {
                     PermitLimit = RatePolicies.PerMinute(config, RatePolicies.Aggregate),
                     Window = TimeSpan.FromMinutes(1), QueueLimit = 0,
                 }));
             o.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(http => RateLimitPartition.GetFixedWindowLimiter(
-                http.User.Identity?.Name ?? http.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                ClientAddress.Partition(http, v6),
                 // Configurable solo para la suite E2E, que hace como administrador más de 600 peticiones por minuto.
                 _ => new FixedWindowRateLimiterOptions
                 {

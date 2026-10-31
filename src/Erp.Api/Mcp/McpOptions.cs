@@ -22,6 +22,10 @@ public sealed class McpOptions
     public int MaxClients { get; init; } = 1000;
     /// <summary>Revisión adversarial F-04: clientes registrados sin canjear todavía por dirección (los demás esperan al barrido).</summary>
     public int PendingClientsPerAddress { get; init; } = 20;
+    /// <summary>Spec 040 (D-01): conexiones vivas de una persona con clientes distintos.</summary>
+    public int MaxConnectionsPerUser { get; init; } = 20;
+    /// <summary>Spec 040 (revisión adversarial F-05): <c>Security:Ipv6PrefixLength</c>, el mismo de los límites por dirección.</summary>
+    public int Ipv6PrefixLength { get; init; } = Infrastructure.ClientAddress.DefaultIpv6Prefix;
     public IReadOnlyList<string> TrustedRedirectHosts { get; init; } = ["claude.ai", "claude.com"];
     public IReadOnlyList<string> AllowedOrigins { get; init; } = [];
 
@@ -42,6 +46,8 @@ public sealed class McpOptions
             MaxResultBytes = Clamp(s.GetValue("MaxResultBytes", 256 * 1024), 1024, 4 * 1024 * 1024),
             MaxClients = Clamp(s.GetValue("MaxClients", 1000), 1, 1_000_000),
             PendingClientsPerAddress = Clamp(s.GetValue("PendingClientsPerAddress", 20), 1, 100_000),
+            MaxConnectionsPerUser = Clamp(s.GetValue("MaxConnectionsPerUser", 20), 1, 1000),
+            Ipv6PrefixLength = Infrastructure.ClientAddress.Ipv6Prefix(config),
             TrustedRedirectHosts = trusted is { Length: > 0 } ? trusted : ["claude.ai", "claude.com"],
             AllowedOrigins = s.GetSection("AllowedOrigins").Get<string[]>() ?? [],
         };

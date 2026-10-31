@@ -36,6 +36,8 @@ if (app.Services.GetRequiredService<EnvironmentOptions>() is { RequireApproval: 
                           "asistente cambian el modelo sin pasar por un paquete aprobado. Úsalo solo en suites de prueba.");
 
 // ---------- Pipeline ----------
+// Spec 040 (H1 CA5, R-021-5 y R-018-4): detrás de un proxy listado, la dirección y el esquema del cliente (límites, URL).
+if (ClientAddress.ForwardedOptions(app.Configuration) is { } forwarded) app.UseForwardedHeaders(forwarded);
 app.UseExceptionHandler();
 app.UseStatusCodePages();
 app.UseSecurityHeaders();

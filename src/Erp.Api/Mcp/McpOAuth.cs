@@ -28,6 +28,38 @@ public sealed class McpOAuthService(Db db, McpOptions options, UserContextLoader
 
     public static readonly string[] GrantTypes = ["authorization_code", "refresh_token"];
 
+    /// <summary>Spec 040: una conexión viva (alias <c>g</c>): sin revocar y con un <i>refresh</i> sin usar ni vencer (como «Conexiones de Claude»).</summary>
+    private const string LiveGrant = "g.RevokedAt IS NULL AND EXISTS (SELECT 1 FROM meta.McpToken t WHERE t.GrantId = g.Id AND t.Kind = 'r' AND t.UsedAt IS NULL AND t.ExpiresAt > SYSUTCDATETIME())";
+
+    private string TooManyConnections() =>
+        $"Llegaste al máximo de {options.MaxConnectionsPerUser} conexiones de Claude (cuentan también las que desconectaste en las últimas 24 horas): " +
+        "desconecta las que no uses en «Conexiones de Claude» (menú de usuario) o inténtalo mañana.";
+
+    /// <summary>
+    /// Spec 040 (H1 CA3): clientes con los que la persona tiene una conexión viva o desconectada en las últimas 24 horas (el día
+    /// de gracia del barrido; revisión adversarial F-03: si no, conectar y desconectar en bucle dejaba filas sin tope), sin
+    /// contar el cliente que se está conectando (su conexión se reemplaza). Sin pistas de bloqueo: dos canjes de la misma
+    /// persona los forma <see cref="LockPersonAsync"/>.
+    /// </summary>
+    private static Task<int> OtherConnectionsAsync(DbConnection cn, DbTransaction? tx, int userId, int clientId) =>
+        cn.ExecuteScalarAsync<int>($"""
+            SELECT COUNT(DISTINCT g.ClientId) FROM meta.McpGrant g
+             WHERE g.UserId = @userId AND g.ClientId <> @clientId AND ({LiveGrant} OR g.RevokedAt > DATEADD(day, -1, SYSUTCDATETIME()))
+            """, new { userId, clientId }, tx);
+
+    /// <summary>
+    /// Spec 040 (revisión adversarial F-01): los canjes de una persona se forman con un candado de aplicación, no con
+    /// <c>UPDLOCK</c> sobre sus conexiones: contar lo vivo lee <c>McpToken</c>, y una renovación bloquea su token antes que su
+    /// conexión (orden contrario: interbloqueo). La renovación no toma este candado.
+    /// </summary>
+    private static async Task LockPersonAsync(DbConnection cn, DbTransaction tx, int userId)
+    {
+        if (await cn.ExecuteScalarAsync<int>("""
+                DECLARE @r int; EXEC @r = sp_getapplock @Resource = @res, @LockMode = 'Exclusive', @LockOwner = 'Transaction', @LockTimeout = 10000; SELECT @r;
+                """, new { res = $"erp-mcp-person:{userId}" }, tx) < 0)
+            throw new TimeoutException("No se obtuvo el candado de la persona para el canje MCP.");
+    }
+
     private void RequireEnabled()
     {
         if (!options.Enabled) throw new NotFound("Ruta no encontrada.");
@@ -114,23 +146,43 @@ public sealed class McpOAuthService(Db db, McpOptions options, UserContextLoader
         var clientId = McpFormat.NewClientId();
         var uniqueUris = uris.Distinct(StringComparer.Ordinal).ToArray();
         await using var cn = await db.OpenAsync(ct);
-        await using var tx = await cn.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, ct);
         // Barrido: un cliente que nunca canjeó un código en 1 h no sirve (CLARIFY 4; revisión adversarial F-04: consentir sin
-        // canjear ya no lo salva). Sus códigos se van con él. Luego, los topes por dirección y total.
-        await cn.ExecuteAsync("""
-            DECLARE @idle TABLE (Id int PRIMARY KEY);
-            INSERT @idle SELECT c.Id FROM meta.McpClient c
-             WHERE c.CreatedAt < DATEADD(hour, -1, SYSUTCDATETIME()) AND NOT EXISTS (SELECT 1 FROM meta.McpGrant g WHERE g.ClientId = c.Id);
-            DELETE meta.McpCode WHERE ClientId IN (SELECT Id FROM @idle);
-            DELETE meta.McpClient WHERE Id IN (SELECT Id FROM @idle);
-            """, transaction: tx);
-        var ip = http.Connection.RemoteIpAddress?.ToString();
+        // canjear ya no lo salva). Spec 040 (auditoría 7, D-01): tampoco uno cuyas conexiones murieron todas (revocadas,
+        // reemplazadas o vencidas) hace más de un día; se va con sus conexiones, tokens y códigos. Revisión adversarial F-02: en
+        // su propia transacción corta (READ COMMITTED), no dentro de la serializable de los topes, que si no detenía o
+        // interbloqueaba canjes y renovaciones. Luego, los topes por dirección y total, que cuentan solo lo vivo.
+        await using (var sweep = await cn.BeginTransactionAsync(ct))
+        {
+            await cn.ExecuteAsync($"""
+                DECLARE @cut datetime2(3) = DATEADD(day, -1, SYSUTCDATETIME());
+                DECLARE @idle TABLE (Id int PRIMARY KEY);
+                INSERT @idle SELECT c.Id FROM meta.McpClient c
+                 WHERE (c.CreatedAt < DATEADD(hour, -1, SYSUTCDATETIME()) AND NOT EXISTS (SELECT 1 FROM meta.McpGrant g WHERE g.ClientId = c.Id))
+                    OR (EXISTS (SELECT 1 FROM meta.McpGrant g WHERE g.ClientId = c.Id) AND ISNULL(c.LastAuthorizedAt, c.CreatedAt) < @cut
+                        -- Quien vuelve a conectar ese cliente ahora mismo (código sin usar ni vencer) no se queda a medias.
+                        AND NOT EXISTS (SELECT 1 FROM meta.McpCode k WHERE k.ClientId = c.Id AND k.UsedAt IS NULL AND k.ExpiresAt > SYSUTCDATETIME())
+                        AND NOT EXISTS (SELECT 1 FROM meta.McpGrant g WHERE g.ClientId = c.Id
+                             AND (g.RevokedAt > @cut OR (g.RevokedAt IS NULL AND EXISTS (SELECT 1 FROM meta.McpToken t WHERE t.GrantId = g.Id AND t.Kind = 'r' AND t.ExpiresAt > @cut)))));
+                DELETE t FROM meta.McpToken t JOIN meta.McpGrant g ON g.Id = t.GrantId WHERE g.ClientId IN (SELECT Id FROM @idle);
+                DELETE meta.McpCode WHERE ClientId IN (SELECT Id FROM @idle);
+                DELETE meta.McpGrant WHERE ClientId IN (SELECT Id FROM @idle);
+                DELETE meta.McpClient WHERE Id IN (SELECT Id FROM @idle);
+                """, transaction: sweep);
+            await sweep.CommitAsync(ct);
+        }
+        await using var tx = await cn.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, ct);
+        var ip = ClientAddress.Key(http.Connection.RemoteIpAddress, options.Ipv6PrefixLength);
         if (await cn.ExecuteScalarAsync<int>("""
                 SELECT COUNT(*) FROM meta.McpClient c WITH (UPDLOCK, HOLDLOCK)
                  WHERE (c.CreatedIp = @ip OR (@ip IS NULL AND c.CreatedIp IS NULL)) AND NOT EXISTS (SELECT 1 FROM meta.McpGrant g WHERE g.ClientId = c.Id)
                 """, new { ip }, tx) >= options.PendingClientsPerAddress)
             return Results.Json(new { error = "temporarily_unavailable", error_description = "Demasiados clientes sin usar desde esta dirección: inténtalo en una hora." }, statusCode: 429);
-        if (await cn.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM meta.McpClient WITH (UPDLOCK, HOLDLOCK)", transaction: tx) >= options.MaxClients)
+        // Vivos: pendientes (sin conexiones; tras el barrido, todos de la última hora) o con una conexión viva.
+        if (await cn.ExecuteScalarAsync<int>($"""
+                SELECT COUNT(*) FROM meta.McpClient c WITH (UPDLOCK, HOLDLOCK)
+                 WHERE NOT EXISTS (SELECT 1 FROM meta.McpGrant g WHERE g.ClientId = c.Id)
+                    OR EXISTS (SELECT 1 FROM meta.McpGrant g WHERE g.ClientId = c.Id AND {LiveGrant})
+                """, transaction: tx) >= options.MaxClients)
         {
             log.LogWarning("Registro de cliente MCP rechazado: se alcanzó Mcp:MaxClients ({Max})", options.MaxClients);
             return Results.Json(new { error = "temporarily_unavailable", error_description = "No se admiten más clientes por ahora." }, statusCode: 503);
@@ -222,12 +274,20 @@ public sealed class McpOAuthService(Db db, McpOptions options, UserContextLoader
         var a = await ParseAsync(http, http.Request.QueryString.Value?.TrimStart('?') ?? "", ct);
         if (a.NoRedirect is { } message) throw new AppException(400, message);
         if (a.Error is not null) return ErrorRedirect(http, a);
+        await RequireRoomAsync(u, a.Client!.Id, ct);
         return new
         {
             client = new { name = a.Client!.Name, redirectHost = RedirectUris.Host(a.RedirectUri!), trusted = RedirectUris.Trusted(a.RedirectUri!, options.TrustedRedirectHosts) },
             user = new { u.Username, u.DisplayName },
             scopes = McpScopes.All.Select(s => new { name = s, required = s == McpScopes.Model, requested = a.Scopes.Contains(s) }),
         };
+    }
+
+    /// <summary>Spec 040 (H1 CA3): la pantalla avisa antes de consentir; el canje vuelve a exigirlo bajo bloqueo.</summary>
+    private async Task RequireRoomAsync(UserContext u, int clientId, CancellationToken ct)
+    {
+        await using var cn = await db.OpenAsync(ct);
+        if (await OtherConnectionsAsync(cn, null, u.Id, clientId) >= options.MaxConnectionsPerUser) throw new Conflict(TooManyConnections());
     }
 
     /// <summary><c>POST /api/mcp/authorize</c>: la decisión de la persona (H2 CA3). Devuelve a dónde ir.</summary>
@@ -239,6 +299,7 @@ public sealed class McpOAuthService(Db db, McpOptions options, UserContextLoader
         if (a.NoRedirect is { } message) throw new AppException(400, message);
         if (a.Error is not null) return ErrorRedirect(http, a);
         if (!req.Approve) return new { redirect = Redirect(http, a.RedirectUri!, a.State, ("error", "access_denied"), ("error_description", "La persona no autorizó el acceso.")) };
+        await RequireRoomAsync(u, a.Client!.Id, ct);
         // Lo que la persona marcó, dentro de lo pedido: nunca más de lo que el cliente pidió.
         var chosen = McpScopes.Normalize((req.Scopes ?? []).Where(a.Scopes.Contains).Append(McpScopes.Model));
         var code = McpFormat.New(McpFormat.CodePrefix);
@@ -247,6 +308,8 @@ public sealed class McpOAuthService(Db db, McpOptions options, UserContextLoader
             INSERT meta.McpCode (CodeHash, ClientId, UserId, SecurityStamp, Scopes, RedirectUri, Challenge, Resource, ExpiresAt)
             VALUES (@hash, @client, @user, @stamp, @scopes, @redirect, @challenge, @resource, DATEADD(second, @seconds, SYSUTCDATETIME()));
             DELETE meta.McpCode WHERE ExpiresAt < DATEADD(day, -1, SYSUTCDATETIME()) AND GrantId IS NULL;
+            -- Spec 040 (revisión adversarial F-04): autorizar también es actividad del cliente (el barrido espera un día).
+            UPDATE meta.McpClient SET LastAuthorizedAt = SYSUTCDATETIME() WHERE Id = @client;
             """, new
         {
             hash = McpFormat.Hash(code), client = a.Client!.Id, user = u.Id, stamp = u.SecurityStamp, scopes = McpScopes.Join(chosen),
@@ -317,6 +380,13 @@ public sealed class McpOAuthService(Db db, McpOptions options, UserContextLoader
         {
             await tx.CommitAsync(ct);
             return Error(http, 400, "invalid_grant", "La cuenta que autorizó cambió: vuelve a conectar.");
+        }
+        // Spec 040 (H1 CA3): tope de conexiones por persona, con sus canjes en fila, antes de revocar la anterior del cliente.
+        await LockPersonAsync(cn, tx, row.UserId);
+        if (await OtherConnectionsAsync(cn, tx, row.UserId, client) >= options.MaxConnectionsPerUser)
+        {
+            await tx.CommitAsync(ct);
+            return Error(http, 400, "invalid_grant", TooManyConnections());
         }
         // Una conexión por persona y cliente (CLARIFY 5): la anterior se revoca.
         foreach (var previous in await cn.QueryAsync<int>(

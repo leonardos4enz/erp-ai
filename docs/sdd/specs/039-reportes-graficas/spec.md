@@ -82,7 +82,7 @@ ticket promedio) y agrupar por semana o trimestre.
    tableros personales: sí). → **Se divide** (dueño, 2026-10-31): **039** gráficas, colores, series, medidas calculadas,
    periodos y dos saltos sobre los reportes **del modelo**; **040 — Reportes y tableros personales**: cualquier usuario arma los
    suyos con lo que ve, explorar al vuelo (cambiar agrupación, medida o gráfica sin guardar) y tableros personales junto a los
-   del modelo. Ventas pasa a la **041** y MCP 2 a la **042**. La 039 queda en 6 historias, sin rutas nuevas.
+   del modelo. Ventas pasa a la **041** y MCP 2 a la **042**. La 039 queda en 6 historias, sin rutas nuevas. (La 040 recorrió la numeración: Endurecimiento 6 es la 040, los reportes personales la **041**, Ventas la **042** y MCP 2 la **043**.)
 2. **Auditoría 7:** el dueño decide que vaya **después** de la 039 (cubrirá 034–039).
 3. **Colores:** paleta del sistema de 12 tonos con nombre (`azul`, `naranja`, `verde`, `ambar`, `rosa`, `bosque`, `violeta`,
    `rojo`, `cian`, `oliva`, `purpura`, `lima`), con valores para claro y oscuro validados (`validate_palette.js`: separación

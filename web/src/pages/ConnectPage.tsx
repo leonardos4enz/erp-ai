@@ -43,6 +43,7 @@ export function ConnectPage() {
     }
   }
 
+  const atLimit = info.error instanceof ApiError && info.error.status === 409;
   const requestedDatos = !!data?.scopes?.find((s) => s.name === 'datos')?.requested;
 
   return (
@@ -53,10 +54,11 @@ export function ConnectPage() {
         {info.error != null && (
           <>
             <h1 id="consent-title" ref={titleRef} tabIndex={-1}>No se puede conectar</h1>
-            <Alert tone="danger" title="La petición de conexión no es válida">
+            {/* Spec 040 (revisión exploratoria F-01): el tope de conexiones no es una petición inválida. */}
+            <Alert tone="danger" title={atLimit ? 'Llegaste al máximo de conexiones de Claude' : 'La petición de conexión no es válida'}>
               {info.error instanceof ApiError ? info.error.message : 'No se pudo revisar la petición.'} No se envió nada al cliente.
             </Alert>
-            <Link className="btn" to="/">Ir al inicio</Link>
+            {atLimit ? <Link className="btn" to="/conexiones">Ver mis conexiones</Link> : <Link className="btn" to="/">Ir al inicio</Link>}
           </>
         )}
         {clientError && !leaving && (

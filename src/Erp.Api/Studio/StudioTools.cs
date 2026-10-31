@@ -174,7 +174,22 @@ public static class StudioTools
         foreach (var (id, content) in await cn.QueryAsync<(long, string)>(
                      "SELECT Id, ContentJson FROM meta.StudioMessage WHERE SessionId = @sessionId AND HasData = 1", new { sessionId }, tx))
             await cn.ExecuteAsync("UPDATE meta.StudioMessage SET ContentJson = @content, HasData = 0 WHERE Id = @id",
-                new { id, content = StudioTranscript.Purge(content, DataTools) ?? content }, tx);
+                new { id, content = PurgeContent(content) }, tx);
+    }
+
+    public const string Unreadable = "(contenido retirado: no se pudo leer)";
+
+    /// <summary>
+    /// Spec 040 (auditoría 7, D-03): un mensaje del historial sin lo que leyeron las herramientas de <c>datos</c>. Si su JSON no
+    /// se puede leer, se reemplaza por un aviso (ningún dato queda y la sesión se cierra igual: no atora la cola).
+    /// </summary>
+    public static string PurgeContent(string content)
+    {
+        try { return StudioTranscript.Purge(content, DataTools) ?? content; }
+        catch (Exception) // JSON mal formado o con otra forma (tipos, campos que faltan): no se puede leer, se retira entero
+        {
+            return StudioTranscript.Serialize([new StudioText(Unreadable)]);
+        }
     }
 
     // ---------- Definición ----------

@@ -37,6 +37,8 @@ public static class InterfaceRules
     public const int MaxHops = 2;
     public const int MaxSeries = 12;
     public const int MaxCalcLength = 500;
+    /// <summary>Spec 040 (auditoría 7, D-09): uniones distintas a otros catálogos por reporte (el tope que prometía el plan 039).</summary>
+    public const int MaxJoins = 16;
 
     public static readonly IReadOnlySet<string> Periods = new HashSet<string> { "day", "week", "month", "quarter", "year" };
     public static readonly IReadOnlySet<string> MeasureFns = new HashSet<string> { "count", "sum", "avg", "min", "max", "calc" };
@@ -271,9 +273,37 @@ public static class InterfaceRules
                 msgs.Add($"{where}: para ordenar por la medida, la primera no puede ser calculada (el orden se aplica en la base).");
             if (r.Dir is not (null or "asc" or "desc")) msgs.Add($"{where}: «dir» es asc o desc.");
             if (r.Limit is < 1 or > MaxRows) msgs.Add($"{where}: «limit» va de 1 a {MaxRows}.");
+            if (JoinCount(e, r, model) is var joins && joins > MaxJoins)
+                msgs.Add($"{where}: usa {joins} uniones a otros catálogos; el máximo es {MaxJoins} (quita agrupaciones o medidas a dos saltos).");
             msgs.AddRange(ValidateChart(e, r, groups.Count, model).Select(m => $"{where}: {m}"));
         }
         return msgs;
+    }
+
+    /// <summary>
+    /// Spec 040 (D-09): cuántas uniones distintas hace <c>ReportService</c> para el reporte, contadas como él las reutiliza:
+    /// una por salto (<c>Ref</c>, <c>Ref.Ref2</c>), más la del catálogo de una agrupación por referencia (<c>Ref</c> y
+    /// <c>Ref.Campo</c> comparten la de <c>Ref</c>) y la de una agrupación por usuario. Las rutas que no resuelven no cuentan
+    /// (ya tienen su propio error).
+    /// </summary>
+    public static int JoinCount(EntityDef e, ReportDef r, IReadOnlyDictionary<string, EntityDef> model)
+    {
+        var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        void Hops(string field, FieldPath p)
+        {
+            var parts = field.Split('.');
+            for (var i = 0; i < p.Hops.Count; i++) keys.Add(string.Join('.', parts[..(i + 1)]));
+        }
+        foreach (var g in r.GroupBy ?? [])
+            if (Resolve(e, g.Field, model).Path is { } p)
+            {
+                Hops(g.Field, p);
+                if (p.Field.Type == FieldTypes.User) keys.Add(g.Field + "@user");
+                else if (KindOf(p.Field) == ValueKind.Id && p.Field.ReferenceEntity is not null) keys.Add(g.Field);
+            }
+        foreach (var m in r.Measures.Where(m => m.Fn != "calc" && m.Field is not null))
+            if (Resolve(e, m.Field!, model).Path is { } p) Hops(m.Field!, p);
+        return keys.Count;
     }
 
     /// <summary>Spec 039 (H1–H4): el tipo de gráfica y sus opciones tienen sentido con las agrupaciones y medidas del reporte.</summary>

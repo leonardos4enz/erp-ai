@@ -96,7 +96,7 @@ test('preparar: una modeladora, un lector y una persona para las capturas', asyn
   expect([200, 409], await res.text()).toContain(res.status());
   const modelador = await roleId(admin, 'ModeladorMcp');
   for (const [username, displayName, ids] of [['e2e-mcp-ana', 'Ana Conectora', [modelador]], ['e2e-mcp-lector', 'Luis Lector', [await roleId(admin, 'Usuario')]],
-    ['e2e-mcp-visual', 'Vera Visual', [modelador]]] as const) {
+    ['e2e-mcp-visual', 'Vera Visual', [modelador]], ['e2e-mcp-tope', 'Teo Tope', [modelador]]] as const) {
     const u = await admin.post('/api/admin/users', { data: { username, displayName, password: PWD, roleIds: ids } });
     expect([201, 409], await u.text()).toContain(u.status());
   }
@@ -202,6 +202,27 @@ test('H2 CA2: un error del cliente (alcance desconocido) se explica y la persona
   await page.getByRole('button', { name: `Volver a ${new URL(callback).host}` }).click();
   await page.waitForURL((u) => u.href.startsWith(callback));
   expect(new URL(page.url()).searchParams.get('error')).toBe('invalid_scope');
+});
+
+// Spec 040 (auditoría 7, D-01): una persona tiene a lo más 20 conexiones vivas (Mcp:MaxConnectionsPerUser). Regresión
+// (revisión exploratoria 040, F-01): la pantalla decía «La petición de conexión no es válida» cuando la petición era válida
+// y lo que faltaba era desconectar algo; ahora lo dice y lleva a Conexiones de Claude.
+test('H1 CA3 (040): con el máximo de conexiones, Conectar lo explica y lleva a Conexiones de Claude', async ({ browser }) => {
+  const person = await as('e2e-mcp-tope');
+  const live = ((await (await person.get('/api/mcp/connections')).json()).connections as unknown[]).length;
+  for (let i = live; i < 20; i++) await connectByApi('e2e-mcp-tope', `Claude ${i + 1}`);
+  const page = await freshPage(browser);
+  await uiLogin(page, 'e2e-mcp-tope', PWD);
+  await page.goto(`/conectar?${authorizeQuery(await register('Claude 21'), pkce().challenge, 'modelo')}`);
+  await expect(page.getByRole('heading', { name: 'No se puede conectar' })).toBeFocused();
+  const alert = page.getByRole('alert');
+  await expect(alert).toContainText('Llegaste al máximo de conexiones de Claude');
+  await expect(alert).toContainText('Llegaste al máximo de 20 conexiones de Claude (cuentan también');
+  await expect(alert).not.toContainText('no es válida');
+  await expect(permitir(page)).toHaveCount(0);
+  await page.getByRole('link', { name: 'Ver mis conexiones' }).click();
+  await expect(page.getByRole('heading', { name: 'Conexiones de Claude', level: 1 })).toBeVisible();
+  await page.context().close();
 });
 
 test('H6 CA1 CA2: Conexiones de Claude lista la conexión, copia la URL y desconecta con confirmación', async ({ browser }) => {

@@ -787,6 +787,9 @@ public static class Bootstrap
         );
         IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_McpGrant_User')
             CREATE INDEX IX_McpGrant_User ON meta.McpGrant (UserId, RevokedAt);
+        -- Spec 040 (revisión adversarial F-02): el barrido y los topes del registro buscan las conexiones por cliente.
+        IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_McpGrant_Client')
+            CREATE INDEX IX_McpGrant_Client ON meta.McpGrant (ClientId) INCLUDE (RevokedAt);
         IF OBJECT_ID('meta.McpCode') IS NULL
         CREATE TABLE meta.McpCode (
             Id bigint IDENTITY PRIMARY KEY,

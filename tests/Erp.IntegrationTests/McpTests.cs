@@ -244,8 +244,14 @@ public class McpTests(McpTests.Host host) : IClassFixture<McpTests.Host>
         Assert.Equal("Cliente MCP", loop.Body!.Str("client_name"));
         Assert.DoesNotContain("client_secret", loop.Text);
 
-        // Tope de clientes: la siguiente instancia admite uno más de los que hay.
-        var count = await host.ScalarAsync<int>("SELECT COUNT(*) FROM meta.McpClient");
+        // Tope de clientes: la siguiente instancia admite uno más de los vivos (spec 040: pendientes o con una conexión viva;
+        // los que ya no tienen conexión viva no cuentan).
+        var count = await host.ScalarAsync<int>("""
+            SELECT COUNT(*) FROM meta.McpClient c
+             WHERE NOT EXISTS (SELECT 1 FROM meta.McpGrant g WHERE g.ClientId = c.Id)
+                OR EXISTS (SELECT 1 FROM meta.McpGrant g WHERE g.ClientId = c.Id AND g.RevokedAt IS NULL
+                           AND EXISTS (SELECT 1 FROM meta.McpToken t WHERE t.GrantId = g.Id AND t.Kind = 'r' AND t.UsedAt IS NULL AND t.ExpiresAt > SYSUTCDATETIME()))
+            """);
         var f = await host.SiblingAsync(s => s["Mcp:MaxClients"] = (count + 1).ToString());
         Assert.Equal(201, (await RegisterRawAsync(f, host, new { redirect_uris = new[] { Callback } })).Status);
         var full = await RegisterRawAsync(f, host, new { redirect_uris = new[] { Callback } });

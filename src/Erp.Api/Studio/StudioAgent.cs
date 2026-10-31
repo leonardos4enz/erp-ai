@@ -131,7 +131,9 @@ public sealed class StudioAgent(Db db, StudioOptions options, AssistantOptions a
         catch (OperationCanceledException) when (lost) { log.LogWarning("La sesión de Studio {Id} la tomó otro trabajador", claim.Id); }
         catch (StudioLeaseLost) { log.LogWarning("La sesión de Studio {Id} ya no es de este trabajador", claim.Id); lost = true; }
         catch (OperationCanceledException) when (cancelled) { outcome = new(StudioStatus.Cancelled, "cancelled"); }
-        catch (OperationCanceledException) when (stopping.IsCancellationRequested) { /* apagado: el lease vence y queda interrumpida */ }
+        // Spec 040 (auditoría 7, D-05): al apagar, el turno se cierra como interrumpido (y purga lo leído) aquí mismo; si el
+        // servidor no vuelve, no se queda nada de «datos» esperando a un vencimiento que nunca llega.
+        catch (OperationCanceledException) when (stopping.IsCancellationRequested) { outcome = new(StudioStatus.Interrupted, "interrupted"); }
         catch (OperationCanceledException) { outcome = new(StudioStatus.Failed, "limit_time", Summary: $"Se alcanzó el tiempo máximo de {options.MaxMinutes} minutos."); }
         // Revisión adversarial 034 (F-03): el proveedor respondió con error (clave, sobrecarga): esa llamada no se factura.
         catch (AssistantProviderException ex) { run.Reserved = 0; outcome = new(StudioStatus.Failed, ex.Code); }
@@ -165,9 +167,12 @@ public sealed class StudioAgent(Db db, StudioOptions options, AssistantOptions a
                     await AppendAsync(run, false, [new StudioText(text)], false);
                     await StepAsync(run, "text", null, null, new JsonObject { ["text"] = Cut(text, 8000), ["stopped"] = true }, "ok", Cut(text, 400), 0);
                 }
-                await FinishAsync(run, outcome);
+                // Al apagar, con un plazo corto: si no alcanza, el lease vence y la siguiente instancia la vence y purga.
+                using var deadline = new CancellationTokenSource(stopping.IsCancellationRequested ? TimeSpan.FromSeconds(5) : Timeout.InfiniteTimeSpan);
+                await FinishAsync(run, outcome, deadline.Token);
             }
             catch (StudioLeaseLost) { log.LogWarning("La sesión de Studio {Id} cambió de dueño antes de cerrarse", claim.Id); }
+            catch (OperationCanceledException) when (stopping.IsCancellationRequested) { log.LogWarning("La sesión de Studio {Id} no alcanzó a cerrarse al apagar; la vencerá su lease", claim.Id); }
         }
     }
 
@@ -541,16 +546,17 @@ public sealed class StudioAgent(Db db, StudioOptions options, AssistantOptions a
     }
 
     /// <summary>H2 CA5: el cierre y su auditoría van en una transacción que exige el lease.</summary>
-    private async Task FinishAsync(Run run, Outcome o)
+    private async Task FinishAsync(Run run, Outcome o, CancellationToken ct = default)
     {
-        await using var cn = await db.OpenAsync(CancellationToken.None);
-        await using var tx = await cn.BeginTransactionAsync();
+        await using var cn = await db.OpenAsync(ct);
+        await using var tx = await cn.BeginTransactionAsync(ct);
         // Spec 036 (H3 CA1): una entrega nueva reemplaza la propuesta vigente (PlanStatus 'proposed'); un turno sin plan no la
         // toca, y si contesta sin plan con una propuesta vigente, la conversación sigue mostrándola (estado y resumen).
         var n = await cn.ExecuteAsync("""
             UPDATE meta.StudioSession
                SET Status = CASE WHEN @PlanJson IS NULL AND @Status = 'answered' AND PlanStatus = 'proposed' THEN 'proposed' ELSE @Status END,
-                   Summary = CASE WHEN @PlanJson IS NULL AND @Status = 'answered' AND PlanStatus = 'proposed' THEN Summary ELSE @Summary END,
+                   -- Spec 040 (auditoría 7, D-08): un turno sin resumen propio (detenido, o fallido sin mensaje) tampoco borra el de la propuesta vigente.
+                   Summary = CASE WHEN @PlanJson IS NULL AND PlanStatus = 'proposed' AND (@Status = 'answered' OR @Summary IS NULL) THEN Summary ELSE @Summary END,
                    ErrorCode = @ErrorCode,
                    PlanJson = CASE WHEN @PlanJson IS NULL THEN PlanJson ELSE @PlanJson END,
                    -- Revisión adversarial 036 (F-06): un turno sin plan (también uno fallido) no borra el informe de la propuesta vigente.
@@ -571,7 +577,7 @@ public sealed class StudioAgent(Db db, StudioOptions options, AssistantOptions a
             after: new { turn = run.Claim.Turn, status = o.Status, errorCode = o.ErrorCode, steps = run.Steps, toolCalls = run.ToolCalls, inputTokens = run.Input,
                 outputTokens = run.Output, costUsd = (run.Cost + run.Reserved) / 1_000_000m, model = assistant.Model },
             userId: run.Claim.UserId, username: run.User?.Username ?? await cn.ExecuteScalarAsync<string>("SELECT Username FROM meta.[User] WHERE Id = @UserId", new { run.Claim.UserId }, tx));
-        await tx.CommitAsync();
+        await tx.CommitAsync(ct);
         signals.Pulse(run.Claim.Id);
     }
 

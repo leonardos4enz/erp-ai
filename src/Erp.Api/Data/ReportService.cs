@@ -247,10 +247,14 @@ public sealed class ReportService(Db db, MetadataStore store)
                 {
                     var target = model[p.Field.ReferenceEntity!];
                     var j = q.Join(col, target);
-                    var display = target.EffectiveDisplayField is { } d && !FieldAccess.DisplayHidden(target, user) // spec 029 (F-B)
+                    var displayHidden = FieldAccess.DisplayHidden(target, user); // spec 029 (F-B)
+                    var display = target.EffectiveDisplayField is { } d && !displayHidden
                         ? $"CAST({j}.{Quote(d)} AS nvarchar(400))" : "CAST(NULL AS nvarchar(400))";
-                    // Un registro referido que no se ve también es «sin acceso», aunque el principal sí se vea.
-                    var hidden = $"CASE WHEN ({noAccess}) = 1 OR ({col} IS NOT NULL AND {j}.[Id] IS NULL) THEN 1 ELSE 0 END";
+                    // Un registro referido que no se ve también es «sin acceso», aunque el principal sí se vea. Spec 040 (auditoría 7,
+                    // D-10): y uno cuyo campo para mostrar está oculto para quien ve, como en el listado (`__label`), en una sola fila.
+                    var hidden = displayHidden
+                        ? $"CASE WHEN ({noAccess}) = 1 OR {col} IS NOT NULL THEN 1 ELSE 0 END"
+                        : $"CASE WHEN ({noAccess}) = 1 OR ({col} IS NOT NULL AND {j}.[Id] IS NULL) THEN 1 ELSE 0 END";
                     // Regresión (revisión adversarial 039, F-B): sin acceso, ni el id ni el nombre agrupan: todos los registros
                     // que no se ven van en una sola fila (antes, una por registro oculto: se sabía cuántos eran y cuánto sumaba cada uno).
                     var shown = $"CASE WHEN {hidden} = 1 THEN NULL ELSE {display} END";

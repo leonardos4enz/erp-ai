@@ -289,4 +289,55 @@ public class Reports039Tests(Reports039Tests.Host host) : IClassFixture<Reports0
         var rows = Rows(await RunAsync(lector, "Promedio"));
         Assert.Contains("2026-10=93.33=280", rows);
     }
+
+    // Regresión (auditoría 7, D-10; spec 040 H4 CA2): con el campo para mostrar del catálogo referido oculto para quien ve, la
+    // agrupación daba «#id» (una fila por registro) mientras el listado dice «(sin acceso)». Ahora, una sola fila, como F-B,
+    // en la pantalla y en la exportación; la referencia vacía sigue en «(sin valor)».
+    [Fact]
+    public async Task H040_H4_CA2_campo_para_mostrar_oculto_da_sin_acceso()
+    {
+        using var admin = await host.AdminAsync();
+        if ((await admin.GetAsync("/api/model/entities/It40Lote")).Status != 200)
+        {
+            await admin.ApplyPlanAsync(new { description = "Spec 040 · campo para mostrar oculto", operations = new object[] {
+                // El campo para mostrar es una fórmula que lee un campo oculto (no se puede ocultar directamente: 029 F-B).
+                new { op = "createEntity", group = Group, name = "It40Bodega", label = "Bodega 040", labelPlural = "Bodegas 040", displayField = "Etiqueta", fields = new object[] {
+                    new { name = "Nombre", label = "Nombre", type = "text", required = true }, new { name = "Interna", label = "Clave interna", type = "text" },
+                    new { name = "Etiqueta", label = "Etiqueta", type = "formula", resultType = "text", formula = "Nombre & ' · ' & COALESCE(Interna, '')" } } },
+                new { op = "createEntity", group = Group, name = "It40Lote", label = "Lote 040", labelPlural = "Lotes 040", fields = new object[] {
+                    new { name = "Clave", label = "Clave", type = "text", required = true },
+                    new { name = "Bodega", label = "Bodega", type = "reference", referenceEntity = "It40Bodega" } } },
+                new { op = "setSecurity", entity = "It40Bodega", security = new { fields = new[] { new { field = "Interna", read = new[] { "Administrador" } } } } },
+                new { op = "setReports", entity = "It40Lote", reports = new object[] {
+                    new { name = "PorBodega", label = "Lotes por bodega", groupBy = new[] { new { field = "Bodega" } }, measures = new[] { new { fn = "count" } } } } },
+            } });
+            var roleId = await admin.RoleIdAsync(Role);
+            var perms = new[] { "It39Pedido", "It39Producto", "It39Categoria", "It39Marca", "It40Bodega", "It40Lote" }
+                .Select(entity => new { entity, canRead = true, canCreate = false, canUpdate = false, canDelete = false }).ToArray();
+            Assert.Equal(200, (await admin.PutAsync($"/api/admin/roles/{roleId}", new { name = Role, description = "Spec 039", canManageModel = false,
+                canManageUsers = false, canViewAudit = false, permissions = perms })).Status);
+            var norte = (await admin.CreateAsync("It40Bodega", new { Nombre = "Bodega Norte", Interna = "N-1" })).Id();
+            var sur = (await admin.CreateAsync("It40Bodega", new { Nombre = "Bodega Sur", Interna = "S-1" })).Id();
+            await admin.CreateAsync("It40Lote", new { Clave = "L1", Bodega = norte });
+            await admin.CreateAsync("It40Lote", new { Clave = "L2", Bodega = sur });
+            await admin.CreateAsync("It40Lote", new { Clave = "L3" });
+        }
+        var all = await admin.GetAsync("/api/reports/It40Lote/PorBodega");
+        Assert.True(all.Status == 200, all.Text);
+        Assert.Equal([$"{ReportService.NoValue}=1", "Bodega Norte · N-1=1", "Bodega Sur · S-1=1"], Rows(all.Body!).Order(StringComparer.Ordinal).ToList());
+
+        using var lector = await LectorAsync();
+        // Control: el listado ya decía «(sin acceso)» en la etiqueta de la referencia.
+        var list = await lector.GetAsync("/api/data/It40Lote");
+        Assert.True(list.Status == 200, list.Text);
+        Assert.Contains(ReportService.NoAccess, list.Text);
+        var r = await lector.GetAsync("/api/reports/It40Lote/PorBodega");
+        Assert.True(r.Status == 200, r.Text);
+        Assert.Equal([$"{ReportService.NoAccess}=2", $"{ReportService.NoValue}=1"], Rows(r.Body!).Order(StringComparer.Ordinal).ToList());
+        var csv = await lector.GetAsync("/api/reports/It40Lote/PorBodega/export", new { format = "csv" });
+        Assert.True(csv.Status == 200, csv.Text);
+        Assert.Contains(ReportService.NoAccess, csv.Text);
+        Assert.DoesNotContain("#", csv.Text);
+        Assert.DoesNotContain("N-1", csv.Text);
+    }
 }

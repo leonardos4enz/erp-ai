@@ -60,7 +60,7 @@ public sealed class AnthropicStudioModel(AnthropicAssistantModel provider, Assis
         try
         {
             // Spec 036: en streaming, para el texto en vivo; el agregador del SDK arma el mensaje completo.
-            var response = await global::Anthropic.SseAggregatorExtensions.Aggregate(Tap(provider.Client(credential).Messages.CreateStreaming(parameters, ct), onText));
+            var response = await global::Anthropic.SseAggregatorExtensions.Aggregate(Tap(provider.Client(credential).Messages.CreateStreaming(parameters, ct), Mark(onText)));
             var content = new List<StudioBlock>();
             foreach (var block in response.Content)
             {
@@ -75,11 +75,21 @@ public sealed class AnthropicStudioModel(AnthropicAssistantModel provider, Assis
                 u.CacheReadInputTokens ?? 0, u.CacheCreationInputTokens ?? 0);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
-        // Revisión adversarial 036 (F-04): lo que falla al escribir el estado en vivo (lease perdido, base) no es del proveedor.
-        catch (StudioLeaseLost) { throw; }
-        catch (Exception ex) when (ex is Microsoft.Data.SqlClient.SqlException) { throw; }
+        // Revisión adversarial 036 (F-04) y spec 040 (auditoría 7, D-06): lo que falla al escribir el estado en vivo (lease
+        // perdido, base, pool agotado…) no es del proveedor: sale tal cual y la llamada se cobra con su reserva. El origen se
+        // marca en el callback (no por tipo: el SDK también lanza InvalidOperationException).
+        catch (StudioCallbackFailed ex) { System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(ex.InnerException!); throw; }
         catch (Exception ex) { throw provider.Fail(ex); }
     }
+
+    /// <summary>Spec 040 (D-06): una excepción del callback del texto en vivo (código del ERP), para no confundirla con el proveedor.</summary>
+    private sealed class StudioCallbackFailed(Exception inner) : Exception(inner.Message, inner);
+
+    private static Func<string, Task>? Mark(Func<string, Task>? onText) => onText is null ? null : async text =>
+    {
+        try { await onText(text); }
+        catch (Exception ex) { throw new StudioCallbackFailed(ex); }
+    };
 
     private static async IAsyncEnumerable<RawMessageStreamEvent> Tap(IAsyncEnumerable<RawMessageStreamEvent> events, Func<string, Task>? onText)
     {

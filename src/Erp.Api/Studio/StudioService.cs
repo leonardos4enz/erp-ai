@@ -158,6 +158,12 @@ public sealed class StudioService(Db db, MetadataStore store, PlanService plans,
         return await GetAsync(id, null, user, ct);
     }
 
+    private const string OtherCompanyMessage = "Esta conversación lee registros de otra empresa: vuelve a esa empresa o empieza una conversación nueva.";
+
+    /// <summary>Spec 040 (auditoría 7, D-07): una conversación con «datos» es de la empresa en que se empezó (o siguió).</summary>
+    private static bool OtherCompany(string scopes, int? companyId, UserContext user) =>
+        ParseScopes(scopes).Contains(StudioScopes.Data) && companyId != user.Company?.Id;
+
     private const string Working = "El agente está trabajando en esta conversación: espera a que termine o detenlo.";
 
     /// <summary>
@@ -178,14 +184,17 @@ public sealed class StudioService(Db db, MetadataStore store, PlanService plans,
         await using (var tx = await cn.BeginTransactionAsync(ct))
         {
             await LockAsync(cn, tx, user.Id);
-            var s = (await cn.QueryAsync<(string Status, int Turns, int Steps, int ToolCalls, long Tokens, long CostMicros, int Messages)>("""
+            var s = (await cn.QueryAsync<(string Status, int Turns, int Steps, int ToolCalls, long Tokens, long CostMicros, int Messages, string Scopes, int? CompanyId)>("""
                 SELECT Status, Turns, Steps, ToolCalls, InputTokens + OutputTokens, CostMicros,
-                       (SELECT COUNT(*) FROM meta.StudioMessage m WHERE m.SessionId = s.Id)
+                       (SELECT COUNT(*) FROM meta.StudioMessage m WHERE m.SessionId = s.Id), Scopes, CompanyId
                   FROM meta.StudioSession s WITH (UPDLOCK, ROWLOCK) WHERE Id = @id AND UserId = @UserId
                 """, new { id, UserId = user.Id }, tx)).SingleOrDefault();
             if (s.Status is null) throw new NotFound("La sesión no existe.");
             if (StudioStatus.Active(s.Status)) throw new Conflict(Working);
             if (s.Messages == 0) throw new Conflict("Esta sesión es anterior al chat de ERP AI Studio: empieza una conversación nueva.");
+            // Spec 040 (auditoría 7, D-07): con «datos», lo que el modelo escribió citando registros de una empresa no viaja en un
+            // turno de otra. Sin «datos» (metadatos y conteos) la conversación sigue y toma la empresa actual (H1 CA4 de la 036).
+            if (OtherCompany(s.Scopes, s.CompanyId, user)) throw new Conflict(OtherCompanyMessage);
             if (await cn.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM meta.StudioSession WHERE UserId = @UserId AND Id <> @id AND Status IN ('queued', 'running')",
                     new { id, UserId = user.Id }, tx) > 0)
                 throw new Conflict("Tienes otra conversación de ERP AI Studio en curso: espera a que termine o detenla.");
@@ -257,7 +266,7 @@ public sealed class StudioService(Db db, MetadataStore store, PlanService plans,
                 """, new { id, after = after ?? 0 })).ToList();
         }
         // Spec 035 (R-033-10): sondear con `after` no compila la propuesta (sin plan, vista previa ni huella).
-        return await ToDtoAsync(row, steps, compile: after is null, ct);
+        return await ToDtoAsync(row, steps, compile: after is null, user, ct);
     }
 
     public async Task<StudioSessionDto> CancelAsync(int id, HttpContext http, CancellationToken ct)
@@ -353,35 +362,92 @@ public sealed class StudioService(Db db, MetadataStore store, PlanService plans,
 
     /// <summary>
     /// Sesiones cuyo trabajador dejó de renovar: terminan como interrumpidas (no se repiten) y su copia se borra. Spec 034
-    /// (A-05): lo reservado para la llamada en curso se cobra (el proveedor la cobra aunque el trabajador haya caído).
+    /// (A-05): lo reservado para la llamada en curso se cobra (el proveedor la cobra aunque el trabajador haya caído). Spec 040
+    /// (auditoría 7, D-03): cada sesión en su propia transacción; si una falla (purga, bitácora), las demás se vencen igual y
+    /// esa se reintenta en la vuelta siguiente.
     /// </summary>
     internal async Task<int> ExpireAsync(CancellationToken ct)
     {
-        List<(int Id, int UserId, string? SandboxDb, Guid? SandboxToken)> expired;
+        List<int> candidates;
+        await using (var cn = await db.OpenAsync(ct))
+            candidates = (await cn.QueryAsync<int>("SELECT Id FROM meta.StudioSession WHERE Status = 'running' AND LeaseUntil < SYSUTCDATETIME() ORDER BY Id")).ToList();
+        var count = 0;
+        foreach (var id in candidates)
+        {
+            try
+            {
+                if (await ExpireOneAsync(id, ct)) count++;
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (Exception ex)
+            {
+                log.LogError(ex, "No se pudo cerrar la sesión de Studio {Id} con su bitácora; se cierra sin ella", id);
+                // Revisión adversarial 040 (F-08): una sesión que falla siempre dejaba a su dueña con «sesión en curso» para
+                // siempre (y un error en cada vuelta): se cierra con lo mínimo y sin leer el historial.
+                try { if (await ExpireBareAsync(id, ct)) count++; }
+                catch (Exception bare) when (bare is not OperationCanceledException || !ct.IsCancellationRequested)
+                {
+                    log.LogError(bare, "Tampoco se pudo cerrar sin bitácora la sesión de Studio {Id}; se reintenta en la siguiente vuelta", id);
+                }
+            }
+        }
+        return count;
+    }
+
+    /// <summary>
+    /// Revisión adversarial 040 (F-08): el cierre de respaldo cuando el normal falla. Interrumpida, cobra lo reservado y retira
+    /// lo leído con «datos» sin interpretar el historial (los pasos de herramientas de datos pierden su salida y los mensajes
+    /// con datos se reemplazan por el aviso). Sin bitácora: lo que fallaba puede ser la bitácora (queda en el log).
+    /// </summary>
+    private async Task<bool> ExpireBareAsync(int id, CancellationToken ct)
+    {
+        (string? SandboxDb, Guid? SandboxToken)? e;
         await using (var cn = await db.OpenAsync(ct))
         await using (var tx = await cn.BeginTransactionAsync(ct))
         {
-            expired = (await cn.QueryAsync<(int, int, string?, Guid?)>("""
+            e = (await cn.QueryAsync<(string?, Guid?)>("""
+                UPDATE meta.StudioSession SET Status = 'interrupted', ErrorCode = 'interrupted', FinishedAt = SYSUTCDATETIME(),
+                       LeaseToken = NULL, LeaseUntil = NULL, CostMicros = CostMicros + ReservedMicros, ReservedMicros = 0,
+                       LiveJson = NULL, SandboxDb = NULL, SandboxToken = NULL, LastActivityAt = SYSUTCDATETIME()
+                OUTPUT deleted.SandboxDb, deleted.SandboxToken
+                 WHERE Id = @id AND Status = 'running' AND LeaseUntil < SYSUTCDATETIME()
+                """, new { id }, tx)).Cast<(string?, Guid?)?>().SingleOrDefault();
+            if (e is null) return false;
+            await cn.ExecuteAsync("""
+                UPDATE meta.StudioStep SET OutputJson = NULL WHERE SessionId = @id AND Tool IN @DataTools AND OutputJson IS NOT NULL;
+                UPDATE meta.StudioMessage SET ContentJson = @unreadable, HasData = 0 WHERE SessionId = @id AND HasData = 1;
+                """, new { id, StudioTools.DataTools, unreadable = StudioTranscript.Serialize([new StudioText(StudioTools.Unreadable)]) }, tx);
+            await tx.CommitAsync(ct);
+        }
+        log.LogWarning("La sesión de Studio {Id} quedó sin trabajador y se marcó interrumpida (sin bitácora)", id);
+        if (e.Value.SandboxDb is not null) await sandboxes.DropIfOwnedAsync(e.Value.SandboxDb, e.Value.SandboxToken);
+        return true;
+    }
+
+    private async Task<bool> ExpireOneAsync(int id, CancellationToken ct)
+    {
+        (int Id, int UserId, string? SandboxDb, Guid? SandboxToken)? e;
+        await using (var cn = await db.OpenAsync(ct))
+        await using (var tx = await cn.BeginTransactionAsync(ct))
+        {
+            // Sigue vencida (otra instancia no la venció ni su trabajador renovó entre la lista y aquí).
+            e = (await cn.QueryAsync<(int, int, string?, Guid?)>("""
                 UPDATE meta.StudioSession SET Status = 'interrupted', ErrorCode = 'interrupted', FinishedAt = SYSUTCDATETIME(),
                        LeaseToken = NULL, LeaseUntil = NULL, CostMicros = CostMicros + ReservedMicros, ReservedMicros = 0,
                        LiveJson = NULL, SandboxDb = NULL, SandboxToken = NULL, LastActivityAt = SYSUTCDATETIME()
                 OUTPUT inserted.Id, inserted.UserId, deleted.SandboxDb, deleted.SandboxToken
-                 WHERE Status = 'running' AND LeaseUntil < SYSUTCDATETIME()
-                """, transaction: tx)).ToList();
-            foreach (var e in expired)
-                await StudioTools.PurgeDataAsync(cn, tx, e.Id); // spec 035 (R-033-4)
-            foreach (var e in expired)
-                await Audit.WriteAsync(cn, tx, new DefaultHttpContext(), AuditActions.StudioFinish, entity: "studio", recordId: e.Id.ToString(),
-                    after: new { status = StudioStatus.Interrupted }, userId: e.UserId,
-                    username: await cn.ExecuteScalarAsync<string>("SELECT Username FROM meta.[User] WHERE Id = @UserId", new { e.UserId }, tx));
+                 WHERE Id = @id AND Status = 'running' AND LeaseUntil < SYSUTCDATETIME()
+                """, new { id }, tx)).Cast<(int, int, string?, Guid?)?>().SingleOrDefault();
+            if (e is not { } x) return false;
+            await StudioTools.PurgeDataAsync(cn, tx, x.Id); // spec 035 (R-033-4)
+            await Audit.WriteAsync(cn, tx, new DefaultHttpContext(), AuditActions.StudioFinish, entity: "studio", recordId: x.Id.ToString(),
+                after: new { status = StudioStatus.Interrupted }, userId: x.UserId,
+                username: await cn.ExecuteScalarAsync<string>("SELECT Username FROM meta.[User] WHERE Id = @UserId", new { x.UserId }, tx));
             await tx.CommitAsync(ct);
         }
-        foreach (var e in expired)
-        {
-            log.LogWarning("La sesión de Studio {Id} quedó sin trabajador y se marcó interrumpida", e.Id);
-            if (e.SandboxDb is not null) await sandboxes.DropIfOwnedAsync(e.SandboxDb, e.SandboxToken);
-        }
-        return expired.Count;
+        log.LogWarning("La sesión de Studio {Id} quedó sin trabajador y se marcó interrumpida", e.Value.Id);
+        if (e.Value.SandboxDb is not null) await sandboxes.DropIfOwnedAsync(e.Value.SandboxDb, e.Value.SandboxToken);
+        return true;
     }
 
     internal async Task<StudioClaim?> ClaimAsync(CancellationToken ct)
@@ -439,7 +505,7 @@ public sealed class StudioService(Db db, MetadataStore store, PlanService plans,
 
     // ---------- Lectura ----------
 
-    private async Task<StudioSessionDto> ToDtoAsync(Row r, IReadOnlyList<StepRow> steps, bool compile, CancellationToken ct)
+    private async Task<StudioSessionDto> ToDtoAsync(Row r, IReadOnlyList<StepRow> steps, bool compile, UserContext user, CancellationToken ct)
     {
         ChangePlan? plan = null;
         if (r.PlanJson is not null && compile)
@@ -483,7 +549,7 @@ public sealed class StudioService(Db db, MetadataStore store, PlanService plans,
             AppliedAt = Utc(r.AppliedAt), ChangeSetId = r.ChangeSetId,
             Trail = steps.Select(ToStep).ToList(),
             Turns = r.Turns, PlanStatus = r.PlanStatus,
-            CanSend = SendBlocked(r) is null, SendBlockedReason = SendBlocked(r),
+            CanSend = SendBlocked(r, user) is null, SendBlockedReason = SendBlocked(r, user),
         };
     }
 
@@ -518,17 +584,18 @@ public sealed class StudioService(Db db, MetadataStore store, PlanService plans,
     private const string SelectRow = """
         SELECT Id, Prompt, Scopes, Status, ErrorCode, Model, Steps, ToolCalls, InputTokens, OutputTokens, CostMicros, CreatedAt, StartedAt,
                FinishedAt, Summary, ReportJson, PlanJson, AppliedAt, ChangeSetId, Turns, PlanStatus,
-               (SELECT COUNT(*) FROM meta.StudioMessage m WHERE m.SessionId = meta.StudioSession.Id) AS Messages FROM meta.StudioSession
+               (SELECT COUNT(*) FROM meta.StudioMessage m WHERE m.SessionId = meta.StudioSession.Id) AS Messages, CompanyId FROM meta.StudioSession
         """;
 
     private sealed record Row(int Id, string Prompt, string Scopes, string Status, string? ErrorCode, string Model, int Steps, int ToolCalls,
         long InputTokens, long OutputTokens, long CostMicros, DateTime CreatedAt, DateTime? StartedAt, DateTime? FinishedAt, string? Summary,
-        string? ReportJson, string? PlanJson, DateTime? AppliedAt, int? ChangeSetId, int Turns, string? PlanStatus, int Messages);
+        string? ReportJson, string? PlanJson, DateTime? AppliedAt, int? ChangeSetId, int Turns, string? PlanStatus, int Messages, int? CompanyId);
 
     /// <summary>Spec 036: por qué no se puede mandar otro mensaje ahora (lo mismo que comprueba <see cref="SendAsync"/>, sin el día).</summary>
-    private string? SendBlocked(Row r) =>
+    private string? SendBlocked(Row r, UserContext user) =>
         StudioStatus.Active(r.Status) ? Working
         : r.Messages == 0 ? "Esta sesión es anterior al chat de ERP AI Studio: empieza una conversación nueva."
+        : OtherCompany(r.Scopes, r.CompanyId, user) ? OtherCompanyMessage
         : r.Turns >= options.MaxTurns ? $"Esta conversación llegó al tope de {options.MaxTurns} mensajes: empieza una nueva."
         : r.Steps >= options.MaxSteps ? $"Esta conversación llegó al tope de {options.MaxSteps} pasos: empieza una nueva."
         : r.ToolCalls >= options.MaxToolCalls ? $"Esta conversación llegó al tope de {options.MaxToolCalls} herramientas: empieza una nueva."
@@ -557,8 +624,16 @@ public sealed class StudioDispatcher(IServiceScopeFactory scopes, StudioOptions 
             {
                 using var scope = scopes.CreateScope();
                 var svc = scope.ServiceProvider.GetRequiredService<StudioService>();
-                await svc.ExpireAsync(stoppingToken);
-                await svc.ReleaseSandboxesAsync(null, stoppingToken); // spec 036: copias sin uso
+                // Spec 040 (D-03): una falla al vencer o al soltar copias no impide reclamar turnos.
+                try
+                {
+                    await svc.ExpireAsync(stoppingToken);
+                    await svc.ReleaseSandboxesAsync(null, stoppingToken); // spec 036: copias sin uso
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException || !stoppingToken.IsCancellationRequested)
+                {
+                    log.LogError(ex, "Error al vencer sesiones o soltar copias de ERP AI Studio");
+                }
                 while (Volatile.Read(ref running) < options.Workers && await svc.ClaimAsync(stoppingToken) is { } claim)
                 {
                     // Spec 036 (H4 CA2): una copia viva por persona.

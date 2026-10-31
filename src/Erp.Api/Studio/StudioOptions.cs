@@ -64,6 +64,7 @@ public sealed record StudioOptions
     public static StudioOptions From(IConfiguration config)
     {
         var s = config.GetSection("Studio");
+        var lease = Math.Clamp(s.GetValue("LeaseSeconds", 120), 5, 3600);
         return new StudioOptions
         {
             // F-06: la columna meta.StudioSession.Prompt es de 4 000.
@@ -82,8 +83,9 @@ public sealed record StudioOptions
             Sandbox = s.GetValue("Sandbox", true),
             Workers = Math.Clamp(s.GetValue("Workers", 2), 1, 16),
             PollSeconds = Math.Clamp(s.GetValue("PollSeconds", 2), 1, 60),
-            LeaseSeconds = Math.Clamp(s.GetValue("LeaseSeconds", 120), 5, 3600),
-            RenewSeconds = Math.Clamp(s.GetValue("RenewSeconds", 10), 1, 600),
+            LeaseSeconds = lease,
+            // Spec 040 (auditoría 7, D-04): renovar más seguido que un tercio del lease; si no, cada turno lo perdería.
+            RenewSeconds = Math.Min(Math.Clamp(s.GetValue("RenewSeconds", 10), 1, 600), Math.Max(1, lease / 3)),
             MaxTurns = Math.Clamp(s.GetValue("MaxTurns", 20), 1, 200),
             SandboxIdleMinutes = Math.Clamp(s.GetValue("SandboxIdleMinutes", 60), 1, 24 * 60),
             LiveMs = Math.Clamp(s.GetValue("LiveMs", 250), 50, 5000),

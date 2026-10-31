@@ -731,7 +731,9 @@ public partial class StudioTests(StudioTests.Host host) : IClassFixture<StudioTe
     }
 
     [Fact]
-    public async Task H3_CA3_las_bases_aisladas_huerfanas_se_barren()
+    // Spec 040: dentro de Task.Run, como F01 (E/S de canalizaciones con nombre de LocalDB y salida de hilos, ver ErpHost):
+    // la consulta a sys.databases fallaba con «La operación de E/S se anuló por una salida de subproceso».
+    public Task H3_CA3_las_bases_aisladas_huerfanas_se_barren() => Task.Run(async () =>
     {
         var orphan = SandboxFactory.NameFor(host.RealDb, 900_002);
         // De otra base real con el mismo inicio: no es de este entorno y no se toca.
@@ -750,7 +752,7 @@ public partial class StudioTests(StudioTests.Host host) : IClassFixture<StudioTe
             SqlConnection.ClearAllPools();
             await host.ExecAsync($"IF DB_ID(N'{other}') IS NOT NULL DROP DATABASE [{other}]");
         }
-    }
+    });
 
     // ---------- H4 ----------
 
@@ -1179,5 +1181,24 @@ public class StudioProviderTests(StudioProviderTests.Host host) : IClassFixture<
         Assert.Equal("failed", s.Str("status"));
         Assert.Contains("rechazó la clave", s.Str("error"));
         Assert.DoesNotContain("invalid x-api-key", s.Json());
+    }
+
+    // Regresión (auditoría 7, D-06; spec 040 H2 CA4): una falla del ERP mientras llega el texto en vivo (aquí, la del pool de
+    // conexiones) salía como falla del proveedor y la llamada no se cobraba; solo SqlException y la pérdida del lease se
+    // reconocían. Ahora el origen se marca en el callback y sale tal cual.
+    [Fact]
+    public async Task H040_H2_CA4_una_falla_del_callback_no_es_del_proveedor()
+    {
+        var model = host.Services.GetRequiredService<IStudioModel>();
+        var credential = await host.Services.GetRequiredService<AssistantKeys>().GetAsync(CancellationToken.None);
+        var request = new StudioRequest("Sistema de prueba", [new StudioMessage(true, [new StudioText("Hola")])], [], 1000);
+        while (host.Replies.TryDequeue(out _)) { }
+        host.Replies.Enqueue(_ => (200, Message([new { type = "text", text = "Escribo algo en vivo para la prueba" }], "end_turn")));
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            model.NextAsync(credential!, request, _ => throw new InvalidOperationException("Se agotó el pool de conexiones."), CancellationToken.None));
+        Assert.Equal("Se agotó el pool de conexiones.", ex.Message);
+        // Control: lo que falla del lado del proveedor sigue siendo del proveedor.
+        host.Replies.Enqueue(_ => (529, new { type = "error", error = new { type = "overloaded_error", message = "Overloaded" } }));
+        await Assert.ThrowsAsync<AssistantProviderException>(() => model.NextAsync(credential!, request, _ => Task.CompletedTask, CancellationToken.None));
     }
 }

@@ -25,6 +25,7 @@ const COMPANY = { code: 'CN029', name: 'Empresa canario 029', baseCurrency: 'MXN
 const AVISO = 'Aviso del canario: el dato secreto está vacío.';
 const AVISO_OCULTO = 'Aviso del canario: el campo oculto tiene valor.';
 const ENTITIES = ['CnDoc', 'CnPuente2', 'CnPuente', 'CnSecreto', 'CnEmpresa'] as const;
+const REPORTS = ['PorDato', 'PorCopia', 'PorPuente', 'Conteo', 'PorSecreto2', 'PorSecretoRef2', 'PorPuenteDoble'] as const;
 
 // El canario se guarda en un archivo de la corrida (el proceso se reinicia tras una falla con E2E_INDEPENDENT).
 const STATE = path.join(HERE, '.results', 'canario-029.json');
@@ -88,10 +89,15 @@ const MODEL = (canary: string) => ({
       { name: 'PorDato', label: 'Por dato', groupBy: [{ field: 'Dos' }], measures: [{ fn: 'count' }] },
       { name: 'PorCopia', label: 'Por copia', groupBy: [{ field: 'Copia' }], measures: [{ fn: 'count' }] },
       { name: 'PorPuente', label: 'Por puente', groupBy: [{ field: 'Puente' }], measures: [{ fn: 'count' }] },
-      { name: 'Conteo', label: 'Documentos', measures: [{ fn: 'count' }] } ] },
+      { name: 'Conteo', label: 'Documentos', measures: [{ fn: 'count' }] },
+      // Spec 040 (auditoría 7, D-12): a dos saltos, en agrupaciones (texto y referencia) y medidas.
+      { name: 'PorSecreto2', label: 'Por secreto a dos saltos', groupBy: [{ field: 'Puente.Secreto.Dato' }], measures: [{ fn: 'count' }, { fn: 'count', field: 'Puente.Secreto.Dato' }] },
+      { name: 'PorSecretoRef2', label: 'Por secreto (referencia) a dos saltos', groupBy: [{ field: 'Puente2.Puente.Secreto' }], measures: [{ fn: 'count' }] },
+      { name: 'PorPuenteDoble', label: 'Por puente del puente doble', groupBy: [{ field: 'Puente2.Puente' }], measures: [{ fn: 'count', field: 'Puente2.Puente.Secreto' }] } ] },
     { op: 'setDashboard', dashboard: { name: 'CnTablero', label: 'Tablero 029', widgets: [
       { type: 'table', entity: 'CnDoc', report: 'PorDato' }, { type: 'table', entity: 'CnDoc', report: 'PorCopia' },
-      { type: 'kpi', entity: 'CnDoc', report: 'Conteo' } ] } },
+      { type: 'kpi', entity: 'CnDoc', report: 'Conteo' }, { type: 'table', entity: 'CnDoc', report: 'PorSecreto2' },
+      { type: 'table', entity: 'CnDoc', report: 'PorPuenteDoble' } ] } },
     { op: 'setPrintTemplates', entity: 'CnDoc', templates: [{ name: 'Canario', label: 'Canario', default: true, blocks: [
       { type: 'text', text: 'Documento {{ Folio }}' },
       { type: 'text', text: 'Dos: {{ Puente.Secreto.Dato }} · Tres: {{ Puente2.Puente.Secreto.Dato }} · Empresa: {{ Puente.Empresa.Dato }}' },
@@ -233,7 +239,7 @@ function expand(template: string, ids: Record<string, number>): string[] {
   if (template.includes('{entity}') && template.includes('{id:long}'))
     return [...ENTITIES].flatMap((e) => byEntity[e].map((id) => template.replace('{entity}', e).replace('{id:long}', String(id))));
   fill('{entity}', [...ENTITIES]);
-  fill('{name}', template.startsWith('/api/reports') ? ['PorDato', 'PorCopia', 'PorPuente', 'Conteo'] : template.startsWith('/api/dashboards') ? ['CnTablero'] : [...ENTITIES]);
+  fill('{name}', template.startsWith('/api/reports') ? [...REPORTS] : template.startsWith('/api/dashboards') ? ['CnTablero'] : [...ENTITIES]);
   fill('{id:long}', [String(ids.doc)]);
   fill('{id:int}', ['1']);
   fill('{token}', ['x']);
@@ -311,6 +317,30 @@ test('H2 CA2: ninguna ruta GET del inventario devuelve el canario al lector', as
   // La extracción de XLSX funciona (si no, buscar el canario en Excel no probaría nada).
   const own = await (await admin()).get('/api/data/CnDoc/export', { params: { format: 'xlsx', columns: 'Nombre,Oculto' } });
   expect(zipText(await own.body())).toContain(canary);
+});
+
+// Spec 040 (auditoría 7, D-12): los reportes a dos saltos (agrupación por texto y por referencia, medida) están en el
+// recorrido de arriba (pantalla, exportación y tablero); aquí, el control: el administrador sí ve el canario por esos mismos
+// caminos (si no, que el lector no lo vea no probaría nada) y el lector recibe las filas como «(sin acceso)».
+test('H4 CA3 (040): los reportes a dos saltos, su exportación y el tablero: el administrador ve el canario y el lector no', async () => {
+  const a = await admin();
+  const l = await lector();
+  const { canary } = state;
+  for (const [name, visible] of [['PorSecreto2', true], ['PorPuenteDoble', true], ['PorSecretoRef2', false]] as const) {
+    const own = await a.get(`/api/reports/CnDoc/${name}`);
+    expect(own.status(), await own.text()).toBe(200);
+    expect((await own.text()).includes(canary), `${name} del administrador`).toBe(visible);
+    const res = await l.get(`/api/reports/CnDoc/${name}`);
+    expect(res.status(), await res.text()).toBe(200);
+    expect(await res.text()).not.toContain(canary);
+    expect(await res.text()).toContain('(sin acceso)');
+  }
+  expect(await (await a.get('/api/reports/CnDoc/PorSecreto2/export', { params: { format: 'csv' } })).text()).toContain(canary);
+  expect(await (await l.get('/api/reports/CnDoc/PorSecreto2/export', { params: { format: 'csv' } })).text()).not.toContain(canary);
+  const board = await a.get('/api/dashboards/CnTablero');
+  expect(board.status(), await board.text()).toBe(200);
+  expect(await board.text()).toContain(canary);
+  expect(await (await l.get('/api/dashboards/CnTablero')).text()).not.toContain(canary);
 });
 
 test('H2 CA2 (031): ordenar por una fórmula o un campo que no ve se ignora (el orden no es un oráculo)', async () => {

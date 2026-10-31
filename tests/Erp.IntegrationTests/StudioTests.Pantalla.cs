@@ -108,14 +108,17 @@ public partial class StudioTests
         {
             id = (await StartAsync(gil, "purga-atomica", "Lee las tareas", "datos")).Id();
             await WaitForAsync(() => host.ScalarAsync<int>($"SELECT COUNT(*) FROM meta.StudioStep WHERE SessionId = {id} AND Kind = 'deliver'"), n => n == 1, "la entrega");
-            // El cierre y el vencimiento (lease de 4 s) fallan mientras dure la restricción.
-            await Task.Delay(TimeSpan.FromSeconds(6));
+            // El cierre del trabajador falla: la sesión sigue «running» con lo leído (nada a medias).
             Assert.Equal("running", await host.ScalarAsync<string>($"SELECT Status FROM meta.StudioSession WHERE Id = {id}"));
             Assert.Equal(1, await StoredDataAsync(id));
+            // Spec 040 (revisión adversarial F-08): al vencer el lease (4 s), el vencimiento normal falla igual (bitácora) y el
+            // cierre de respaldo la deja interrumpida sin bitácora; la purga va en esa misma transacción: nunca se ve
+            // «interrumpida» con lo leído.
+            await WaitForAsync(async () => (await host.ScalarAsync<string>($"SELECT Status FROM meta.StudioSession WHERE Id = {id}"), await StoredDataAsync(id)),
+                s => s.Item1 == "interrupted" || s.Item2 == 0, "sesión cerrada o purgada");
+            Assert.Equal(("interrupted", 0), (await host.ScalarAsync<string>($"SELECT Status FROM meta.StudioSession WHERE Id = {id}"), await StoredDataAsync(id)));
+            Assert.Equal(0, await host.ScalarAsync<int>($"SELECT COUNT(*) FROM meta.AuditLog WHERE Action = 'studio.finish' AND RecordId = '{id}'"));
         }
-        // Sin la falla, el lease vencido la deja interrumpida y lo leído se borra en esa misma transacción.
-        await WaitForAsync(() => host.ScalarAsync<string>($"SELECT Status FROM meta.StudioSession WHERE Id = {id}"), s => s == "interrupted", "sesión interrumpida");
-        Assert.Equal(0, await StoredDataAsync(id));
     }
 
     [Fact]

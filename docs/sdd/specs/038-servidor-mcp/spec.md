@@ -104,7 +104,7 @@ para retirar un permiso que ya no quiero.
 2. **Copia aislada y `entregar` por MCP: fuera.** La copia aislada vive con la conversación de Studio (`meta.StudioSession`:
    *lease*, marca, barrido, una copia viva por persona) y MCP no tiene un fin de conversación: exponerla exige un ciclo de
    vida propio (otro trabajo asíncrono, otra base por cliente) y escrituras con idempotencia. Va a una spec propia,
-   **040 — MCP 2: copia aislada y propuestas** (después de Ventas). Mientras, el alcance `aislado` no se ofrece por MCP y
+   **040 — MCP 2: copia aislada y propuestas** (después de Ventas; hoy la **043**). Mientras, el alcance `aislado` no se ofrece por MCP y
    ninguna herramienta MCP escribe: todas son de lectura e idempotentes (la regla de idempotencia o huella en escrituras
    queda escrita para la 040).
 3. **Alcances del token MCP = alcances de Studio** (`modelo`, `datos`), no los de la 018 (`odata.read`, `data.*`): el token

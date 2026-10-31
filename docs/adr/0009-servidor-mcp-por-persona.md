@@ -18,7 +18,7 @@ tokens en el navegador (II.3, ADR-0002), mínimo privilegio (II.2) y que la IA n
 2. **Las herramientas son las de Studio del entorno real** (`StudioTools` + `StudioToolRunner` + `RouteDispatcher`), con la
    persona del token y los alcances de la conexión (`modelo`, `datos`). El despachador recibe la credencial nula (la persona):
    el límite del token está en los alcances (runner) y en que el destino real solo admite rutas que no escriben. La copia
-   aislada y `entregar` no se exponen (su ciclo de vida es el de una conversación de Studio; va a la 040).
+   aislada y `entregar` no se exponen (su ciclo de vida es el de una conversación de Studio; va a la 043, MCP 2; numerada 040 al escribir este ADR y recorrida en la 039 y la 040).
 3. **Clientes públicos con registro dinámico abierto y consentimiento de la persona.** Sin secretos de cliente (PKCE S256
    obligatorio, código de un uso y 2 min), retorno exacto a uno registrado (https o *loopback*), *refresh token* rotado con
    detección de reuso. El consentimiento es una pantalla de la SPA con la sesión de la persona (cookie + CSRF); muestra el
