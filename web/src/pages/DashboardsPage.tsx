@@ -91,11 +91,13 @@ export function DashboardPage() {
                 <Link to={`/reports/${encodeURIComponent(w.entity)}/${encodeURIComponent(w.report)}`}>{w.label}</Link>
               </h2>
               {w.type === 'kpi' ? (
-                <div className="kpi-value">{m ? formatReportValue(m, w.result.totals[m.key]) : '—'}</div>
+                w.result.comparison
+                  ? <ReportChart result={w.result} kind="kpi" measure={w.measure ?? 0} /> // spec 039 (H4): último periodo contra el anterior
+                  : <div className="kpi-value">{m ? formatReportValue(m, w.result.totals[m.key]) : '—'}</div>
               ) : w.result.rows.length === 0 ? (
                 <p className="subtle">Sin datos todavía.</p>
               ) : w.type === 'chart' ? (
-                <ReportChart result={w.result} kind={w.result.chart ?? 'bar'} measure={w.measure ?? 0} />
+                <ReportChart result={w.result} kind={w.result.chart ?? 'bar'} measure={w.measure ?? undefined} />
               ) : (
                 <ReportTable result={w.result} caption={w.label} />
               )}
@@ -132,7 +134,7 @@ function DashboardEditor({ open, initial, onClose, onApplied }: { open: boolean;
   return (
     <>
       <Dialog open={open && !plan} onClose={onClose} size="lg" title={initial ? `Editar ${initial.label}` : 'Nuevo tablero'}
-        description="Tarjetas kpi (reporte sin agrupación), chart o table (con agrupación), cada una con entity y report. Se valida en la vista previa."
+        description="Tarjetas kpi (reporte sin agrupación, o por una fecha con periodo para compararlo con el anterior), chart o table (con agrupación), cada una con entity y report. Se valida en la vista previa."
         footer={<><Button onClick={onClose}>Cancelar</Button><Button variant="primary" onClick={review}>Revisar cambios</Button></>}>
         <Textarea className="mono json-editor" label="Tablero (JSON)" rows={16} spellCheck={false} value={text} error={error}
           onChange={(e) => { setText(e.target.value); setError(undefined); }} />

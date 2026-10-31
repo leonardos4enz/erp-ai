@@ -521,7 +521,7 @@ test('H4 CA4 · CA5 · CA12: vista y reporte con selectores; el editor conserva 
   await rep.getByLabel('Agrupación 1: campo').selectOption('Prioridad');
   await rep.getByRole('button', { name: 'Agregar medida' }).click();
   await rep.getByLabel('Medida 2: campo').selectOption('Total');
-  await rep.getByLabel('Gráfica').selectOption('bar');
+  await rep.getByLabel('Tipo de gráfica').selectOption('bar'); // spec 039: «Gráfica» es ahora la sección
   await applyFromDialog(page);
 
   const d = await def(`${NOTA}`);

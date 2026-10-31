@@ -556,21 +556,40 @@ code, pre, .mono { font-family: var(--font-mono); font-size: 0.8125rem; }
 :root {
   --chart-1: #2a78d6; --chart-2: #eb6834; --chart-3: #1baf7a; --chart-4: #eda100;
   --chart-5: #e87ba4; --chart-6: #008300; --chart-7: #6250d6; --chart-8: #e34948;
+  /* Spec 039: cian, oliva, púrpura y lima (validados con los 8 anteriores: daltonismo ≥ 8 y ≥ 15 a simple vista entre vecinos). */
+  --chart-9: #0f8fb0; --chart-10: #8c7200; --chart-11: #a83fb5; --chart-12: #7aa316;
+  --chart-other: #8a8984;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --chart-1: #3987e5; --chart-2: #d95926; --chart-3: #199e70; --chart-4: #c98500;
     --chart-5: #d55181; --chart-6: #008300; --chart-7: #9085e9; --chart-8: #e66767;
+    --chart-9: #1d94b3; --chart-10: #9a7f0a; --chart-11: #b65cc2; --chart-12: #729e1c;
+    --chart-other: #77766f;
   }
 }
 :root[data-theme="dark"] {
   --chart-1: #3987e5; --chart-2: #d95926; --chart-3: #199e70; --chart-4: #c98500;
   --chart-5: #d55181; --chart-6: #008300; --chart-7: #9085e9; --chart-8: #e66767;
+  --chart-9: #1d94b3; --chart-10: #9a7f0a; --chart-11: #b65cc2; --chart-12: #729e1c;
+  --chart-other: #77766f;
 }
 .chart .chart-bar { fill: var(--chart-1); }
 .chart .chart-line { stroke: var(--chart-1); }
 .chart .chart-dot { fill: var(--chart-1); stroke: var(--surface); stroke-width: 2; }
 .chart .chart-hit { fill: transparent; }
+/* Spec 039: varias series; el color va en el atributo (paleta cerrada), el trazo de separación es la superficie. */
+.chart .chart-mark { stroke: var(--surface); stroke-width: 1; }
+.chart .chart-hit:hover { fill: var(--text); fill-opacity: 0.04; }
+.chart polyline.chart-line { stroke-width: 2; fill: none; }
+.chart .chart-area { fill-opacity: 0.22; stroke: none; }
+.chart circle.chart-dot { stroke: var(--surface); stroke-width: 2; }
+.chart text.chart-value { fill: var(--text); font-variant-numeric: tabular-nums; }
+.chart-wrap { min-width: 0; }
+.chart-swatch.line { height: 3px; border-radius: 2px; }
+.kpi { display: flex; flex-direction: column; gap: var(--space-1); }
+.kpi-meta, .kpi-delta { font-size: var(--text-sm); color: var(--text-muted); }
+.kpi-delta { display: inline-flex; align-items: center; gap: var(--space-1); color: var(--text); }
 .chart .chart-hit:hover + .chart-bar, .chart .chart-bar:hover { opacity: 0.85; }
 
 /* Spec 008: importación, integraciones */
@@ -849,6 +868,14 @@ code, pre, .mono { font-family: var(--font-mono); font-size: 0.8125rem; }
 .subgroup > legend { padding: 0 var(--space-1); }
 .subitem { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: var(--space-3); display: grid; gap: var(--space-2); background: var(--surface-2); min-width: 0; }
 .assign-row { display: grid; grid-template-columns: minmax(140px, 0.8fr) minmax(0, 1.4fr) auto; gap: var(--space-2); align-items: start; }
+/* Spec 039: medidas con nombre, etiqueta y decimales; colores de las series de la gráfica. */
+.measure-row { display: grid; gap: var(--space-2); padding-bottom: var(--space-2); border-bottom: 1px solid var(--border); }
+.measure-row:last-of-type { border-bottom: 0; }
+.measure-extra { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: var(--space-2); }
+.color-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: var(--space-2); margin-top: var(--space-3); }
+.color-pick { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.color-pick > :last-child { flex: 1; min-width: 0; }
+.color-pick .chart-swatch { width: 14px; height: 14px; border: 1px solid var(--border-strong); }
 .filter-row-editor { display: grid; grid-template-columns: minmax(130px, 1fr) minmax(120px, 0.8fr) minmax(0, 1.2fr) auto; gap: var(--space-2); align-items: start; }
 .filter-row-editor .multipick { grid-column: auto; }
 @media (max-width: 640px) {

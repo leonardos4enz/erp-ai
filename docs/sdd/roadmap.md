@@ -44,7 +44,9 @@ en orden, no en paralelo: casi todas tocan el núcleo del motor (`PlanCompiler`,
 | 036 ERP AI Studio como chat: motor conversacional y streaming | Implementado ([spec](specs/036-ai-studio-chat/spec.md)) |
 | 037 ERP AI Studio: pantalla de chat | Implementado ([spec](specs/037-ai-studio-chat-pantalla/spec.md)) |
 | 038 Servidor MCP por persona | Implementado ([spec](specs/038-servidor-mcp/spec.md)) |
-| 039 Módulo de Ventas | Planeado |
+| 039 Reportes 2: gráficas personalizables y medidas calculadas | Implementado ([spec](specs/039-reportes-graficas/spec.md)) |
+| 040 Reportes y tableros personales | Planeado |
+| 041 Módulo de Ventas | Planeado |
 
 ## Diagnóstico
 | Brecha señalada | Situación actual | Spec |
@@ -283,7 +285,7 @@ reglas de negocio** (constitución I.1), configurables por metadatos con valores
   ventas) y revaluación, que siguen de la 020.
 
 ### 023 — Capacidades del motor: listas que se fusionan, reglas de aviso y rutas de tres niveles
-Origen: pendientes de la 022 que limitan a los módulos y que Ventas (024, luego 025, 026, 027, 028, 031, 032, 033, 036, 037, ahora 039) necesitará; plan del dueño (2026-10-24).
+Origen: pendientes de la 022 que limitan a los módulos y que Ventas (024, luego 025, 026, 027, 028, 031, 032, 033, 036, 037, 039, ahora 041) necesitará; plan del dueño (2026-10-24).
 - **Estado:** implementado en la [spec 023](specs/023-capacidades-motor/spec.md). `merge` en las seis listas del catálogo
   (reglas, automatizaciones, vistas, reportes, webhooks, tareas): agrega o reemplaza por nombre en su lugar; la vista previa
   ya no dice que quita lo que un `merge` conserva, y un paquete de Entornos que extiende un catálogo que no crea llega al
@@ -393,7 +395,7 @@ ya marcados) y sus hallazgos se vuelven una spec de endurecimiento.
 | 2026-10-25, auditoría 4 (origen de la 029) | 021–028 | 9 defectos (1 alto: rutas de varios saltos fuera de alcance); ninguno de los 29 riesgos marcados estaba resuelto |
 | 2026-10-25, auditoría 5 (origen de la 031), adelantada | 029 (y la 030 en curso) | 5 defectos (1 alto: la importación calculaba avisos sin el alcance de quien importa) y 9 observaciones del canario y el inventario |
 | 2026-10-27, auditoría 6 (origen de la 034), al cerrar la 033 | 031–033 | 7 defectos (1 alto: quien administra usuarios cambiaba la contraseña o desactivaba al superusuario) y huecos del catálogo de Studio antes del MCP; R-009-1 y R-032-6 confirmados |
-| **Auditoría 7: siguiente, en sesión aparte (la 038 cerró el 2026-10-29)** (servidor MCP: punto de entrada nuevo con OAuth por persona, registro dinámico anónimo y token solo para `/mcp`; cubre también el flujo SSE y el multi-turno de la 036). Empezar por [riesgos.md](riesgos.md#038) y el STRIDE del [plan 038](specs/038-servidor-mcp/plan.md#5-stride) | 034–038 | — |
+| **Auditoría 7: siguiente, en sesión aparte, al cerrar la 039** (el dueño decidió el 2026-10-31 que fuera después de la 039; la 038 cerró el 2026-10-29) (servidor MCP: punto de entrada nuevo con OAuth por persona, registro dinámico anónimo y token solo para `/mcp`; cubre también el flujo SSE y el multi-turno de la 036). Empezar por [riesgos.md](riesgos.md#038) y el STRIDE del [plan 038](specs/038-servidor-mcp/plan.md#5-stride); de la 039, las uniones a dos saltos de `ReportService` | 034–039 | — |
 
 La auditoría 5 (adelantada, sobre la 029) confirmó que las 139 rutas conservan una capacidad igual o más estricta y
 encontró que la regla «lo vivo con el alcance de quien lo ve» de la 029 no llegaba a la importación, a las transiciones ni
@@ -556,7 +558,7 @@ los límites de frecuencia en cada ruta). Punto de entrada nuevo: **auditoría 7
   Claude** (menú de usuario) para ver y desconectar. El token solo sirve en `/mcp`; `/mcp` solo lo acepta a él. Para *code
   mode*: `inputSchema` estrictos, `outputSchema` + `structuredContent` probados herramienta por herramienta, `pageSize` y
   `nextPage`, cubeta de fichas por persona con `retryAfterSeconds`, resultado de más de 256 KB como error que pide filtrar.
-- **Pendiente (diferido con razón):** copia aislada, `entregar` y escrituras por MCP (con idempotencia) → **040 — MCP 2**
+- **Pendiente (diferido con razón):** copia aislada, `entregar` y escrituras por MCP (con idempotencia) → **042 — MCP 2** (antes 040; renumerada en la 039)
   (CLARIFY 2); *Client ID Metadata Documents* y CORS (R-038-2); vista del superusuario de todas las conexiones (R-038-4).
 
 ## Specs planeadas (después de la 029)
@@ -604,17 +606,29 @@ En este orden, por decisión del dueño (2026-10-25):
 6. ~~**035 — ERP AI Studio: pantalla.**~~ Implementado (ver arriba).
 7. ~~**036 — ERP AI Studio como chat: motor**~~ (pedido del dueño, 2026-10-29). Implementado (ver arriba).
 8. ~~**037 — ERP AI Studio: pantalla de chat.**~~ Implementado (ver arriba).
-9. ~~**038 — Servidor MCP por persona.**~~ Implementado (ver arriba). **Auditoría 7** pendiente, en una sesión aparte.
-10. **039 — Módulo de Ventas:** clientes, cotización, pedido, salida de almacén con costo de ventas (póliza de salidas),
+9. ~~**038 — Servidor MCP por persona.**~~ Implementado (ver arriba). **Auditoría 7** pendiente, en una sesión aparte, al
+   cerrar la 039 (decisión del dueño, 2026-10-31).
+10. ~~**039 — Reportes 2: gráficas personalizables y medidas calculadas**~~ Implementado (pedido del dueño, 2026-10-31; [spec](specs/039-reportes-graficas/spec.md), [verify](specs/039-reportes-graficas/verify.md)):
+   columnas, barras, línea, área, pastel, dona y combinada; varias series (segunda agrupación o varias medidas) y apiladas;
+   paleta de 12 colores con nombre, valores y leyenda; indicador con comparación contra el periodo anterior; medidas
+   calculadas sobre otras medidas; semana y trimestre; agrupar y medir a dos saltos (también por el documento padre).
+   Sobre los reportes **del modelo**; la mitad personal va en la 040 (CLARIFY 1). La revisión adversarial corrigió dos fugas
+   preexistentes de la 007 (unión sin permiso de lectura del catálogo destino; una fila «(sin acceso)» por registro oculto).
+   **Auditoría 7** sigue: va ahora, en sesión aparte, antes de la 040.
+11. **040 — Reportes y tableros personales** (la otra mitad del pedido, 039 CLARIFY 1): cualquier usuario arma sus reportes
+   y gráficas con lo que puede ver (sin ser modelador), explora al vuelo (cambia agrupación, medida o gráfica sin guardar) y
+   tiene tableros personales junto a los del modelo. Agrega rutas que escriben y datos por persona: STRIDE completo
+   (`RecordFilter`, `FieldAccess` y empresa del **dueño** del reporte al correrlo, un reporte compartido no hereda permisos).
+12. **041 — Módulo de Ventas:** clientes, cotización, pedido, salida de almacén con costo de ventas (póliza de salidas),
    factura y cobranza. Usa `merge` para extender Producto e Inventario, avisos (límite de crédito) y rutas de tres niveles;
-   declara su módulo con `setApp` (orden 15, entre Compras e Inventario).
-11. ~~**040 — CFDI 4.0 con PAC.**~~ Retirada del plan por decisión del dueño (2026-10-29). Si vuelve, se numera al abrirla.
-    **040 — MCP 2: copia aislada y propuestas por MCP** (lo que la 038 dejó fuera, CLARIFY 2): la copia aislada con un ciclo
+   declara su módulo con `setApp` (orden 15, entre Compras e Inventario). Sus reportes usan los de la 039.
+13. ~~**CFDI 4.0 con PAC.**~~ Retirada del plan por decisión del dueño (2026-10-29). Si vuelve, se numera al abrirla.
+    **042 — MCP 2: copia aislada y propuestas por MCP** (lo que la 038 dejó fuera, CLARIFY 2): la copia aislada con un ciclo
     de vida propio por conexión (*lease*, barrido), `entregar` como propuesta que la persona revisa en Studio y escrituras
     con clave de idempotencia. Va después de Ventas y de la auditoría 7.
-12. **Pólizas en moneda extranjera** (pendiente de la 020).
-13. **Revaluación de existencias** (pendiente de la 020).
-14. **Reversa de pólizas con otra póliza** (pendiente de la 020).
+14. **Pólizas en moneda extranjera** (pendiente de la 020).
+15. **Revaluación de existencias** (pendiente de la 020).
+16. **Reversa de pólizas con otra póliza** (pendiente de la 020).
 
 ## Decisión: ¿extensión con código?
 La auditoría tiene razón en el costo: cada necesidad nueva exige una capacidad del motor. Se mantiene

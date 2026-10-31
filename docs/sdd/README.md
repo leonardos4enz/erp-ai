@@ -103,3 +103,7 @@ y cada sesión queda como registro de una sola entrega. Al cerrar la spec:
 | 036 | [ERP AI Studio como chat: motor conversacional y streaming](specs/036-ai-studio-chat/spec.md) | Implementado |
 | 037 | [ERP AI Studio: pantalla de chat](specs/037-ai-studio-chat-pantalla/spec.md) | Implementado |
 | 038 | [Servidor MCP por persona](specs/038-servidor-mcp/spec.md) | Implementado |
+| 039 | [Reportes 2: gráficas personalizables y medidas calculadas](specs/039-reportes-graficas/spec.md) | Implementado |
+| 040 | Reportes y tableros personales | Planeado |
+| 041 | Módulo de Ventas | Planeado |
+| 042 | MCP 2: copia aislada y propuestas por MCP | Planeado |

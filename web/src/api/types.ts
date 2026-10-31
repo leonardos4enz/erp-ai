@@ -97,14 +97,22 @@ export interface ReportDef {
   label: string;
   description?: string;
   roles?: string[];
-  groupBy?: { field: string; period?: 'day' | 'month' | 'year'; label?: string }[];
-  measures: { fn: 'count' | 'sum' | 'avg' | 'min' | 'max'; field?: string; label?: string }[];
+  groupBy?: { field: string; period?: ReportPeriod; label?: string }[];
+  /** Spec 039: `calc` lleva `expr` sobre los `name` de otras medidas y `scale`. */
+  measures: { fn: 'count' | 'sum' | 'avg' | 'min' | 'max' | 'calc'; field?: string; label?: string; name?: string; expr?: string; scale?: number }[];
   filter?: string;
   orderBy?: 'group' | 'measure';
   dir?: 'asc' | 'desc';
   limit?: number;
-  chart?: 'bar' | 'line' | 'pie';
+  chart?: ChartKind;
+  chartOptions?: ChartOptions;
 }
+/** Spec 039: periodos de una agrupación por fecha. */
+export type ReportPeriod = 'day' | 'week' | 'month' | 'quarter' | 'year';
+/** Spec 039: tipos de gráfica (`kpi`: indicador, con comparación si el reporte va por periodo). */
+export type ChartKind = 'column' | 'bar' | 'line' | 'area' | 'pie' | 'donut' | 'combo' | 'kpi';
+/** Spec 039: cómo se dibuja la gráfica de un reporte (ver plan 039 §1). */
+export interface ChartOptions { measures?: number[]; lines?: number[]; stacked?: boolean; colors?: string[]; values?: boolean; legend?: boolean | null }
 // ---------- Spec 008: integraciones ----------
 export interface WebhookEvent { on: 'create' | 'update' | 'enterState' | 'transition'; state?: string | null; transition?: string | null }
 export interface WebhookDef {
@@ -255,13 +263,20 @@ export interface ImportResult {
 }
 
 export interface ReportSummary { entity: string; entityLabel: string; group?: string | null; name: string; label: string; description?: string | null; chart?: string | null }
-export interface ReportColumn { key: string; label: string; kind: 'group' | 'measure'; type: 'text' | 'number' | 'date' | 'boolean'; scale?: number | null }
+export interface ReportColumn { key: string; label: string; kind: 'group' | 'measure'; type: 'text' | 'number' | 'date' | 'boolean'; scale?: number | null; period?: ReportPeriod | null; fn?: string | null }
+/** Spec 039 (H4): último periodo con datos y el inmediato anterior (sin registros: conteo y suma en 0). */
+export interface ReportComparison {
+  current: { label: string; values: Record<string, number | string | null> };
+  previous?: { label: string; values: Record<string, number | string | null> } | null;
+}
 export interface ReportResult {
   entity: string;
   name: string;
   label: string;
   description?: string | null;
-  chart?: 'bar' | 'line' | 'pie' | null;
+  chart?: ChartKind | null;
+  chartOptions?: ChartOptions | null;
+  comparison?: ReportComparison | null;
   columns: ReportColumn[];
   rows: Record<string, string | number | boolean | null>[];
   totals: Record<string, number | string | null>;

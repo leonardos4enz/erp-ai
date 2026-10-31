@@ -7,10 +7,17 @@ namespace Erp.Api.Metadata;
 /// <summary>Spec 007: clase de valor de un campo para filtros, agrupaciones y medidas.</summary>
 public enum ValueKind { Text, LongText, Number, Date, Boolean, Id }
 
-/// <summary>Campo de un reporte: propio (<c>Campo</c>) o de un catálogo relacionado a un nivel (<c>Relacion.Campo</c>).</summary>
-public sealed record FieldPath(FieldDef Field, EntityDef Owner, FieldDef? Via)
+/// <summary>Spec 039: un salto de una ruta: la referencia (o el documento padre) <c>Via</c> de <c>From</c> que lleva a <c>To</c>.</summary>
+public sealed record FieldHop(FieldDef Via, EntityDef From, EntityDef To);
+
+/// <summary>
+/// Campo de un reporte: propio (<c>Campo</c>) o de un catálogo relacionado (<c>Relacion.Campo</c>; spec 039, hasta
+/// <see cref="InterfaceRules.MaxHops"/> saltos: <c>Relacion.Relacion.Campo</c>).
+/// </summary>
+public sealed record FieldPath(FieldDef Field, EntityDef Owner, IReadOnlyList<FieldHop> Hops)
 {
-    public bool IsRelated => Via is not null;
+    public bool IsRelated => Hops.Count > 0;
+    public string Label => string.Join(" · ", Hops.Select(h => h.Via.Label).Append(Field.Label));
 }
 
 /// <summary>Spec 007: validación estática de layouts, vistas compartidas, reportes y tableros (ver plan 007).</summary>
@@ -26,10 +33,22 @@ public static class InterfaceRules
     public const int MaxWidgets = 20;
     public const int MaxLabel = 100;
     public const int MaxDescription = 300;
+    /// <summary>Spec 039: saltos de una ruta de reporte, series de una gráfica y largo de una medida calculada.</summary>
+    public const int MaxHops = 2;
+    public const int MaxSeries = 12;
+    public const int MaxCalcLength = 500;
 
-    public static readonly IReadOnlySet<string> Periods = new HashSet<string> { "day", "month", "year" };
-    public static readonly IReadOnlySet<string> MeasureFns = new HashSet<string> { "count", "sum", "avg", "min", "max" };
-    public static readonly IReadOnlySet<string> Charts = new HashSet<string> { "bar", "line", "pie" };
+    public static readonly IReadOnlySet<string> Periods = new HashSet<string> { "day", "week", "month", "quarter", "year" };
+    public static readonly IReadOnlySet<string> MeasureFns = new HashSet<string> { "count", "sum", "avg", "min", "max", "calc" };
+    public static readonly IReadOnlySet<string> Charts = new HashSet<string> { "column", "bar", "line", "area", "pie", "donut", "combo", "kpi" };
+    /// <summary>Spec 039: paleta de la gráfica, en el orden de <c>--chart-1…12</c> de la SPA.</summary>
+    public static readonly IReadOnlyList<string> Palette =
+        ["azul", "naranja", "verde", "ambar", "rosa", "bosque", "violeta", "rojo", "cian", "oliva", "purpura", "lima"];
+    /// <summary>Spec 039: funciones que admite una medida calculada (solo números; nada del registro, del usuario ni de la empresa).</summary>
+    public static readonly IReadOnlyDictionary<string, (int Min, int Max)> CalcFunctions = new Dictionary<string, (int Min, int Max)>
+    {
+        ["IF"] = (3, 3), ["COALESCE"] = (1, 10), ["ISBLANK"] = (1, 1), ["ROUND"] = (1, 2), ["ABS"] = (1, 1), ["MIN"] = (2, 2), ["MAX"] = (2, 2),
+    };
     public static readonly IReadOnlySet<string> WidgetTypes = new HashSet<string> { "kpi", "chart", "table" };
 
     public static ValueKind KindOf(FieldDef f) => (f.Type == FieldTypes.Formula ? f.ResultType : f.Type) switch
@@ -42,24 +61,44 @@ public static class InterfaceRules
         _ => ValueKind.Text,
     };
 
-    /// <summary>Resuelve <c>Campo</c> o <c>Relacion.Campo</c> a columnas con tabla; devuelve el error para el modelador.</summary>
+    /// <summary>
+    /// Resuelve <c>Campo</c>, <c>Relacion.Campo</c> o (spec 039) <c>Relacion.Relacion.Campo</c> a columnas con tabla; cada salto
+    /// es una referencia o el documento padre. Devuelve el error para el modelador.
+    /// </summary>
     public static (FieldPath? Path, string? Error) Resolve(EntityDef e, string? path, IReadOnlyDictionary<string, EntityDef> model)
     {
         var parts = (path ?? "").Split('.');
-        if (parts.Length > 2 || parts.Any(string.IsNullOrWhiteSpace)) return (null, $"'{path}' no es un campo (usa Campo o Relacion.Campo).");
-        var head = e.FindField(parts[0]);
-        if (head is null || head.IsArchived || FieldTypes.IsVirtual(head.Type)) return (null, $"'{parts[0]}' no es un campo de {e.Name}.");
-        if (parts.Length == 1) return (new FieldPath(head, e, null), null);
-        if (head.Type is not (FieldTypes.Reference or FieldTypes.Parent) || !model.TryGetValue(head.ReferenceEntity ?? "", out var target) || target.IsArchived)
-            return (null, $"'{path}': solo se puede llegar a otro catálogo por una referencia o el documento padre.");
-        var tail = target.FindField(parts[1]);
-        if (tail is null || tail.IsArchived || FieldTypes.IsVirtual(tail.Type)) return (null, $"'{parts[1]}' no es un campo de {target.Name}.");
-        return (new FieldPath(tail, target, head), null);
+        if (parts.Length > MaxHops + 1 || parts.Any(string.IsNullOrWhiteSpace))
+            return (null, $"'{path}' no es un campo (usa Campo, Relacion.Campo o Relacion.Relacion.Campo).");
+        var hops = new List<FieldHop>();
+        var current = e;
+        for (var i = 0; ; i++)
+        {
+            var f = current.FindField(parts[i]);
+            if (f is null || f.IsArchived || FieldTypes.IsVirtual(f.Type)) return (null, $"'{parts[i]}' no es un campo de {current.Name}.");
+            if (i == parts.Length - 1) return (new FieldPath(f, current, hops), null);
+            if (f.Type is not (FieldTypes.Reference or FieldTypes.Parent) || !model.TryGetValue(f.ReferenceEntity ?? "", out var next) || next.IsArchived)
+                return (null, $"'{path}': solo se puede llegar a otro catálogo por una referencia o el documento padre.");
+            hops.Add(new FieldHop(f, current, next));
+            current = next;
+        }
     }
 
-    /// <summary>¿El usuario ve el campo y, si es relacionado, también la referencia que lleva a él?</summary>
-    public static bool CanSee(FieldPath p, EntityDef e, UserContext u) =>
-        FieldAccess.CanSee(p.Owner, p.Field, u) && (p.Via is null || FieldAccess.CanSee(e, p.Via, u));
+    /// <summary>¿El usuario ve el campo y cada referencia del camino que lleva a él (spec 039: en todos los saltos)?</summary>
+    public static bool CanSee(FieldPath p, UserContext u) =>
+        FieldAccess.CanSee(p.Owner, p.Field, u) && p.Hops.All(h => FieldAccess.CanSee(h.From, h.Via, u));
+
+    /// <summary>Spec 039 (H4): el reporte admite comparación con el periodo anterior: su única agrupación es una fecha con periodo.</summary>
+    public static bool IsComparable(EntityDef e, ReportDef r, IReadOnlyDictionary<string, EntityDef> model) =>
+        r.GroupBy is [{ Period: not null } g] && Resolve(e, g.Field, model).Path is { } p && KindOf(p.Field) == ValueKind.Date;
+
+    /// <summary>Spec 039: ¿la medida da un número? (mínimo o máximo de una fecha, no: no se grafica ni se calcula).</summary>
+    public static bool IsNumeric(ReportMeasure m, EntityDef e, IReadOnlyDictionary<string, EntityDef> model) => m.Fn switch
+    {
+        "count" or "sum" or "avg" or "calc" => true,
+        "min" or "max" => Resolve(e, m.Field, model).Path is { } p && KindOf(p.Field) == ValueKind.Number,
+        _ => false,
+    };
 
     private static void CheckRoles(IReadOnlyList<string>? list, string where, IReadOnlySet<string> roles, List<string> msgs)
     {
@@ -190,16 +229,25 @@ public static class InterfaceRules
                 if (p is null) { msgs.Add($"{where}: {err}"); continue; }
                 var kind = KindOf(p.Field);
                 if (kind == ValueKind.LongText) msgs.Add($"{where}: no se puede agrupar por un texto largo ('{g.Field}').");
-                if (kind == ValueKind.Date && g.Period is null) msgs.Add($"{where}: agrupar por la fecha '{g.Field}' requiere «period» (day, month o year).");
+                if (kind == ValueKind.Date && g.Period is null) msgs.Add($"{where}: agrupar por la fecha '{g.Field}' requiere «period» (day, week, month, quarter o year).");
                 if (g.Period is not null && (kind != ValueKind.Date || !Periods.Contains(g.Period)))
-                    msgs.Add($"{where}: «period» solo aplica a fechas y es day, month o year.");
+                    msgs.Add($"{where}: «period» solo aplica a fechas y es day, week, month, quarter o year.");
                 if (g.Label?.Length > MaxLabel) msgs.Add($"{where}: la etiqueta de '{g.Field}' es demasiado larga.");
             }
             if (r.Measures.Count is 0 or > MaxMeasures) msgs.Add($"{where}: indica de 1 a {MaxMeasures} medidas.");
+            var measureNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var m in r.Measures)
             {
-                if (!MeasureFns.Contains(m.Fn ?? "")) { msgs.Add($"{where}: la medida '{m.Fn}' no existe (count, sum, avg, min, max)."); continue; }
+                if (m.Name is not null) CheckName(m.Name, $"{where}: medida '{m.Name}'", measureNames, msgs);
+                if (!MeasureFns.Contains(m.Fn ?? "")) { msgs.Add($"{where}: la medida '{m.Fn}' no existe (count, sum, avg, min, max, calc)."); continue; }
                 if (m.Label?.Length > MaxLabel) msgs.Add($"{where}: la etiqueta de una medida es demasiado larga.");
+                if (m.Fn == "calc")
+                {
+                    if (m.Field is not null) msgs.Add($"{where}: una medida calculada no lleva campo; usa «expr» con los nombres de otras medidas.");
+                    if (m.Scale is < 0 or > 6) msgs.Add($"{where}: «scale» de una medida calculada va de 0 a 6.");
+                    continue; // la expresión se revisa cuando ya se conocen todos los nombres
+                }
+                if (m.Expr is not null || m.Scale is not null) msgs.Add($"{where}: «expr» y «scale» son solo de una medida calculada (fn: calc).");
                 if (m.Field is null)
                 {
                     if (m.Fn != "count") msgs.Add($"{where}: «{m.Fn}» necesita un campo.");
@@ -211,13 +259,115 @@ public static class InterfaceRules
                 if (m.Fn is "sum" or "avg" && kind != ValueKind.Number) msgs.Add($"{where}: «{m.Fn}» solo aplica a números ('{m.Field}').");
                 if (m.Fn is "min" or "max" && kind is not (ValueKind.Number or ValueKind.Date)) msgs.Add($"{where}: «{m.Fn}» solo aplica a números o fechas ('{m.Field}').");
             }
+            // Spec 039 (H5): una calculada usa los nombres de medidas no calculadas con valor numérico.
+            if (r.Measures.Count > 0 && r.Measures.All(m => m.Fn == "calc")) msgs.Add($"{where}: una medida calculada se apoya en otras; agrega al menos una que no lo sea.");
+            var usable = r.Measures.Where(m => m.Fn != "calc" && m.Name is not null && IsNumeric(m, e, model))
+                .Select(m => m.Name!).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            foreach (var m in r.Measures.Where(m => m.Fn == "calc"))
+                if (CheckCalc(m.Expr, usable) is { } cerr) msgs.Add($"{where}: medida calculada '{m.Label ?? m.Name ?? "sin nombre"}': {cerr}");
             if (!string.IsNullOrWhiteSpace(r.Filter) && RecordFilter.Check(r.Filter, e, roles) is { } ferr) msgs.Add($"{where} (filter): {ferr}");
             if (r.OrderBy is not (null or "group" or "measure")) msgs.Add($"{where}: «orderBy» es group o measure.");
+            if (r.OrderBy == "measure" && r.Measures is [{ Fn: "calc" }, ..])
+                msgs.Add($"{where}: para ordenar por la medida, la primera no puede ser calculada (el orden se aplica en la base).");
             if (r.Dir is not (null or "asc" or "desc")) msgs.Add($"{where}: «dir» es asc o desc.");
             if (r.Limit is < 1 or > MaxRows) msgs.Add($"{where}: «limit» va de 1 a {MaxRows}.");
-            if (r.Chart is not null && (!Charts.Contains(r.Chart) || groups.Count == 0)) msgs.Add($"{where}: «chart» es bar, line o pie y requiere una agrupación.");
+            msgs.AddRange(ValidateChart(e, r, groups.Count, model).Select(m => $"{where}: {m}"));
         }
         return msgs;
+    }
+
+    /// <summary>Spec 039 (H1–H4): el tipo de gráfica y sus opciones tienen sentido con las agrupaciones y medidas del reporte.</summary>
+    private static IEnumerable<string> ValidateChart(EntityDef e, ReportDef r, int groups, IReadOnlyDictionary<string, EntityDef> model)
+    {
+        var o = r.ChartOptions;
+        if (r.Chart is null)
+        {
+            if (o is not null) yield return "«chartOptions» necesita «chart».";
+            yield break;
+        }
+        if (!Charts.Contains(r.Chart)) { yield return "«chart» es column, bar, line, area, pie, donut, combo o kpi."; yield break; }
+        var plotted = o?.Measures ?? [0];
+        var lines = o?.Lines ?? [];
+        if (plotted.Count is 0 or > MaxMeasures) yield return $"«chartOptions.measures» indica de 1 a {MaxMeasures} medidas.";
+        if (plotted.Distinct().Count() != plotted.Count) yield return "«chartOptions.measures» repite una medida.";
+        foreach (var i in plotted)
+            if (i < 0 || i >= r.Measures.Count) yield return $"la medida {i} de la gráfica no existe.";
+            else if (!IsNumeric(r.Measures[i], e, model)) yield return $"la medida {i} de la gráfica no es un número (una fecha no se grafica).";
+        foreach (var i in lines)
+            if (!plotted.Contains(i)) yield return $"la línea {i} no está entre las medidas de la gráfica.";
+        if (lines.Count > 0 && r.Chart != "combo") yield return "«lines» es solo de la gráfica combinada.";
+        if (o?.Colors is { Count: > MaxSeries }) yield return $"máximo {MaxSeries} colores.";
+        foreach (var c in o?.Colors ?? [])
+            if (!Palette.Contains(c)) yield return $"el color '{c}' no es de la paleta ({string.Join(", ", Palette)}).";
+        switch (r.Chart)
+        {
+            case "kpi":
+                if (groups > 0 && !IsComparable(e, r, model)) yield return "un indicador usa un reporte sin agrupación o agrupado solo por una fecha con periodo.";
+                if (plotted.Count > 1) yield return "un indicador muestra una sola medida.";
+                break;
+            case "pie" or "donut":
+                if (groups != 1) yield return "un pastel o una dona necesita exactamente una agrupación.";
+                if (plotted.Count > 1) yield return "un pastel o una dona muestra una sola medida.";
+                break;
+            case "combo":
+                if (groups != 1) yield return "la combinada necesita exactamente una agrupación.";
+                if (plotted.Count < 2 || lines.Count == 0 || lines.Count >= plotted.Count)
+                    yield return "la combinada necesita al menos dos medidas: unas como columnas y otras como línea («lines»).";
+                break;
+            default:
+                if (groups == 0) yield return $"la gráfica «{r.Chart}» necesita una agrupación.";
+                if (groups == 2 && plotted.Count > 1) yield return "con dos agrupaciones, la segunda da las series: elige una sola medida.";
+                break;
+        }
+        var series = groups == 2 ? MaxSeries : plotted.Count;
+        if (o?.Stacked == true && (r.Chart is not ("column" or "bar" or "area") || series < 2))
+            yield return "apilar es de columnas, barras o área con más de una serie (dos agrupaciones o varias medidas).";
+    }
+
+    /// <summary>
+    /// Spec 039 (H5 CA2): la expresión de una medida calculada solo usa números, nombres de medidas no calculadas, operadores
+    /// y las funciones de <see cref="CalcFunctions"/>, y da un número. Nada de campos, registros, usuario ni empresa.
+    /// </summary>
+    public static string? CheckCalc(string? expr, IReadOnlySet<string> measures)
+    {
+        if (string.IsNullOrWhiteSpace(expr)) return "falta «expr».";
+        if (expr.Length > MaxCalcLength) return $"la expresión excede {MaxCalcLength} caracteres.";
+        Node root;
+        try { root = ExprParser.Parse(expr); }
+        catch (ExprException ex) { return ex.Message; }
+        if (CalcError(root, measures) is { } err) return err;
+        // Una evaluación de prueba (todas las medidas en 1) descubre lo que da un booleano en vez de un número.
+        try
+        {
+            var v = ReportCalc.Eval(root, measures.ToDictionary(n => n, _ => (object?)1m, StringComparer.OrdinalIgnoreCase));
+            return v is null or decimal ? null : "la expresión debe dar un número.";
+        }
+        catch (ExprException ex) { return ex.Message; }
+        catch (OverflowException) { return null; }
+    }
+
+    private static string? CalcError(Node n, IReadOnlySet<string> measures)
+    {
+        switch (n)
+        {
+            case Literal { Value: null or decimal or bool }: return null;
+            case Literal: return "solo se admiten números.";
+            case PathRef { IsOwn: true } p when measures.Contains(p.Head): return null;
+            case PathRef p:
+                return $"'{p}' no es el nombre de una medida no calculada del reporte" +
+                       (measures.Count == 0 ? " (dale un nombre a las medidas que uses)." : $" ({string.Join(", ", measures)}).");
+            case Unary u: return CalcError(u.Operand, measures);
+            case Binary { Op: "&" }: return "«&» une textos; una medida calculada da un número.";
+            case Binary b: return CalcError(b.Left, measures) ?? CalcError(b.Right, measures);
+            case InList i: return CalcError(i.Value, measures) ?? i.Items.Select(x => CalcError(x, measures)).FirstOrDefault(x => x is not null);
+            case Call c:
+                if (!CalcFunctions.TryGetValue(c.Name, out var arity))
+                    return $"la función {c.Name} no se usa en medidas calculadas (se admiten {string.Join(", ", CalcFunctions.Keys)}).";
+                if (c.Args.Count < arity.Min || c.Args.Count > arity.Max)
+                    return $"{c.Name} recibe {(arity.Min == arity.Max ? $"{arity.Min}" : $"de {arity.Min} a {arity.Max}")} argumentos.";
+                return c.Args.Select(x => CalcError(x, measures)).FirstOrDefault(x => x is not null);
+            default: return "expresión no soportada.";
+        }
     }
 
     // ---------------- Tableros ----------------
@@ -239,7 +389,8 @@ public static class InterfaceRules
             var r = e.Reports?.FirstOrDefault(x => string.Equals(x.Name, w.Report, StringComparison.OrdinalIgnoreCase));
             if (r is null) { msgs.Add($"{where}: el reporte '{w.Report}' no existe en {e.Name}."); continue; }
             var grouped = r.GroupBy is { Count: > 0 };
-            if (w.Type == "kpi" && grouped) msgs.Add($"{where}: un indicador usa un reporte sin agrupación ('{r.Name}' agrupa).");
+            if (w.Type == "kpi" && grouped && !IsComparable(e, r, model))
+                msgs.Add($"{where}: un indicador usa un reporte sin agrupación o agrupado solo por una fecha con periodo ('{r.Name}' agrupa de otra forma).");
             if (w.Type == "chart" && !grouped) msgs.Add($"{where}: una gráfica usa un reporte con agrupación.");
             if (w.Measure is { } m && (m < 0 || m >= r.Measures.Count)) msgs.Add($"{where}: la medida {m} no existe en '{r.Name}'.");
         }

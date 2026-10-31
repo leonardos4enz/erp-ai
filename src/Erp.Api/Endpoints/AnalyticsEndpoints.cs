@@ -68,7 +68,7 @@ public static class AnalyticsEndpoints
             foreach (var w in d.Widgets)
             {
                 if (Widget(w, u, model) is not var (e, r)) continue;
-                var result = await svc.RunAsync(e, r, [], u, model, ct);
+                var result = await svc.RunAsync(e, r, [], u, model, ct, compare: w.Type == "kpi"); // spec 039 (H4)
                 widgets.Add(new WidgetResult(w.Type, w.Label ?? r.Label, w.Wide, e.Name, r.Name, w.Measure, result));
             }
             return new DashboardResult(d.Name, d.Label, d.Icon ?? "layout-dashboard", d.Description, widgets, u.CanManageModel ? d : null);

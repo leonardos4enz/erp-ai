@@ -249,7 +249,7 @@ public class InterfaceTests
         Assert.Contains("indica de 1 a 6 medidas", e);
         Assert.Contains("'median' no existe", e);
         Assert.Contains("«min» solo aplica a números o fechas", e);
-        Assert.Contains("«chart» es bar, line o pie y requiere una agrupación", e);
+        Assert.Contains("la gráfica «bar» necesita una agrupación", e); // spec 039: el mensaje nombra el tipo
         Assert.Contains("«limit» va de 1 a 1000", e);
         Assert.Contains("(filter)", e);
         Assert.Contains("solo se puede llegar a otro catálogo por una referencia", e);

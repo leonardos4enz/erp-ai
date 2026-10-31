@@ -521,6 +521,27 @@ public sealed record ReportMeasure
     public required string Fn { get; init; }
     public string? Field { get; init; }
     public string? Label { get; init; }
+    /// <summary>Spec 039: identificador con el que la nombra una medida calculada.</summary>
+    public string? Name { get; init; }
+    /// <summary>Spec 039: expresión de una medida <c>calc</c> sobre los nombres de otras medidas.</summary>
+    public string? Expr { get; init; }
+    /// <summary>Spec 039: decimales de una medida calculada (0–6, por omisión 2).</summary>
+    public int? Scale { get; init; }
+}
+
+/// <summary>Spec 039: cómo se dibuja la gráfica de un reporte.</summary>
+public sealed record ReportChartOptions
+{
+    /// <summary>Índices de las medidas que se dibujan (por omisión, la primera).</summary>
+    public IReadOnlyList<int>? Measures { get; init; }
+    /// <summary>Combinada: cuáles de <see cref="Measures"/> van como línea (eje derecho).</summary>
+    public IReadOnlyList<int>? Lines { get; init; }
+    public bool Stacked { get; init; }
+    /// <summary>Nombres de la paleta (<see cref="InterfaceRules.Palette"/>), en el orden de las series.</summary>
+    public IReadOnlyList<string>? Colors { get; init; }
+    public bool Values { get; init; }
+    /// <summary>Por omisión (nulo), leyenda si hay más de una serie.</summary>
+    public bool? Legend { get; init; }
 }
 
 public sealed record ReportDef
@@ -536,6 +557,7 @@ public sealed record ReportDef
     public string? Dir { get; init; }
     public int? Limit { get; init; }
     public string? Chart { get; init; }
+    public ReportChartOptions? ChartOptions { get; init; }
 }
 
 public sealed record DashboardWidget

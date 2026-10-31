@@ -90,9 +90,14 @@ public static class AssistantPrompt
           fields: (string | { field, visibleWhen?, wide? })[] }] } }   (o layout: null)
         - setViews { entity, merge?, views: [{ name, label, roles?, columns?, filters?: [{ field, op, value? }], sort?, dir?,
           state?, default? }] }   op: eq ne gt gte lt lte contains in blank notBlank; value admite "$me" y "$today".
-        - setReports { entity, merge?, reports: [{ name, label, description?, roles?, groupBy?: [{ field, period?: day|month|year (obligatorio al
-          agrupar por fecha), label? }], measures: [{ fn: count|sum|avg|min|max, field?, label? }], filter?, orderBy?, dir?,
-          limit?, chart?: bar|line|pie }] }
+        - setReports { entity, merge?, reports: [{ name, label, description?, roles?, groupBy?: [{ field, period?: day|week|month|quarter|year
+          (obligatorio al agrupar por fecha), label? }] (hasta 2), measures: [{ fn: count|sum|avg|min|max|calc, field?, label?, name?,
+          expr?, scale? }], filter?, orderBy?, dir?, limit?, chart?: column|bar|line|area|pie|donut|combo|kpi, chartOptions?: { measures?:
+          [índices], lines?: [índices, solo combo], stacked?, colors?: [azul|naranja|verde|ambar|rosa|bosque|violeta|rojo|cian|oliva|purpura|lima],
+          values?, legend? } }] }   field: Campo, Ref.Campo o Ref.Ref.Campo (referencias o el documento padre). calc: expr sobre los
+          «name» de otras medidas no calculadas (+ - * /, IF, ROUND, ABS, MIN, MAX, COALESCE, ISBLANK), p. ej. ROUND(Utilidad / Ventas * 100, 1).
+          Con dos agrupaciones la segunda da las series (una medida); kpi: sin agrupación o con una sola fecha con periodo (compara
+          contra el periodo anterior).
         - setDashboard { dashboard: { name, label, icon?, description?, roles?, widgets: [{ type: kpi|chart|table,
           entity, report, label?, measure?, wide? }] } }   - archiveDashboard { name }
         - setApp { app: { name, label, icon?, description?, order? } }   - archiveApp { name }
