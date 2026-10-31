@@ -395,7 +395,7 @@ ya marcados) y sus hallazgos se vuelven una spec de endurecimiento.
 | 2026-10-25, auditoría 4 (origen de la 029) | 021–028 | 9 defectos (1 alto: rutas de varios saltos fuera de alcance); ninguno de los 29 riesgos marcados estaba resuelto |
 | 2026-10-25, auditoría 5 (origen de la 031), adelantada | 029 (y la 030 en curso) | 5 defectos (1 alto: la importación calculaba avisos sin el alcance de quien importa) y 9 observaciones del canario y el inventario |
 | 2026-10-27, auditoría 6 (origen de la 034), al cerrar la 033 | 031–033 | 7 defectos (1 alto: quien administra usuarios cambiaba la contraseña o desactivaba al superusuario) y huecos del catálogo de Studio antes del MCP; R-009-1 y R-032-6 confirmados |
-| **Auditoría 7: siguiente, en sesión aparte, al cerrar la 039** (el dueño decidió el 2026-10-31 que fuera después de la 039; la 038 cerró el 2026-10-29) (servidor MCP: punto de entrada nuevo con OAuth por persona, registro dinámico anónimo y token solo para `/mcp`; cubre también el flujo SSE y el multi-turno de la 036). Empezar por [riesgos.md](riesgos.md#038) y el STRIDE del [plan 038](specs/038-servidor-mcp/plan.md#5-stride); de la 039, las uniones a dos saltos de `ReportService` | 034–039 | — |
+| 2026-10-31, auditoría 7, al cerrar la 039 (servidor MCP, flujo SSE y multi-turno de Studio, reportes a dos saltos) | 034–039 | 12 defectos (1 medio: el registro dinámico del MCP se agota —con direcciones IPv6 sin cuenta, o para siempre con una cuenta, porque los clientes que tuvieron conexión no se barren— y bloquea conexiones nuevas; 11 bajos: tope de pendientes por dirección detrás de un proxy, cola de Studio que vence sesiones en un solo lote, `RenewSeconds` sin relación con `LeaseSeconds`, salidas de `datos` sin purgar si el servidor no vuelve, conversación que cambia de empresa, tope de uniones de la 039 que no existe, «#id» en lugar de «(sin acceso)», canario sin reportes a dos saltos, entre otros) y 3 observaciones. Sin fugas ni escaladas verificadas; los 25 riesgos marcados siguen abiertos. Propone la **040 — Endurecimiento 6**; el dueño decide si va antes de los reportes personales |
 
 La auditoría 5 (adelantada, sobre la 029) confirmó que las 139 rutas conservan una capacidad igual o más estricta y
 encontró que la regla «lo vivo con el alcance de quien lo ve» de la 029 no llegaba a la importación, a las transiciones ni
@@ -614,7 +614,7 @@ En este orden, por decisión del dueño (2026-10-25):
    calculadas sobre otras medidas; semana y trimestre; agrupar y medir a dos saltos (también por el documento padre).
    Sobre los reportes **del modelo**; la mitad personal va en la 040 (CLARIFY 1). La revisión adversarial corrigió dos fugas
    preexistentes de la 007 (unión sin permiso de lectura del catálogo destino; una fila «(sin acceso)» por registro oculto).
-   **Auditoría 7** sigue: va ahora, en sesión aparte, antes de la 040.
+   **Auditoría 7** hecha el 2026-10-31 ([resultado](#auditorías)): propone un Endurecimiento 6; el dueño decide si va antes de la 040.
 11. **040 — Reportes y tableros personales** (la otra mitad del pedido, 039 CLARIFY 1): cualquier usuario arma sus reportes
    y gráficas con lo que puede ver (sin ser modelador), explora al vuelo (cambia agrupación, medida o gráfica sin guardar) y
    tiene tableros personales junto a los del modelo. Agrega rutas que escriben y datos por persona: STRIDE completo
