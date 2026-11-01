@@ -48,7 +48,7 @@ en orden, no en paralelo: casi todas tocan el núcleo del motor (`PlanCompiler`,
 | 040 Endurecimiento 6 (auditoría 7) | Implementado ([spec](specs/040-endurecimiento-6/spec.md)) |
 | 041 Reportes personales y exploración al vuelo | Implementado ([spec](specs/041-reportes-personales/spec.md)) |
 | 042 Tableros personales y compartir | Implementado ([spec](specs/042-tableros-personales/spec.md)) |
-| 043 Módulo de Ventas | Planeado |
+| 043 Módulo de Ventas | Implementado ([spec](specs/043-modulo-ventas/spec.md)) |
 | 044 MCP 2: copia aislada y propuestas por MCP | Planeado |
 
 ## Diagnóstico
@@ -637,9 +637,18 @@ En este orden, por decisión del dueño (2026-10-25):
    Pendiente, si se pide: copiar un tablero compartido, compartir con personas o equipos, el mismo tope en los reportes y
    tableros del modelo. **Auditoría 8** pendiente (la 042 agrega puntos de entrada y delegación por reparto); el dueño decidió (2026-11-01) hacerla
    **después de la 043 (Ventas) y la 044 (MCP 2)**, cubriendo 040–044.
-13. **043 — Módulo de Ventas** (antes 042): clientes, cotización, pedido, salida de almacén con costo de ventas (póliza de salidas),
-   factura y cobranza. Usa `merge` para extender Producto e Inventario, avisos (límite de crédito) y rutas de tres niveles;
-   declara su módulo con `setApp` (orden 15, entre Compras e Inventario). Sus reportes usan los de la 039.
+13. ~~**043 — Módulo de Ventas**~~ Implementado ([spec](specs/043-modulo-ventas/spec.md), [verify](specs/043-modulo-ventas/verify.md);
+   antes 042; no se dividió: un criterio). Paquete `modules/ventas.json` 1.0.0 sin código por módulo: clientes por empresa con
+   límite de crédito (aviso que acepta el gerente y error para los demás) y saldo recalculado desde las facturas; cotización
+   que al aceptarse crea su pedido; embarque que saca la mercancía al costo real con su póliza de costo de ventas (la «póliza
+   de salidas» pendiente de la 020); factura con póliza de ventas e IVA trasladado; cobro a varias facturas con póliza de
+   ingreso a la cuenta de clientes del almacén de cada una; reportes con margen solo para quien ve costos, tablero, PDF,
+   tarea «Vencer cotizaciones» y `setApp` (orden 15). Capacidad del motor: `createLines[].from` (una partida por cada partida
+   del origen). Pendiente, si se pide: devoluciones, notas de crédito, anticipos y cancelar lo emitido (con el punto 17);
+   diferencia cambiaria del cobro (con el punto 15, R-043-2); existencia comprometida por pedidos y el pedido abierto en el
+   cálculo de crédito (R-043-1); listas de precios por cliente y comisiones; el id del registro en expresiones (para ligar
+   documentos creados por referencia, 043 decisión 8); que la vista previa de un módulo diga qué permisos agrega a roles que
+   ya existen (R-043-3).
 14. ~~**CFDI 4.0 con PAC.**~~ Retirada del plan por decisión del dueño (2026-10-29). Si vuelve, se numera al abrirla.
     **044 — MCP 2: copia aislada y propuestas por MCP** (antes 043; lo que la 038 dejó fuera, CLARIFY 2): la copia aislada con un ciclo
     de vida propio por conexión (*lease*, barrido), `entregar` como propuesta que la persona revisa en Studio y escrituras

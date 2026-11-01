@@ -145,7 +145,7 @@ function ActionForm({ a, patch, ctx, isChild, schedule }: { a: Action; patch: (p
           </Select>
           <AssignList label="Campos del registro nuevo" value={a.set ?? []} onChange={(set) => patch({ set })} fields={targetFields.filter(writable)} scope={exprScope} ctx={ctx}
             hint="Los obligatorios sin valor por defecto deben asignarse." />
-          <CreateLines a={a} patch={patch} ctx={ctx} target={target} exprScope={exprScope} />
+          <CreateLines a={a} patch={patch} ctx={ctx} target={target} exprScope={exprScope} sourceFields={a.lines ? [] : (scope?.fields ?? [])} />
           <AssignList label="Capturar en este registro (opcional)" value={a.capture ?? []} onChange={(capture) => patch({ capture })}
             fields={(scope?.fields ?? []).filter(writable)} scope={createdScope} ctx={ctx} addLabel="Agregar captura"
             hint="Valores del registro creado que se guardan en el que disparó la acción (p. ej. su costo real)." />
@@ -231,8 +231,12 @@ function ActionForm({ a, patch, ctx, isChild, schedule }: { a: Action; patch: (p
   );
 }
 
-function CreateLines({ a, patch, ctx, target, exprScope }: { a: Action; patch: (p: Partial<Action>) => void; ctx: SectionCtx; target?: { fields: FieldDef[] }; exprScope: ExprScope | null }) {
+function CreateLines({ a, patch, ctx, target, exprScope, sourceFields }: {
+  a: Action; patch: (p: Partial<Action>) => void; ctx: SectionCtx; target?: { fields: FieldDef[] }; exprScope: ExprScope | null; sourceFields: FieldDef[];
+}) {
   const lines = activeFields(target).filter((f) => f.type === 'lines');
+  // Spec 043: partidas del registro que dispara la acción (solo desde el encabezado, como `AutomationRules.FromScope`).
+  const sources = sourceFields.filter((f) => f.type === 'lines' && !f.isArchived);
   const list = a.createLines ?? [];
   if (!lines.length && !list.length) return null;
   const set = (next: typeof list) => patch({ createLines: next });
@@ -241,16 +245,26 @@ function CreateLines({ a, patch, ctx, target, exprScope }: { a: Action; patch: (
       <legend className="field-label">Partidas del registro nuevo (opcional)</legend>
       {list.map((lt, i) => {
         const child = entityByName(ctx, lines.find((f) => f.name === lt.field)?.childEntity);
+        const ltScope = lt.from ? scopeOf(ctx, sources.find((f) => f.name === lt.from)?.childEntity) : exprScope;
         return (
           <div className="subitem" key={i}>
             <div className="item-grid">
               <Select label={`Partida ${i + 1}: campo de partidas`} value={lt.field ?? ''} onChange={(e) => set(list.map((x, k) => (k === i ? { ...x, field: e.target.value } : x)))}>
                 {fieldOptions(lines, 'Elige…')}
               </Select>
-              <ExprInput condition label={`Partida ${i + 1}: solo si (opcional)`} value={lt.when ?? ''} scope={exprScope} entities={ctx.entities}
+              {(sources.length > 0 || lt.from) && (
+                <Select label={`Partida ${i + 1}: repetir por cada partida de`} value={lt.from ?? ''}
+                  hint="Una partida nueva por cada partida de este registro; los valores se calculan en esa partida."
+                  onChange={(e) => set(list.map((x, k) => (k === i ? clean({ ...x, from: e.target.value || undefined }) : x)))}>
+                  <option value="">No: una sola partida</option>
+                  {sources.map((f) => <option key={f.name} value={f.name}>{f.label}</option>)}
+                  {lt.from && !sources.some((f) => f.name === lt.from) && <option value={lt.from}>{lt.from} (no existe)</option>}
+                </Select>
+              )}
+              <ExprInput condition label={`Partida ${i + 1}: solo si (opcional)`} value={lt.when ?? ''} scope={ltScope} entities={ctx.entities}
                 onChange={(v) => set(list.map((x, k) => (k === i ? clean({ ...x, when: v }) : x)))} />
               <AssignList label={`Partida ${i + 1}: campos`} value={lt.set ?? []} onChange={(s) => set(list.map((x, k) => (k === i ? { ...x, set: s } : x)))}
-                fields={activeFields(child).filter(writable)} scope={exprScope} ctx={ctx} />
+                fields={activeFields(child).filter(writable)} scope={ltScope} ctx={ctx} />
             </div>
             <Button size="sm" variant="ghost" icon={Trash2} onClick={() => set(list.filter((_, k) => k !== i))}>Quitar partida {i + 1}</Button>
           </div>

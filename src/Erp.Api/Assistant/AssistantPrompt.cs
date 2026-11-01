@@ -70,7 +70,8 @@ public static class AssistantPrompt
           capture?, quantity?, method?, unitCost?, fallbackCost?, costField?, unitCostField?, totalCost?, uncostedEntry?,
           methodChange?, quantityField? }], mode?: sync|async }] }
           mode async: las acciones corren después, fuera de la transacción del evento (no detienen a quien guarda).
-          create: createLines [{ field (partidas del nuevo), when?, set }] agrega partidas; transition ejecuta esa transición
+          create: createLines [{ field (partidas del nuevo), when?, set, from? }] agrega partidas (con from = campo de partidas
+          del origen, una por cada partida de origen, calculada en esa partida); transition ejecuta esa transición
           sobre el registro nuevo; capture [{ field, value }] asigna al registro que disparó la acción (o a su partida, con
           lines) valores calculados en el registro creado. cost (sin lines): valúa el registro con capas por llave (entity +
           match = catálogo de saldo), quantity = campo con signo (+ entra, − sale), method = expresión 'average'|'fifo',

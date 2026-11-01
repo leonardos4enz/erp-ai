@@ -231,6 +231,12 @@ public sealed record LineTemplate
     public required string Field { get; init; }
     public string? When { get; init; }
     public IReadOnlyList<FieldAssignment> Set { get; init; } = [];
+    /// <summary>
+    /// Spec 043: campo de partidas del registro que dispara la acción; la plantilla se repite por cada una de sus partidas y
+    /// <c>when</c> y <c>set</c> se evalúan en el ámbito de esa partida. Omitido, agrega una sola partida (020).
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? From { get; init; }
 }
 
 public sealed record MatchPair(string Field, string Source);

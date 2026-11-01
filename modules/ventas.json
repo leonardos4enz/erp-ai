@@ -1,0 +1,1788 @@
+{
+  "id": "ventas",
+  "name": "Ventas",
+  "version": "1.0.0",
+  "icon": "badge-dollar-sign",
+  "description": "Clientes con límite de crédito, cotizaciones que se convierten en pedidos, embarques que sacan la mercancía al costo real con su póliza de costo de ventas, facturas con póliza de ventas y cobranza con póliza de ingreso.",
+  "requires": ["inventario", "contabilidad", "costeo"],
+  "plan": {
+    "description": "Módulo de Ventas 1.0.0",
+    "operations": [
+      {"op": "addField", "entity": "Producto", "field": {"name": "PrecioVenta", "label": "Precio de venta", "type": "decimal", "precision": 18, "scale": 2, "showInList": false}},
+      {"op": "addField", "entity": "Producto", "field": {"name": "MonedaPrecio", "label": "Moneda del precio", "type": "text", "maxLength": 3, "defaultValue": "BASECURRENCY()", "showInList": false}},
+      {
+        "op": "setRules",
+        "entity": "Producto",
+        "merge": true,
+        "rules": [
+          {"name": "PrecioVentaNoNegativo", "field": "PrecioVenta", "when": "NOT ISBLANK(PrecioVenta)", "assert": "PrecioVenta >= 0", "message": "El precio de venta no puede ser negativo."},
+          {
+            "name": "MonedaPrecioClave",
+            "field": "MonedaPrecio",
+            "assert": "ISBLANK(MonedaPrecio) OR LEN(MonedaPrecio) = 3",
+            "message": "La moneda del precio es una clave de 3 letras (p. ej. MXN, USD)."
+          }
+        ]
+      },
+      {
+        "op": "addField",
+        "entity": "Almacen",
+        "field": {"name": "CuentaCostoVentas", "label": "Cuenta de costo de ventas", "type": "reference", "referenceEntity": "CuentaContable", "showInList": false}
+      },
+      {"op": "addField", "entity": "Almacen", "field": {"name": "CuentaVentas", "label": "Cuenta de ventas", "type": "reference", "referenceEntity": "CuentaContable", "showInList": false}},
+      {"op": "addField", "entity": "Almacen", "field": {"name": "CuentaClientes", "label": "Cuenta de clientes", "type": "reference", "referenceEntity": "CuentaContable", "showInList": false}},
+      {
+        "op": "addField",
+        "entity": "Almacen",
+        "field": {"name": "CuentaIvaTrasladado", "label": "Cuenta de IVA trasladado", "type": "reference", "referenceEntity": "CuentaContable", "showInList": false}
+      },
+      {
+        "op": "createEntity",
+        "group": "Ventas",
+        "name": "Cliente",
+        "label": "Cliente",
+        "labelPlural": "Clientes",
+        "icon": "contact",
+        "perCompany": true,
+        "displayField": "RazonSocial",
+        "description": "Padrón de clientes de cada empresa. El saldo por cobrar lo calcula el sistema con las facturas emitidas.",
+        "fields": [
+          {"name": "Folio", "label": "Folio", "type": "autonumber", "prefix": "CLI-", "padding": 4},
+          {"name": "RFC", "label": "RFC", "type": "text", "maxLength": 13, "required": true, "unique": true},
+          {"name": "RazonSocial", "label": "Razón social", "type": "text", "maxLength": 200, "required": true},
+          {"name": "NombreComercial", "label": "Nombre comercial", "type": "text", "maxLength": 120, "showInList": false},
+          {"name": "Correo", "label": "Correo", "type": "text", "maxLength": 120},
+          {"name": "Telefono", "label": "Teléfono", "type": "text", "maxLength": 20, "showInList": false},
+          {"name": "CondicionPago", "label": "Condición de pago", "type": "reference", "referenceEntity": "CondicionPago", "showInList": false},
+          {"name": "Moneda", "label": "Moneda", "type": "reference", "referenceEntity": "Moneda", "showInList": false},
+          {"name": "Vendedor", "label": "Vendedor", "type": "user", "defaultValue": "CURRENTUSER()"},
+          {"name": "LimiteCredito", "label": "Límite de crédito (moneda base)", "type": "decimal", "precision": 18, "scale": 2, "showInList": false},
+          {"name": "Saldo", "label": "Saldo por cobrar (moneda base)", "type": "decimal", "precision": 18, "scale": 2, "editable": false, "defaultValue": "0"},
+          {
+            "name": "PedidosAbiertos",
+            "label": "Pedidos confirmados por facturar (moneda base)",
+            "type": "decimal",
+            "precision": 18,
+            "scale": 2,
+            "editable": false,
+            "defaultValue": "0",
+            "showInList": false
+          },
+          {
+            "name": "CreditoDisponible",
+            "label": "Crédito disponible",
+            "type": "formula",
+            "resultType": "decimal",
+            "showInList": false,
+            "precision": 18,
+            "scale": 2,
+            "formula": "IF(ISBLANK(LimiteCredito), NULL, LimiteCredito - Saldo - PedidosAbiertos)"
+          },
+          {"name": "Activo", "label": "Activo", "type": "boolean", "defaultValue": "TRUE"},
+          {"name": "Notas", "label": "Notas", "type": "longtext", "showInList": false}
+        ]
+      },
+      {
+        "op": "setRules",
+        "entity": "Cliente",
+        "rules": [
+          {"name": "RfcLongitud", "field": "RFC", "assert": "LEN(RFC) >= 12 AND LEN(RFC) <= 13", "message": "El RFC debe tener 12 (persona moral) o 13 caracteres (persona física)."},
+          {"name": "CorreoValido", "field": "Correo", "when": "NOT ISBLANK(Correo)", "assert": "ISEMAIL(Correo)", "message": "El correo no tiene un formato válido."},
+          {"name": "LimiteNoNegativo", "field": "LimiteCredito", "when": "NOT ISBLANK(LimiteCredito)", "assert": "LimiteCredito >= 0", "message": "El límite de crédito no puede ser negativo."}
+        ]
+      },
+      {
+        "op": "createEntity",
+        "group": "Ventas",
+        "name": "Cotizacion",
+        "label": "Cotización",
+        "labelPlural": "Cotizaciones",
+        "icon": "file-text",
+        "perCompany": true,
+        "displayField": "Folio",
+        "description": "Propuesta de precios a un cliente. Al aceptarla se crea su pedido con las mismas partidas.",
+        "fields": [
+          {"name": "Folio", "label": "Folio", "type": "autonumber", "prefix": "COT-", "padding": 6},
+          {"name": "Cliente", "label": "Cliente", "type": "reference", "referenceEntity": "Cliente", "required": true},
+          {"name": "Fecha", "label": "Fecha", "type": "date", "required": true, "defaultValue": "TODAY()"},
+          {"name": "Vigencia", "label": "Vigente hasta", "type": "date", "required": true, "defaultValue": "ADDDAYS(TODAY(), 15)"},
+          {"name": "Almacen", "label": "Almacén que surte", "type": "reference", "referenceEntity": "Almacen", "required": true, "showInList": false},
+          {"name": "Moneda", "label": "Moneda", "type": "reference", "referenceEntity": "Moneda", "required": true, "defaultValue": "Cliente.Moneda", "showInList": false},
+          {"name": "TipoCambio", "label": "Tipo de cambio", "type": "decimal", "precision": 18, "scale": 4, "defaultValue": "RATE(Moneda.Clave, BASECURRENCY(), Fecha)", "showInList": false},
+          {"name": "Vendedor", "label": "Vendedor", "type": "user", "required": true, "defaultValue": "CURRENTUSER()"},
+          {"name": "Pedido", "label": "Pedido", "type": "text", "maxLength": 20, "editable": false},
+          {"name": "Notas", "label": "Notas", "type": "longtext", "showInList": false}
+        ]
+      },
+      {
+        "op": "createEntity",
+        "group": "Ventas",
+        "name": "CotizacionPartida",
+        "label": "Partida de cotización",
+        "labelPlural": "Partidas de cotización",
+        "icon": "list",
+        "fields": [
+          {"name": "Cotizacion", "label": "Cotización", "type": "parent", "referenceEntity": "Cotizacion"},
+          {"name": "Producto", "label": "Producto", "type": "reference", "referenceEntity": "Producto", "required": true},
+          {"name": "Cantidad", "label": "Cantidad", "type": "decimal", "precision": 18, "scale": 2, "required": true},
+          {
+            "name": "PrecioUnitario",
+            "label": "Precio unitario",
+            "type": "decimal",
+            "precision": 18,
+            "scale": 2,
+            "required": true,
+            "defaultValue": "IF(ISBLANK(Producto.PrecioVenta) OR ISBLANK(Cotizacion.Moneda), NULL, ROUND(CONVERT(Producto.PrecioVenta, COALESCE(Producto.MonedaPrecio, BASECURRENCY()), Cotizacion.Moneda.Clave, Cotizacion.Fecha), 2))"
+          },
+          {"name": "DescuentoPct", "label": "Desc. %", "type": "decimal", "precision": 5, "scale": 2, "defaultValue": "0"},
+          {"name": "IvaPct", "label": "IVA %", "type": "decimal", "precision": 5, "scale": 2, "defaultValue": "Producto.IVA"},
+          {
+            "name": "PrecioLista",
+            "label": "Precio de lista",
+            "type": "formula",
+            "resultType": "decimal",
+            "showInList": false,
+            "precision": 18,
+            "scale": 2,
+            "formula": "IF(ISBLANK(Producto.PrecioVenta) OR ISBLANK(Cotizacion.Moneda), NULL, ROUND(CONVERT(Producto.PrecioVenta, COALESCE(Producto.MonedaPrecio, BASECURRENCY()), Cotizacion.Moneda.Clave, Cotizacion.Fecha), 2))"
+          },
+          {"name": "Importe", "label": "Importe", "type": "formula", "resultType": "decimal", "precision": 18, "scale": 2, "formula": "Cantidad * PrecioUnitario"},
+          {
+            "name": "DescuentoImporte",
+            "label": "Descuento",
+            "type": "formula",
+            "resultType": "decimal",
+            "showInList": false,
+            "precision": 18,
+            "scale": 2,
+            "formula": "ROUND(Importe * DescuentoPct / 100, 2)"
+          },
+          {
+            "name": "IvaImporte",
+            "label": "IVA",
+            "type": "formula",
+            "resultType": "decimal",
+            "showInList": false,
+            "precision": 18,
+            "scale": 2,
+            "formula": "ROUND((Importe - DescuentoImporte) * IvaPct / 100, 2)"
+          },
+          {"name": "Total", "label": "Total", "type": "formula", "resultType": "decimal", "precision": 18, "scale": 2, "formula": "Importe - DescuentoImporte + IvaImporte"}
+        ]
+      },
+      {
+        "op": "setRules",
+        "entity": "CotizacionPartida",
+        "rules": [
+          {"name": "CantidadPositiva", "field": "Cantidad", "assert": "Cantidad > 0", "message": "La cantidad debe ser mayor a cero."},
+          {"name": "PrecioNoNegativo", "field": "PrecioUnitario", "assert": "PrecioUnitario >= 0", "message": "El precio no puede ser negativo."},
+          {"name": "DescuentoRango", "field": "DescuentoPct", "assert": "DescuentoPct >= 0 AND DescuentoPct <= 100", "message": "El descuento debe estar entre 0 y 100%."},
+          {"name": "IvaRango", "field": "IvaPct", "assert": "IvaPct >= 0 AND IvaPct <= 100", "message": "El IVA debe estar entre 0 y 100%."},
+          {
+            "name": "DescuentoAutorizado",
+            "field": "DescuentoPct",
+            "when": "Cotizacion.Estado = 'Borrador' AND NOT HASROLE('Gerente de ventas')",
+            "assert": "IF(ISBLANK(PrecioLista), DescuentoPct <= 15, PrecioUnitario * (1 - DescuentoPct / 100) >= ROUND(PrecioLista * 0.85, 2))",
+            "message": "Un descuento mayor a 15 % (o un precio neto menor al 85 % del precio de lista) solo lo autoriza el gerente de ventas: pídele que capture o acepte el documento."
+          }
+        ]
+      },
+      {"op": "addField", "entity": "Cotizacion", "field": {"name": "Partidas", "label": "Partidas", "type": "lines", "childEntity": "CotizacionPartida"}},
+      {
+        "op": "addField",
+        "entity": "Cotizacion",
+        "field": {"name": "Subtotal", "label": "Subtotal", "type": "formula", "resultType": "decimal", "showInList": false, "precision": 18, "scale": 2, "formula": "SUM(Partidas.Importe)"}
+      },
+      {
+        "op": "addField",
+        "entity": "Cotizacion",
+        "field": {"name": "Descuento", "label": "Descuento", "type": "formula", "resultType": "decimal", "showInList": false, "precision": 18, "scale": 2, "formula": "SUM(Partidas.DescuentoImporte)"}
+      },
+      {
+        "op": "addField",
+        "entity": "Cotizacion",
+        "field": {"name": "IVA", "label": "IVA", "type": "formula", "resultType": "decimal", "showInList": false, "precision": 18, "scale": 2, "formula": "SUM(Partidas.IvaImporte)"}
+      },
+      {
+        "op": "addField",
+        "entity": "Cotizacion",
+        "field": {"name": "Total", "label": "Total", "type": "formula", "resultType": "decimal", "precision": 18, "scale": 2, "formula": "Subtotal - Descuento + IVA"}
+      },
+      {
+        "op": "addField",
+        "entity": "Cotizacion",
+        "field": {"name": "TotalBase", "label": "Total en moneda base", "type": "formula", "resultType": "decimal", "showInList": false, "precision": 18, "scale": 2, "formula": "ROUND(Total * TipoCambio, 2)"}
+      },
+      {
+        "op": "setRules",
+        "entity": "Cotizacion",
+        "rules": [
+          {"name": "VigenciaPosterior", "field": "Vigencia", "assert": "Vigencia >= Fecha", "message": "La vigencia no puede ser anterior a la fecha de la cotización."},
+          {"name": "ClienteActivo", "field": "Cliente", "when": "Estado = 'Borrador'", "assert": "Cliente.Activo = TRUE", "message": "El cliente está inactivo; no se le puede cotizar."},
+          {
+            "name": "TipoCambioRegistrado",
+            "field": "TipoCambio",
+            "assert": "NOT ISBLANK(TipoCambio)",
+            "message": "No hay tipo de cambio de la moneda a la moneda base en la fecha del documento: pide que lo registren en Configuración › Empresas › Tipos de cambio (o al gerente de ventas que lo capture)."
+          },
+          {"name": "TipoCambioPositivo", "field": "TipoCambio", "assert": "TipoCambio > 0", "message": "El tipo de cambio debe ser mayor a cero."},
+          {
+            "name": "MonedaBaseSinTipoCambio",
+            "field": "TipoCambio",
+            "when": "Moneda.Clave = BASECURRENCY()",
+            "assert": "TipoCambio = 1",
+            "message": "En la moneda base de la empresa el tipo de cambio debe ser 1."
+          }
+        ]
+      },
+      {
+        "op": "setWorkflow",
+        "entity": "Cotizacion",
+        "workflow": {
+          "initial": "Borrador",
+          "states": [
+            {"name": "Borrador", "label": "Borrador", "color": "neutral", "editable": true},
+            {"name": "Enviada", "label": "Enviada al cliente", "color": "accent", "editable": false},
+            {"name": "Aceptada", "label": "Aceptada", "color": "success", "editable": false},
+            {"name": "Rechazada", "label": "Rechazada", "color": "danger", "editable": false},
+            {"name": "Vencida", "label": "Vencida", "color": "neutral", "editable": false},
+            {"name": "Cancelada", "label": "Cancelada", "color": "danger", "editable": false}
+          ],
+          "transitions": [
+            {
+              "name": "enviar",
+              "label": "Enviar al cliente",
+              "from": ["Borrador"],
+              "to": "Enviada",
+              "icon": "send",
+              "variant": "primary",
+              "roles": ["Vendedor", "Gerente de ventas"],
+              "when": "COUNT(Partidas) > 0",
+              "whenMessage": "Agrega al menos una partida."
+            },
+            {
+              "name": "aceptar",
+              "label": "Aceptar y crear pedido",
+              "from": ["Enviada"],
+              "to": "Aceptada",
+              "icon": "check",
+              "variant": "primary",
+              "roles": ["Vendedor", "Gerente de ventas"],
+              "when": "Vigencia >= TODAY()",
+              "whenMessage": "La cotización ya venció: haz una nueva con precios vigentes."
+            },
+            {"name": "rechazar", "label": "Rechazar", "from": ["Enviada"], "to": "Rechazada", "icon": "x", "variant": "danger", "roles": ["Vendedor", "Gerente de ventas"], "requireComment": true},
+            {
+              "name": "vencer",
+              "label": "Marcar como vencida",
+              "from": ["Enviada"],
+              "to": "Vencida",
+              "icon": "calendar-x",
+              "roles": ["Gerente de ventas"],
+              "when": "Vigencia < TODAY()",
+              "whenMessage": "La cotización sigue vigente."
+            },
+            {"name": "cancelar", "label": "Cancelar", "from": ["Borrador"], "to": "Cancelada", "icon": "ban", "variant": "danger", "roles": ["Vendedor", "Gerente de ventas"], "requireComment": true}
+          ]
+        }
+      },
+      {
+        "op": "createEntity",
+        "group": "Ventas",
+        "name": "Pedido",
+        "label": "Pedido",
+        "labelPlural": "Pedidos",
+        "icon": "clipboard-check",
+        "perCompany": true,
+        "displayField": "Folio",
+        "description": "Pedido de un cliente: se surte con embarques y se factura lo surtido.",
+        "fields": [
+          {"name": "Folio", "label": "Folio", "type": "autonumber", "prefix": "PED-", "padding": 6},
+          {"name": "Cliente", "label": "Cliente", "type": "reference", "referenceEntity": "Cliente", "required": true},
+          {"name": "Cotizacion", "label": "Cotización", "type": "text", "maxLength": 20, "editable": false, "showInList": false},
+          {"name": "Fecha", "label": "Fecha", "type": "date", "required": true, "defaultValue": "TODAY()"},
+          {"name": "FechaEntrega", "label": "Fecha de entrega", "type": "date", "required": true, "defaultValue": "ADDDAYS(TODAY(), 3)"},
+          {"name": "Almacen", "label": "Almacén que surte", "type": "reference", "referenceEntity": "Almacen", "required": true, "showInList": false},
+          {"name": "Moneda", "label": "Moneda", "type": "reference", "referenceEntity": "Moneda", "required": true, "defaultValue": "Cliente.Moneda", "showInList": false},
+          {"name": "TipoCambio", "label": "Tipo de cambio", "type": "decimal", "precision": 18, "scale": 4, "defaultValue": "RATE(Moneda.Clave, BASECURRENCY(), Fecha)", "showInList": false},
+          {"name": "CondicionPago", "label": "Condición de pago", "type": "reference", "referenceEntity": "CondicionPago", "defaultValue": "Cliente.CondicionPago", "showInList": false},
+          {"name": "Vendedor", "label": "Vendedor", "type": "user", "required": true, "defaultValue": "CURRENTUSER()"},
+          {"name": "Notas", "label": "Notas", "type": "longtext", "showInList": false}
+        ]
+      },
+      {
+        "op": "createEntity",
+        "group": "Ventas",
+        "name": "PedidoPartida",
+        "label": "Partida de pedido",
+        "labelPlural": "Partidas de pedido",
+        "icon": "list",
+        "fields": [
+          {"name": "Pedido", "label": "Pedido", "type": "parent", "referenceEntity": "Pedido"},
+          {"name": "Producto", "label": "Producto", "type": "reference", "referenceEntity": "Producto", "required": true},
+          {"name": "Cantidad", "label": "Cantidad", "type": "decimal", "precision": 18, "scale": 2, "required": true},
+          {
+            "name": "PrecioUnitario",
+            "label": "Precio unitario",
+            "type": "decimal",
+            "precision": 18,
+            "scale": 2,
+            "required": true,
+            "defaultValue": "IF(ISBLANK(Producto.PrecioVenta) OR ISBLANK(Pedido.Moneda), NULL, ROUND(CONVERT(Producto.PrecioVenta, COALESCE(Producto.MonedaPrecio, BASECURRENCY()), Pedido.Moneda.Clave, Pedido.Fecha), 2))"
+          },
+          {"name": "DescuentoPct", "label": "Desc. %", "type": "decimal", "precision": 5, "scale": 2, "defaultValue": "0"},
+          {"name": "IvaPct", "label": "IVA %", "type": "decimal", "precision": 5, "scale": 2, "defaultValue": "Producto.IVA"},
+          {
+            "name": "PrecioLista",
+            "label": "Precio de lista",
+            "type": "formula",
+            "resultType": "decimal",
+            "showInList": false,
+            "precision": 18,
+            "scale": 2,
+            "formula": "IF(ISBLANK(Producto.PrecioVenta) OR ISBLANK(Pedido.Moneda), NULL, ROUND(CONVERT(Producto.PrecioVenta, COALESCE(Producto.MonedaPrecio, BASECURRENCY()), Pedido.Moneda.Clave, Pedido.Fecha), 2))"
+          },
+          {"name": "Importe", "label": "Importe", "type": "formula", "resultType": "decimal", "precision": 18, "scale": 2, "formula": "Cantidad * PrecioUnitario"},
+          {
+            "name": "DescuentoImporte",
+            "label": "Descuento",
+            "type": "formula",
+            "resultType": "decimal",
+            "showInList": false,
+            "precision": 18,
+            "scale": 2,
+            "formula": "ROUND(Importe * DescuentoPct / 100, 2)"
+          },
+          {
+            "name": "IvaImporte",
+            "label": "IVA",
+            "type": "formula",
+            "resultType": "decimal",
+            "showInList": false,
+            "precision": 18,
+            "scale": 2,
+            "formula": "ROUND((Importe - DescuentoImporte) * IvaPct / 100, 2)"
+          },
+          {"name": "Total", "label": "Total", "type": "formula", "resultType": "decimal", "precision": 18, "scale": 2, "formula": "Importe - DescuentoImporte + IvaImporte"},
+          {"name": "CantidadSurtida", "label": "Surtido", "type": "decimal", "precision": 18, "scale": 2, "editable": false, "defaultValue": "0"},
+          {"name": "CantidadFacturada", "label": "Facturado", "type": "decimal", "precision": 18, "scale": 2, "editable": false, "defaultValue": "0"},
+          {"name": "PorSurtir", "label": "Por surtir", "type": "formula", "resultType": "decimal", "precision": 18, "scale": 2, "formula": "Cantidad - CantidadSurtida"},
+          {"name": "PorFacturar", "label": "Por facturar", "type": "formula", "resultType": "decimal", "precision": 18, "scale": 2, "formula": "CantidadSurtida - CantidadFacturada"},
+          {
+            "name": "PorFacturarBase",
+            "label": "Por facturar con IVA (moneda base)",
+            "type": "formula",
+            "resultType": "decimal",
+            "showInList": false,
+            "precision": 18,
+            "scale": 2,
+            "formula": "ROUND((Cantidad - CantidadFacturada) * PrecioUnitario * (1 - DescuentoPct / 100) * (1 + IvaPct / 100) * Pedido.TipoCambio, 2)"
+          },
+          {
+            "name": "VentaSurtidaBase",
+            "label": "Venta surtida (moneda base)",
+            "type": "formula",
+            "resultType": "decimal",
+            "showInList": false,
+            "precision": 18,
+            "scale": 2,
+            "formula": "ROUND(CantidadSurtida * PrecioUnitario * (1 - DescuentoPct / 100) * Pedido.TipoCambio, 2)"
+          },
+          {"name": "CostoSurtido", "label": "Costo de lo surtido (moneda base)", "type": "decimal", "precision": 18, "scale": 2, "editable": false, "defaultValue": "0", "showInList": false},
+          {
+            "name": "Descripcion",
+            "label": "Descripción",
+            "type": "formula",
+            "resultType": "text",
+            "showInList": false,
+            "formula": "Producto.Clave & ' · ' & Producto.Descripcion & ' · por surtir ' & PorSurtir & ' · por facturar ' & PorFacturar"
+          }
+        ]
+      },
+      {"op": "updateEntity", "entity": "PedidoPartida", "displayField": "Descripcion"},
+      {
+        "op": "setRules",
+        "entity": "PedidoPartida",
+        "rules": [
+          {"name": "CantidadPositiva", "field": "Cantidad", "assert": "Cantidad > 0", "message": "La cantidad debe ser mayor a cero."},
+          {"name": "PrecioNoNegativo", "field": "PrecioUnitario", "assert": "PrecioUnitario >= 0", "message": "El precio no puede ser negativo."},
+          {"name": "DescuentoRango", "field": "DescuentoPct", "assert": "DescuentoPct >= 0 AND DescuentoPct <= 100", "message": "El descuento debe estar entre 0 y 100%."},
+          {"name": "IvaRango", "field": "IvaPct", "assert": "IvaPct >= 0 AND IvaPct <= 100", "message": "El IVA debe estar entre 0 y 100%."},
+          {
+            "name": "DescuentoAutorizado",
+            "field": "DescuentoPct",
+            "when": "Pedido.Estado = 'Borrador' AND NOT HASROLE('Gerente de ventas')",
+            "assert": "IF(ISBLANK(PrecioLista), DescuentoPct <= 15, PrecioUnitario * (1 - DescuentoPct / 100) >= ROUND(PrecioLista * 0.85, 2))",
+            "message": "Un descuento mayor a 15 % (o un precio neto menor al 85 % del precio de lista) solo lo autoriza el gerente de ventas: pídele que capture o acepte el documento."
+          },
+          {"name": "SurtidoNoExcede", "field": "CantidadSurtida", "assert": "CantidadSurtida <= Cantidad", "message": "Lo surtido no puede exceder lo pedido en la partida."},
+          {"name": "FacturadoNoExcede", "field": "CantidadFacturada", "assert": "CantidadFacturada <= CantidadSurtida", "message": "Lo facturado no puede exceder lo surtido en la partida."}
+        ]
+      },
+      {"op": "addField", "entity": "Pedido", "field": {"name": "Partidas", "label": "Partidas", "type": "lines", "childEntity": "PedidoPartida"}},
+      {
+        "op": "addField",
+        "entity": "Pedido",
+        "field": {"name": "Subtotal", "label": "Subtotal", "type": "formula", "resultType": "decimal", "showInList": false, "precision": 18, "scale": 2, "formula": "SUM(Partidas.Importe)"}
+      },
+      {
+        "op": "addField",
+        "entity": "Pedido",
+        "field": {"name": "Descuento", "label": "Descuento", "type": "formula", "resultType": "decimal", "showInList": false, "precision": 18, "scale": 2, "formula": "SUM(Partidas.DescuentoImporte)"}
+      },
+      {
+        "op": "addField",
+        "entity": "Pedido",
+        "field": {"name": "IVA", "label": "IVA", "type": "formula", "resultType": "decimal", "showInList": false, "precision": 18, "scale": 2, "formula": "SUM(Partidas.IvaImporte)"}
+      },
+      {
+        "op": "addField",
+        "entity": "Pedido",
+        "field": {"name": "Total", "label": "Total", "type": "formula", "resultType": "decimal", "precision": 18, "scale": 2, "formula": "Subtotal - Descuento + IVA"}
+      },
+      {
+        "op": "addField",
+        "entity": "Pedido",
+        "field": {"name": "TotalBase", "label": "Total en moneda base", "type": "formula", "resultType": "decimal", "showInList": false, "precision": 18, "scale": 2, "formula": "ROUND(Total * TipoCambio, 2)"}
+      },
+      {
+        "op": "addField",
+        "entity": "Pedido",
+        "field": {"name": "PendientePorSurtir", "label": "Pendiente por surtir", "type": "formula", "resultType": "decimal", "precision": 18, "scale": 2, "formula": "SUM(Partidas.PorSurtir)"}
+      },
+      {
+        "op": "addField",
+        "entity": "Pedido",
+        "field": {
+          "name": "PendientePorFacturar",
+          "label": "Surtido por facturar",
+          "type": "formula",
+          "resultType": "decimal",
+          "showInList": false,
+          "precision": 18,
+          "scale": 2,
+          "formula": "SUM(Partidas.PorFacturar)"
+        }
+      },
+      {
+        "op": "addField",
+        "entity": "Pedido",
+        "field": {
+          "name": "PorFacturarBase",
+          "label": "Por facturar con IVA (moneda base)",
+          "type": "formula",
+          "resultType": "decimal",
+          "showInList": false,
+          "precision": 18,
+          "scale": 2,
+          "formula": "SUM(Partidas.PorFacturarBase)"
+        }
+      },
+      {
+        "op": "setRules",
+        "entity": "Pedido",
+        "rules": [
+          {"name": "EntregaPosterior", "field": "FechaEntrega", "assert": "FechaEntrega >= Fecha", "message": "La fecha de entrega no puede ser anterior a la fecha del pedido."},
+          {"name": "ClienteActivo", "field": "Cliente", "when": "Estado = 'Borrador'", "assert": "Cliente.Activo = TRUE", "message": "El cliente está inactivo; no se le pueden hacer pedidos."},
+          {
+            "name": "TipoCambioRegistrado",
+            "field": "TipoCambio",
+            "assert": "NOT ISBLANK(TipoCambio)",
+            "message": "No hay tipo de cambio de la moneda a la moneda base en la fecha del documento: pide que lo registren en Configuración › Empresas › Tipos de cambio (o al gerente de ventas que lo capture)."
+          },
+          {"name": "TipoCambioPositivo", "field": "TipoCambio", "assert": "TipoCambio > 0", "message": "El tipo de cambio debe ser mayor a cero."},
+          {
+            "name": "MonedaBaseSinTipoCambio",
+            "field": "TipoCambio",
+            "when": "Moneda.Clave = BASECURRENCY()",
+            "assert": "TipoCambio = 1",
+            "message": "En la moneda base de la empresa el tipo de cambio debe ser 1."
+          },
+          {
+            "name": "LimiteCredito",
+            "field": "Cliente",
+            "severity": "warning",
+            "when": "Estado IN ('Borrador', 'Confirmado')",
+            "assert": "ISBLANK(Cliente.LimiteCredito) OR Cliente.Saldo + Cliente.PedidosAbiertos + TotalBase <= Cliente.LimiteCredito",
+            "message": "El pedido más el saldo por cobrar y los pedidos abiertos del cliente supera su límite de crédito."
+          },
+          {
+            "name": "LimiteCreditoGerente",
+            "field": "Cliente",
+            "when": "Estado = 'Confirmado' AND NOT HASROLE('Gerente de ventas')",
+            "assert": "ISBLANK(Cliente.LimiteCredito) OR Cliente.Saldo + Cliente.PedidosAbiertos + TotalBase <= Cliente.LimiteCredito",
+            "message": "El pedido más el saldo por cobrar y los pedidos abiertos del cliente supera su límite de crédito. Solo el gerente de ventas confirma un pedido sobre el límite."
+          }
+        ]
+      },
+      {
+        "op": "setWorkflow",
+        "entity": "Pedido",
+        "workflow": {
+          "initial": "Borrador",
+          "states": [
+            {"name": "Borrador", "label": "Borrador", "color": "neutral", "editable": true},
+            {"name": "Confirmado", "label": "Confirmado", "color": "accent", "editable": false},
+            {"name": "SurtidoParcial", "label": "Surtido parcial", "color": "warning", "editable": false},
+            {"name": "Surtido", "label": "Surtido", "color": "success", "editable": false},
+            {"name": "Facturado", "label": "Surtido y facturado", "color": "success", "editable": false},
+            {"name": "Cancelado", "label": "Cancelado", "color": "danger", "editable": false}
+          ],
+          "transitions": [
+            {
+              "name": "confirmar",
+              "label": "Confirmar pedido",
+              "from": ["Borrador"],
+              "to": "Confirmado",
+              "icon": "check",
+              "variant": "primary",
+              "roles": ["Vendedor", "Gerente de ventas"],
+              "when": "COUNT(Partidas) > 0",
+              "whenMessage": "Agrega al menos una partida.",
+              "onWarning": "confirm"
+            },
+            {"name": "surtirParcial", "label": "Surtido parcial", "from": ["Confirmado"], "to": "SurtidoParcial", "icon": "package-open", "system": true},
+            {"name": "surtir", "label": "Surtido", "from": ["Confirmado", "SurtidoParcial"], "to": "Surtido", "icon": "package-check", "system": true},
+            {"name": "facturar", "label": "Surtido y facturado", "from": ["Surtido"], "to": "Facturado", "icon": "receipt", "system": true},
+            {
+              "name": "cancelar",
+              "label": "Cancelar",
+              "from": ["Borrador", "Confirmado"],
+              "to": "Cancelado",
+              "icon": "ban",
+              "variant": "danger",
+              "roles": ["Vendedor", "Gerente de ventas"],
+              "requireComment": true
+            }
+          ]
+        }
+      },
+      {
+        "op": "setAutomations",
+        "entity": "Pedido",
+        "automations": [
+          {
+            "name": "AbiertosAlConfirmar",
+            "label": "Sumar el pedido a los pedidos abiertos del cliente",
+            "on": "enterState",
+            "state": "Confirmado",
+            "actions": [{"type": "rollup", "target": "Cliente", "field": "PedidosAbiertos", "sum": "PorFacturarBase", "filter": "Estado IN ('Confirmado', 'SurtidoParcial', 'Surtido')"}]
+          },
+          {
+            "name": "AbiertosAlCancelar",
+            "label": "Quitar el pedido cancelado de los pedidos abiertos",
+            "on": "enterState",
+            "state": "Cancelado",
+            "actions": [{"type": "rollup", "target": "Cliente", "field": "PedidosAbiertos", "sum": "PorFacturarBase", "filter": "Estado IN ('Confirmado', 'SurtidoParcial', 'Surtido')"}]
+          },
+          {
+            "name": "AbiertosAlFacturar",
+            "label": "Actualizar los pedidos abiertos del cliente",
+            "on": "update",
+            "when": "Estado IN ('Confirmado', 'SurtidoParcial', 'Surtido', 'Facturado')",
+            "actions": [{"type": "rollup", "target": "Cliente", "field": "PedidosAbiertos", "sum": "PorFacturarBase", "filter": "Estado IN ('Confirmado', 'SurtidoParcial', 'Surtido')"}]
+          }
+        ]
+      },
+      {
+        "op": "setAutomations",
+        "entity": "Cotizacion",
+        "automations": [
+          {
+            "name": "CrearPedido",
+            "label": "Crear el pedido de la cotización",
+            "on": "enterState",
+            "state": "Aceptada",
+            "actions": [
+              {
+                "type": "create",
+                "entity": "Pedido",
+                "set": [
+                  {"field": "Cliente", "value": "Cliente"},
+                  {"field": "Cotizacion", "value": "Folio"},
+                  {"field": "Almacen", "value": "Almacen"},
+                  {"field": "Moneda", "value": "Moneda"},
+                  {"field": "TipoCambio", "value": "TipoCambio"},
+                  {"field": "Vendedor", "value": "Vendedor"},
+                  {"field": "Notas", "value": "Notas"}
+                ],
+                "createLines": [
+                  {
+                    "field": "Partidas",
+                    "from": "Partidas",
+                    "set": [
+                      {"field": "Producto", "value": "Producto"},
+                      {"field": "Cantidad", "value": "Cantidad"},
+                      {"field": "PrecioUnitario", "value": "PrecioUnitario"},
+                      {"field": "DescuentoPct", "value": "DescuentoPct"},
+                      {"field": "IvaPct", "value": "IvaPct"}
+                    ]
+                  }
+                ],
+                "capture": [{"field": "Pedido", "value": "Folio"}]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "op": "createEntity",
+        "group": "Ventas",
+        "name": "Embarque",
+        "label": "Embarque",
+        "labelPlural": "Embarques",
+        "icon": "truck",
+        "perCompany": true,
+        "displayField": "Folio",
+        "description": "Salida de almacén de un pedido. Al confirmarla baja la existencia al costo real y genera la póliza de costo de ventas.",
+        "fields": [
+          {"name": "Folio", "label": "Folio", "type": "autonumber", "prefix": "EMB-", "padding": 6},
+          {"name": "Pedido", "label": "Pedido", "type": "reference", "referenceEntity": "Pedido", "required": true},
+          {"name": "Almacen", "label": "Almacén", "type": "reference", "referenceEntity": "Almacen", "required": true, "defaultValue": "Pedido.Almacen"},
+          {"name": "Fecha", "label": "Fecha", "type": "date", "required": true, "defaultValue": "TODAY()"},
+          {"name": "Transportista", "label": "Transportista", "type": "text", "maxLength": 80, "showInList": false},
+          {"name": "Guia", "label": "Guía", "type": "text", "maxLength": 40, "showInList": false},
+          {"name": "Notas", "label": "Notas", "type": "longtext", "showInList": false}
+        ]
+      },
+      {
+        "op": "createEntity",
+        "group": "Ventas",
+        "name": "EmbarquePartida",
+        "label": "Partida de embarque",
+        "labelPlural": "Partidas de embarque",
+        "icon": "list",
+        "fields": [
+          {"name": "Embarque", "label": "Embarque", "type": "parent", "referenceEntity": "Embarque"},
+          {
+            "name": "PartidaPedido",
+            "label": "Partida del pedido",
+            "type": "reference",
+            "referenceEntity": "PedidoPartida",
+            "required": true,
+            "lookupFilter": {"field": "Pedido", "source": "Embarque.Pedido"}
+          },
+          {"name": "Producto", "label": "Producto", "type": "reference", "referenceEntity": "Producto", "required": true, "defaultValue": "PartidaPedido.Producto"},
+          {"name": "Cantidad", "label": "Cantidad", "type": "decimal", "precision": 18, "scale": 2, "required": true, "defaultValue": "PartidaPedido.PorSurtir"},
+          {"name": "Costo", "label": "Costo (moneda base)", "type": "decimal", "precision": 18, "scale": 2, "editable": false}
+        ]
+      },
+      {
+        "op": "setRules",
+        "entity": "EmbarquePartida",
+        "rules": [
+          {"name": "CantidadPositiva", "field": "Cantidad", "assert": "Cantidad > 0", "message": "La cantidad debe ser mayor a cero."},
+          {"name": "PartidaDelPedido", "field": "PartidaPedido", "assert": "PartidaPedido.Pedido = Embarque.Pedido", "message": "La partida no pertenece al pedido de este embarque."},
+          {"name": "ProductoDeLaPartida", "field": "Producto", "assert": "Producto = PartidaPedido.Producto", "message": "El producto no coincide con el de la partida del pedido."},
+          {
+            "name": "NoExcederPendiente",
+            "field": "Cantidad",
+            "when": "Embarque.Estado <> 'Cancelado'",
+            "assert": "Cantidad <= PartidaPedido.PorSurtir",
+            "message": "La cantidad excede lo pendiente de surtir en la partida del pedido."
+          }
+        ]
+      },
+      {"op": "addField", "entity": "Embarque", "field": {"name": "Partidas", "label": "Partidas", "type": "lines", "childEntity": "EmbarquePartida"}},
+      {
+        "op": "addField",
+        "entity": "Embarque",
+        "field": {"name": "TotalPiezas", "label": "Total a surtir", "type": "formula", "resultType": "decimal", "precision": 18, "scale": 2, "formula": "SUM(Partidas.Cantidad)"}
+      },
+      {
+        "op": "addField",
+        "entity": "Embarque",
+        "field": {"name": "CostoTotal", "label": "Costo de ventas (moneda base)", "type": "formula", "resultType": "decimal", "showInList": false, "precision": 18, "scale": 2, "formula": "SUM(Partidas.Costo)"}
+      },
+      {
+        "op": "setRules",
+        "entity": "Embarque",
+        "rules": [
+          {"name": "AlmacenDelPedido", "field": "Almacen", "assert": "Almacen = Pedido.Almacen", "message": "El embarque sale del almacén del pedido."},
+          {
+            "name": "CuentasDeCostoDeVentas",
+            "field": "Almacen",
+            "when": "Estado = 'Confirmado'",
+            "assert": "NOT ISBLANK(Almacen.CuentaCostoVentas) AND NOT ISBLANK(Almacen.CuentaInventario)",
+            "message": "El almacén no tiene la cuenta de costo de ventas y la de inventario: configúralas en el almacén para que el embarque genere su póliza."
+          }
+        ]
+      },
+      {
+        "op": "setWorkflow",
+        "entity": "Embarque",
+        "workflow": {
+          "initial": "Borrador",
+          "states": [
+            {"name": "Borrador", "label": "Borrador", "color": "neutral", "editable": true},
+            {"name": "Confirmado", "label": "Confirmado", "color": "success", "editable": false},
+            {"name": "Cancelado", "label": "Cancelado", "color": "danger", "editable": false}
+          ],
+          "transitions": [
+            {
+              "name": "confirmar",
+              "label": "Confirmar salida",
+              "from": ["Borrador"],
+              "to": "Confirmado",
+              "icon": "check",
+              "variant": "primary",
+              "roles": ["Surtidor", "Gerente de ventas"],
+              "when": "Pedido.Estado IN ('Confirmado', 'SurtidoParcial') AND COUNT(Partidas) > 0 AND COUNT(Partidas) < 500",
+              "whenMessage": "Para confirmar: el pedido debe estar confirmado y el embarque necesita de 1 a 499 partidas (su póliza lleva una más)."
+            },
+            {"name": "cancelar", "label": "Cancelar", "from": ["Borrador"], "to": "Cancelado", "icon": "ban", "variant": "danger", "roles": ["Surtidor", "Gerente de ventas"], "requireComment": true}
+          ]
+        }
+      },
+      {
+        "op": "setAutomations",
+        "entity": "Embarque",
+        "automations": [
+          {
+            "name": "SalidaAlmacen",
+            "label": "Registrar la salida del almacén",
+            "on": "enterState",
+            "state": "Confirmado",
+            "actions": [
+              {
+                "type": "create",
+                "lines": "Partidas",
+                "entity": "MovimientoInventario",
+                "set": [
+                  {"field": "Fecha", "value": "Embarque.Fecha"},
+                  {"field": "Tipo", "value": "'Salida'"},
+                  {"field": "Almacen", "value": "Embarque.Almacen"},
+                  {"field": "Producto", "value": "Producto"},
+                  {"field": "Cantidad", "value": "Cantidad"},
+                  {"field": "Referencia", "value": "Embarque.Folio"}
+                ],
+                "capture": [{"field": "Costo", "value": "-CostoTotal"}]
+              }
+            ]
+          },
+          {
+            "name": "AcumularSurtido",
+            "label": "Acumular lo surtido en el pedido",
+            "on": "enterState",
+            "state": "Confirmado",
+            "actions": [
+              {"type": "rollup", "lines": "Partidas", "target": "PartidaPedido", "field": "CantidadSurtida", "sum": "Cantidad", "filter": "Embarque.Estado = 'Confirmado'"},
+              {"type": "rollup", "lines": "Partidas", "target": "PartidaPedido", "field": "CostoSurtido", "sum": "Costo", "filter": "Embarque.Estado = 'Confirmado'"},
+              {"type": "transition", "target": "Pedido", "transition": "surtir", "when": "Pedido.PendientePorSurtir <= 0"},
+              {"type": "transition", "target": "Pedido", "transition": "surtirParcial", "when": "Pedido.PendientePorSurtir > 0"}
+            ]
+          },
+          {
+            "name": "PolizaCostoVentas",
+            "label": "Póliza de costo de ventas",
+            "on": "enterState",
+            "state": "Confirmado",
+            "when": "CostoTotal > 0",
+            "actions": [
+              {
+                "type": "create",
+                "entity": "Poliza",
+                "transition": "aplicar",
+                "set": [
+                  {"field": "Fecha", "value": "Fecha"},
+                  {"field": "Tipo", "value": "'Diario'"},
+                  {"field": "Concepto", "value": "'Costo de ventas del embarque ' & Folio"},
+                  {"field": "Referencia", "value": "Folio"},
+                  {"field": "Origen", "value": "'Automática'"}
+                ],
+                "createLines": [
+                  {
+                    "field": "Partidas",
+                    "from": "Partidas",
+                    "when": "Costo > 0",
+                    "set": [
+                      {"field": "Cuenta", "value": "Embarque.Almacen.CuentaCostoVentas"},
+                      {"field": "Concepto", "value": "'Costo de ventas · ' & Producto.Clave & ' · ' & Embarque.Folio"},
+                      {"field": "Cargo", "value": "Costo"},
+                      {"field": "Abono", "value": "0"}
+                    ]
+                  },
+                  {
+                    "field": "Partidas",
+                    "set": [
+                      {"field": "Cuenta", "value": "Almacen.CuentaInventario"},
+                      {"field": "Concepto", "value": "'Salida de inventario · ' & Folio"},
+                      {"field": "Cargo", "value": "0"},
+                      {"field": "Abono", "value": "CostoTotal"}
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "op": "createEntity",
+        "group": "Ventas",
+        "name": "Factura",
+        "label": "Factura",
+        "labelPlural": "Facturas",
+        "icon": "receipt",
+        "perCompany": true,
+        "displayField": "Folio",
+        "description": "Factura de lo surtido de un pedido. Al emitirla genera la póliza de ventas y suma al saldo del cliente.",
+        "fields": [
+          {"name": "Folio", "label": "Folio", "type": "autonumber", "prefix": "FAC-", "padding": 6},
+          {"name": "Pedido", "label": "Pedido", "type": "reference", "referenceEntity": "Pedido", "required": true},
+          {"name": "Cliente", "label": "Cliente", "type": "reference", "referenceEntity": "Cliente", "required": true, "defaultValue": "Pedido.Cliente"},
+          {"name": "Almacen", "label": "Almacén", "type": "reference", "referenceEntity": "Almacen", "required": true, "defaultValue": "Pedido.Almacen", "showInList": false},
+          {"name": "Fecha", "label": "Fecha", "type": "date", "required": true, "defaultValue": "TODAY()"},
+          {"name": "CondicionPago", "label": "Condición de pago", "type": "reference", "referenceEntity": "CondicionPago", "defaultValue": "Pedido.CondicionPago", "showInList": false},
+          {"name": "Vencimiento", "label": "Vencimiento", "type": "date", "required": true, "defaultValue": "ADDDAYS(Fecha, COALESCE(CondicionPago.Dias, 0))"},
+          {"name": "Moneda", "label": "Moneda", "type": "reference", "referenceEntity": "Moneda", "required": true, "defaultValue": "Pedido.Moneda", "showInList": false},
+          {"name": "TipoCambio", "label": "Tipo de cambio", "type": "decimal", "precision": 18, "scale": 4, "defaultValue": "RATE(Moneda.Clave, BASECURRENCY(), Fecha)", "showInList": false},
+          {"name": "Vendedor", "label": "Vendedor", "type": "user", "required": true, "defaultValue": "Pedido.Vendedor", "showInList": false},
+          {"name": "Notas", "label": "Notas", "type": "longtext", "showInList": false}
+        ]
+      },
+      {
+        "op": "createEntity",
+        "group": "Ventas",
+        "name": "FacturaPartida",
+        "label": "Partida de factura",
+        "labelPlural": "Partidas de factura",
+        "icon": "list",
+        "fields": [
+          {"name": "Factura", "label": "Factura", "type": "parent", "referenceEntity": "Factura"},
+          {
+            "name": "PartidaPedido",
+            "label": "Partida del pedido",
+            "type": "reference",
+            "referenceEntity": "PedidoPartida",
+            "required": true,
+            "lookupFilter": {"field": "Pedido", "source": "Factura.Pedido"}
+          },
+          {"name": "Producto", "label": "Producto", "type": "reference", "referenceEntity": "Producto", "required": true, "defaultValue": "PartidaPedido.Producto"},
+          {"name": "Cantidad", "label": "Cantidad", "type": "decimal", "precision": 18, "scale": 2, "required": true, "defaultValue": "PartidaPedido.PorFacturar"},
+          {"name": "PrecioUnitario", "label": "Precio unitario", "type": "decimal", "precision": 18, "scale": 2, "editable": false, "defaultValue": "PartidaPedido.PrecioUnitario"},
+          {"name": "DescuentoPct", "label": "Desc. %", "type": "decimal", "precision": 5, "scale": 2, "editable": false, "defaultValue": "PartidaPedido.DescuentoPct"},
+          {"name": "IvaPct", "label": "IVA %", "type": "decimal", "precision": 5, "scale": 2, "editable": false, "defaultValue": "PartidaPedido.IvaPct"},
+          {"name": "Importe", "label": "Importe", "type": "formula", "resultType": "decimal", "precision": 18, "scale": 2, "formula": "Cantidad * PrecioUnitario"},
+          {
+            "name": "DescuentoImporte",
+            "label": "Descuento",
+            "type": "formula",
+            "resultType": "decimal",
+            "showInList": false,
+            "precision": 18,
+            "scale": 2,
+            "formula": "ROUND(Importe * DescuentoPct / 100, 2)"
+          },
+          {
+            "name": "IvaImporte",
+            "label": "IVA",
+            "type": "formula",
+            "resultType": "decimal",
+            "showInList": false,
+            "precision": 18,
+            "scale": 2,
+            "formula": "ROUND((Importe - DescuentoImporte) * IvaPct / 100, 2)"
+          },
+          {"name": "Total", "label": "Total", "type": "formula", "resultType": "decimal", "precision": 18, "scale": 2, "formula": "Importe - DescuentoImporte + IvaImporte"}
+        ]
+      },
+      {
+        "op": "setRules",
+        "entity": "FacturaPartida",
+        "rules": [
+          {"name": "CantidadPositiva", "field": "Cantidad", "assert": "Cantidad > 0", "message": "La cantidad debe ser mayor a cero."},
+          {"name": "PartidaDelPedido", "field": "PartidaPedido", "assert": "PartidaPedido.Pedido = Factura.Pedido", "message": "La partida no pertenece al pedido de esta factura."},
+          {"name": "ProductoDeLaPartida", "field": "Producto", "assert": "Producto = PartidaPedido.Producto", "message": "El producto no coincide con el de la partida del pedido."},
+          {
+            "name": "CondicionesDelPedido",
+            "field": "PrecioUnitario",
+            "assert": "PrecioUnitario = PartidaPedido.PrecioUnitario AND DescuentoPct = PartidaPedido.DescuentoPct AND IvaPct = PartidaPedido.IvaPct",
+            "message": "El precio, el descuento y el IVA son los de la partida del pedido: quita la partida y vuelve a agregarla."
+          },
+          {
+            "name": "NoExcederPorFacturar",
+            "field": "Cantidad",
+            "when": "Factura.Estado IN ('Borrador', 'Emitida')",
+            "assert": "Cantidad <= PartidaPedido.PorFacturar",
+            "message": "La cantidad excede lo surtido pendiente de facturar en la partida del pedido."
+          }
+        ]
+      },
+      {"op": "addField", "entity": "Factura", "field": {"name": "Partidas", "label": "Partidas", "type": "lines", "childEntity": "FacturaPartida"}},
+      {
+        "op": "addField",
+        "entity": "Factura",
+        "field": {"name": "Subtotal", "label": "Subtotal", "type": "formula", "resultType": "decimal", "showInList": false, "precision": 18, "scale": 2, "formula": "SUM(Partidas.Importe)"}
+      },
+      {
+        "op": "addField",
+        "entity": "Factura",
+        "field": {"name": "Descuento", "label": "Descuento", "type": "formula", "resultType": "decimal", "showInList": false, "precision": 18, "scale": 2, "formula": "SUM(Partidas.DescuentoImporte)"}
+      },
+      {
+        "op": "addField",
+        "entity": "Factura",
+        "field": {"name": "IVA", "label": "IVA", "type": "formula", "resultType": "decimal", "showInList": false, "precision": 18, "scale": 2, "formula": "SUM(Partidas.IvaImporte)"}
+      },
+      {
+        "op": "addField",
+        "entity": "Factura",
+        "field": {"name": "Total", "label": "Total", "type": "formula", "resultType": "decimal", "precision": 18, "scale": 2, "formula": "Subtotal - Descuento + IVA"}
+      },
+      {
+        "op": "addField",
+        "entity": "Factura",
+        "field": {"name": "TotalBase", "label": "Total en moneda base", "type": "formula", "resultType": "decimal", "showInList": false, "precision": 18, "scale": 2, "formula": "ROUND(Total * TipoCambio, 2)"}
+      },
+      {
+        "op": "addField",
+        "entity": "Factura",
+        "field": {
+          "name": "SubtotalBase",
+          "label": "Venta neta en moneda base",
+          "type": "formula",
+          "resultType": "decimal",
+          "showInList": false,
+          "precision": 18,
+          "scale": 2,
+          "formula": "ROUND((Subtotal - Descuento) * TipoCambio, 2)"
+        }
+      },
+      {
+        "op": "addField",
+        "entity": "Factura",
+        "field": {"name": "IvaBase", "label": "IVA en moneda base", "type": "formula", "resultType": "decimal", "showInList": false, "precision": 18, "scale": 2, "formula": "TotalBase - SubtotalBase"}
+      },
+      {
+        "op": "addField",
+        "entity": "Factura",
+        "field": {"name": "Cobrado", "label": "Cobrado", "type": "decimal", "precision": 18, "scale": 2, "editable": false, "defaultValue": "0", "showInList": false}
+      },
+      {"op": "addField", "entity": "Factura", "field": {"name": "Saldo", "label": "Saldo", "type": "formula", "resultType": "decimal", "precision": 18, "scale": 2, "formula": "Total - Cobrado"}},
+      {
+        "op": "addField",
+        "entity": "Factura",
+        "field": {"name": "SaldoBase", "label": "Saldo en moneda base", "type": "formula", "resultType": "decimal", "showInList": false, "precision": 18, "scale": 2, "formula": "ROUND(Saldo * TipoCambio, 2)"}
+      },
+      {
+        "op": "setRules",
+        "entity": "Factura",
+        "rules": [
+          {"name": "ClienteDelPedido", "field": "Cliente", "assert": "Cliente = Pedido.Cliente", "message": "El cliente de la factura es el del pedido."},
+          {"name": "MonedaDelPedido", "field": "Moneda", "assert": "Moneda = Pedido.Moneda", "message": "La factura va en la moneda del pedido."},
+          {"name": "AlmacenDelPedido", "field": "Almacen", "assert": "Almacen = Pedido.Almacen", "message": "La factura es del almacén del pedido (sus cuentas reciben la póliza)."},
+          {"name": "VendedorDelPedido", "field": "Vendedor", "assert": "Vendedor = Pedido.Vendedor", "message": "La factura es del vendedor del pedido."},
+          {"name": "VencimientoPosterior", "field": "Vencimiento", "assert": "Vencimiento >= Fecha", "message": "El vencimiento no puede ser anterior a la fecha de la factura."},
+          {
+            "name": "TipoCambioRegistrado",
+            "field": "TipoCambio",
+            "assert": "NOT ISBLANK(TipoCambio)",
+            "message": "No hay tipo de cambio de la moneda a la moneda base en la fecha del documento: pide que lo registren en Configuración › Empresas › Tipos de cambio (o al gerente de ventas que lo capture)."
+          },
+          {"name": "TipoCambioPositivo", "field": "TipoCambio", "assert": "TipoCambio > 0", "message": "El tipo de cambio debe ser mayor a cero."},
+          {
+            "name": "MonedaBaseSinTipoCambio",
+            "field": "TipoCambio",
+            "when": "Moneda.Clave = BASECURRENCY()",
+            "assert": "TipoCambio = 1",
+            "message": "En la moneda base de la empresa el tipo de cambio debe ser 1."
+          },
+          {"name": "CobradoNoExcede", "field": "Cobrado", "assert": "Cobrado <= Total", "message": "Lo cobrado no puede exceder el total de la factura."},
+          {
+            "name": "CuentasDeVentas",
+            "field": "Almacen",
+            "when": "Estado = 'Emitida'",
+            "assert": "NOT ISBLANK(Almacen.CuentaClientes) AND NOT ISBLANK(Almacen.CuentaVentas) AND NOT ISBLANK(Almacen.CuentaIvaTrasladado)",
+            "message": "El almacén no tiene las cuentas de clientes, ventas e IVA trasladado: configúralas en el almacén para que la factura genere su póliza."
+          }
+        ]
+      },
+      {
+        "op": "setWorkflow",
+        "entity": "Factura",
+        "workflow": {
+          "initial": "Borrador",
+          "states": [
+            {"name": "Borrador", "label": "Borrador", "color": "neutral", "editable": true},
+            {"name": "Emitida", "label": "Emitida", "color": "accent", "editable": false},
+            {"name": "PagadaParcial", "label": "Pagada parcial", "color": "warning", "editable": false},
+            {"name": "Pagada", "label": "Pagada", "color": "success", "editable": false},
+            {"name": "Cancelada", "label": "Cancelada", "color": "danger", "editable": false}
+          ],
+          "transitions": [
+            {
+              "name": "emitir",
+              "label": "Emitir factura",
+              "from": ["Borrador"],
+              "to": "Emitida",
+              "icon": "receipt",
+              "variant": "primary",
+              "roles": ["Facturación y cobranza", "Gerente de ventas"],
+              "when": "Pedido.Estado IN ('SurtidoParcial', 'Surtido') AND COUNT(Partidas) > 0",
+              "whenMessage": "Para emitir: el pedido debe tener algo surtido y la factura necesita partidas."
+            },
+            {"name": "pagarParcial", "label": "Pagada parcial", "from": ["Emitida"], "to": "PagadaParcial", "icon": "circle-dollar-sign", "system": true},
+            {"name": "pagar", "label": "Pagada", "from": ["Emitida", "PagadaParcial"], "to": "Pagada", "icon": "badge-check", "system": true},
+            {
+              "name": "cancelar",
+              "label": "Cancelar",
+              "from": ["Borrador"],
+              "to": "Cancelada",
+              "icon": "ban",
+              "variant": "danger",
+              "roles": ["Facturación y cobranza", "Gerente de ventas"],
+              "requireComment": true
+            }
+          ]
+        }
+      },
+      {
+        "op": "setAutomations",
+        "entity": "Factura",
+        "automations": [
+          {
+            "name": "AcumularFacturado",
+            "label": "Acumular lo facturado en el pedido",
+            "on": "enterState",
+            "state": "Emitida",
+            "actions": [
+              {"type": "rollup", "lines": "Partidas", "target": "PartidaPedido", "field": "CantidadFacturada", "sum": "Cantidad", "filter": "Factura.Estado IN ('Emitida', 'PagadaParcial', 'Pagada')"},
+              {"type": "transition", "target": "Pedido", "transition": "facturar", "when": "Pedido.PendientePorSurtir <= 0 AND Pedido.PendientePorFacturar <= 0"}
+            ]
+          },
+          {
+            "name": "PolizaVentas",
+            "label": "Póliza de ventas",
+            "on": "enterState",
+            "state": "Emitida",
+            "when": "TotalBase > 0",
+            "actions": [
+              {
+                "type": "create",
+                "entity": "Poliza",
+                "transition": "aplicar",
+                "set": [
+                  {"field": "Fecha", "value": "Fecha"},
+                  {"field": "Tipo", "value": "'Diario'"},
+                  {"field": "Concepto", "value": "'Venta según factura ' & Folio"},
+                  {"field": "Referencia", "value": "Folio"},
+                  {"field": "Origen", "value": "'Automática'"}
+                ],
+                "createLines": [
+                  {
+                    "field": "Partidas",
+                    "set": [
+                      {"field": "Cuenta", "value": "Almacen.CuentaClientes"},
+                      {"field": "Concepto", "value": "'Clientes · ' & Folio"},
+                      {"field": "Cargo", "value": "TotalBase"},
+                      {"field": "Abono", "value": "0"}
+                    ]
+                  },
+                  {
+                    "field": "Partidas",
+                    "when": "SubtotalBase > 0",
+                    "set": [
+                      {"field": "Cuenta", "value": "Almacen.CuentaVentas"},
+                      {"field": "Concepto", "value": "'Ventas · ' & Folio"},
+                      {"field": "Cargo", "value": "0"},
+                      {"field": "Abono", "value": "SubtotalBase"}
+                    ]
+                  },
+                  {
+                    "field": "Partidas",
+                    "when": "IvaBase > 0",
+                    "set": [
+                      {"field": "Cuenta", "value": "Almacen.CuentaIvaTrasladado"},
+                      {"field": "Concepto", "value": "'IVA trasladado · ' & Folio"},
+                      {"field": "Cargo", "value": "0"},
+                      {"field": "Abono", "value": "IvaBase"}
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "name": "SaldoCliente",
+            "label": "Actualizar el saldo del cliente",
+            "on": "enterState",
+            "state": "Emitida",
+            "actions": [{"type": "rollup", "target": "Cliente", "field": "Saldo", "sum": "SaldoBase", "filter": "Estado IN ('Emitida', 'PagadaParcial', 'Pagada')"}]
+          },
+          {
+            "name": "SaldoClienteCobro",
+            "label": "Actualizar el saldo del cliente al cobrar",
+            "on": "update",
+            "when": "Estado IN ('Emitida', 'PagadaParcial', 'Pagada')",
+            "actions": [{"type": "rollup", "target": "Cliente", "field": "Saldo", "sum": "SaldoBase", "filter": "Estado IN ('Emitida', 'PagadaParcial', 'Pagada')"}]
+          }
+        ]
+      },
+      {
+        "op": "createEntity",
+        "group": "Ventas",
+        "name": "Cobro",
+        "label": "Cobro",
+        "labelPlural": "Cobros",
+        "icon": "hand-coins",
+        "perCompany": true,
+        "displayField": "Folio",
+        "description": "Pago de un cliente aplicado a sus facturas. Al aplicarlo baja los saldos y genera la póliza de ingreso.",
+        "fields": [
+          {"name": "Folio", "label": "Folio", "type": "autonumber", "prefix": "COB-", "padding": 6},
+          {"name": "Cliente", "label": "Cliente", "type": "reference", "referenceEntity": "Cliente", "required": true},
+          {"name": "Fecha", "label": "Fecha", "type": "date", "required": true, "defaultValue": "TODAY()"},
+          {"name": "Moneda", "label": "Moneda", "type": "reference", "referenceEntity": "Moneda", "required": true, "defaultValue": "Cliente.Moneda", "showInList": false},
+          {"name": "TipoCambio", "label": "Tipo de cambio", "type": "decimal", "precision": 18, "scale": 4, "defaultValue": "RATE(Moneda.Clave, BASECURRENCY(), Fecha)", "showInList": false},
+          {"name": "CuentaBanco", "label": "Cuenta de banco", "type": "reference", "referenceEntity": "CuentaContable", "required": true, "showInList": false},
+          {"name": "FormaPago", "label": "Forma de pago", "type": "choice", "required": true, "options": ["Transferencia", "Cheque", "Efectivo", "Tarjeta"], "defaultValue": "'Transferencia'"},
+          {"name": "Referencia", "label": "Referencia del pago", "type": "text", "maxLength": 40},
+          {"name": "Notas", "label": "Notas", "type": "longtext", "showInList": false}
+        ]
+      },
+      {
+        "op": "createEntity",
+        "group": "Ventas",
+        "name": "CobroAplicacion",
+        "label": "Factura cobrada",
+        "labelPlural": "Facturas cobradas",
+        "icon": "list",
+        "fields": [
+          {"name": "Cobro", "label": "Cobro", "type": "parent", "referenceEntity": "Cobro"},
+          {"name": "Factura", "label": "Factura", "type": "reference", "referenceEntity": "Factura", "required": true, "lookupFilter": {"field": "Cliente", "source": "Cobro.Cliente"}},
+          {"name": "Importe", "label": "Importe aplicado", "type": "decimal", "precision": 18, "scale": 2, "required": true, "defaultValue": "Factura.Saldo"},
+          {
+            "name": "ImporteBase",
+            "label": "Importe en moneda base",
+            "type": "formula",
+            "resultType": "decimal",
+            "showInList": false,
+            "precision": 18,
+            "scale": 2,
+            "formula": "ROUND(Importe * Cobro.TipoCambio, 2)"
+          }
+        ]
+      },
+      {
+        "op": "setRules",
+        "entity": "CobroAplicacion",
+        "rules": [
+          {"name": "ImportePositivo", "field": "Importe", "assert": "Importe > 0", "message": "El importe aplicado debe ser mayor a cero."},
+          {"name": "FacturaDelCliente", "field": "Factura", "assert": "Factura.Cliente = Cobro.Cliente", "message": "La factura no es del cliente del cobro."},
+          {
+            "name": "FacturaEmitida",
+            "field": "Factura",
+            "when": "Cobro.Estado <> 'Cancelado'",
+            "assert": "Factura.Estado IN ('Emitida', 'PagadaParcial')",
+            "message": "Solo se cobran facturas emitidas con saldo."
+          },
+          {"name": "MonedaDeLaFactura", "field": "Factura", "assert": "Factura.Moneda = Cobro.Moneda", "message": "El cobro va en la moneda de la factura: registra un cobro por moneda."},
+          {"name": "NoExcederSaldo", "field": "Importe", "when": "Cobro.Estado <> 'Cancelado'", "assert": "Importe <= Factura.Saldo", "message": "El importe excede el saldo de la factura."},
+          {
+            "name": "BancoNoEsClientes",
+            "field": "Factura",
+            "assert": "ISBLANK(Factura.Almacen.CuentaClientes) OR Factura.Almacen.CuentaClientes <> Cobro.CuentaBanco",
+            "message": "La cuenta de banco no puede ser la cuenta de clientes de la factura."
+          },
+          {
+            "name": "CuentaDeClientes",
+            "field": "Factura",
+            "when": "Cobro.Estado = 'Aplicado'",
+            "assert": "NOT ISBLANK(Factura.Almacen.CuentaClientes)",
+            "message": "El almacén de la factura no tiene cuenta de clientes: configúrala para que el cobro genere su póliza."
+          }
+        ]
+      },
+      {"op": "addField", "entity": "Cobro", "field": {"name": "Aplicaciones", "label": "Facturas cobradas", "type": "lines", "childEntity": "CobroAplicacion"}},
+      {
+        "op": "addField",
+        "entity": "Cobro",
+        "field": {"name": "Importe", "label": "Importe", "type": "formula", "resultType": "decimal", "precision": 18, "scale": 2, "formula": "SUM(Aplicaciones.Importe)"}
+      },
+      {
+        "op": "addField",
+        "entity": "Cobro",
+        "field": {
+          "name": "ImporteBase",
+          "label": "Importe en moneda base",
+          "type": "formula",
+          "resultType": "decimal",
+          "showInList": false,
+          "precision": 18,
+          "scale": 2,
+          "formula": "SUM(Aplicaciones.ImporteBase)"
+        }
+      },
+      {
+        "op": "setRules",
+        "entity": "Cobro",
+        "rules": [
+          {
+            "name": "TipoCambioRegistrado",
+            "field": "TipoCambio",
+            "assert": "NOT ISBLANK(TipoCambio)",
+            "message": "No hay tipo de cambio de la moneda a la moneda base en la fecha del documento: pide que lo registren en Configuración › Empresas › Tipos de cambio (o al gerente de ventas que lo capture)."
+          },
+          {"name": "TipoCambioPositivo", "field": "TipoCambio", "assert": "TipoCambio > 0", "message": "El tipo de cambio debe ser mayor a cero."},
+          {
+            "name": "MonedaBaseSinTipoCambio",
+            "field": "TipoCambio",
+            "when": "Moneda.Clave = BASECURRENCY()",
+            "assert": "TipoCambio = 1",
+            "message": "En la moneda base de la empresa el tipo de cambio debe ser 1."
+          },
+          {"name": "CuentaDeBanco", "field": "CuentaBanco", "assert": "CuentaBanco.Tipo = 'Activo' AND CuentaBanco.Activa", "message": "La cuenta de banco debe ser una cuenta de activo vigente."}
+        ]
+      },
+      {
+        "op": "setWorkflow",
+        "entity": "Cobro",
+        "workflow": {
+          "initial": "Borrador",
+          "states": [
+            {"name": "Borrador", "label": "Borrador", "color": "neutral", "editable": true},
+            {"name": "Aplicado", "label": "Aplicado", "color": "success", "editable": false},
+            {"name": "Cancelado", "label": "Cancelado", "color": "danger", "editable": false}
+          ],
+          "transitions": [
+            {
+              "name": "aplicar",
+              "label": "Aplicar cobro",
+              "from": ["Borrador"],
+              "to": "Aplicado",
+              "icon": "check",
+              "variant": "primary",
+              "roles": ["Facturación y cobranza", "Gerente de ventas"],
+              "when": "COUNT(Aplicaciones) > 0 AND COUNT(Aplicaciones) < 500",
+              "whenMessage": "El cobro necesita de 1 a 499 facturas (su póliza lleva una partida más)."
+            },
+            {
+              "name": "cancelar",
+              "label": "Cancelar",
+              "from": ["Borrador"],
+              "to": "Cancelado",
+              "icon": "ban",
+              "variant": "danger",
+              "roles": ["Facturación y cobranza", "Gerente de ventas"],
+              "requireComment": true
+            }
+          ]
+        }
+      },
+      {
+        "op": "setAutomations",
+        "entity": "Cobro",
+        "automations": [
+          {
+            "name": "AplicarAFacturas",
+            "label": "Aplicar el cobro a las facturas",
+            "on": "enterState",
+            "state": "Aplicado",
+            "actions": [
+              {"type": "rollup", "lines": "Aplicaciones", "target": "Factura", "field": "Cobrado", "sum": "Importe", "filter": "Cobro.Estado = 'Aplicado'"},
+              {"type": "transition", "lines": "Aplicaciones", "target": "Factura", "transition": "pagar", "when": "Factura.Saldo <= 0"},
+              {"type": "transition", "lines": "Aplicaciones", "target": "Factura", "transition": "pagarParcial", "when": "Factura.Saldo > 0"}
+            ]
+          },
+          {
+            "name": "PolizaCobro",
+            "label": "Póliza de ingreso",
+            "on": "enterState",
+            "state": "Aplicado",
+            "when": "ImporteBase > 0",
+            "actions": [
+              {
+                "type": "create",
+                "entity": "Poliza",
+                "transition": "aplicar",
+                "set": [
+                  {"field": "Fecha", "value": "Fecha"},
+                  {"field": "Tipo", "value": "'Ingreso'"},
+                  {"field": "Concepto", "value": "'Cobro ' & Folio & ' de ' & Cliente.RazonSocial"},
+                  {"field": "Referencia", "value": "Folio"},
+                  {"field": "Origen", "value": "'Automática'"}
+                ],
+                "createLines": [
+                  {
+                    "field": "Partidas",
+                    "set": [{"field": "Cuenta", "value": "CuentaBanco"}, {"field": "Concepto", "value": "'Banco · ' & Folio"}, {"field": "Cargo", "value": "ImporteBase"}, {"field": "Abono", "value": "0"}]
+                  },
+                  {
+                    "field": "Partidas",
+                    "from": "Aplicaciones",
+                    "when": "ImporteBase > 0",
+                    "set": [
+                      {"field": "Cuenta", "value": "Factura.Almacen.CuentaClientes"},
+                      {"field": "Concepto", "value": "'Clientes · ' & Factura.Folio & ' · ' & Cobro.Folio"},
+                      {"field": "Cargo", "value": "0"},
+                      {"field": "Abono", "value": "ImporteBase"}
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "op": "setSecurity",
+        "entity": "Cliente",
+        "security": {
+          "owner": "Vendedor",
+          "records": [{"roles": ["Vendedor"], "scope": "own"}, {"roles": ["Gerente de ventas", "Facturación y cobranza", "Surtidor"], "scope": "all"}, {"roles": ["Vendedor"], "where": "RFC = 'XAXX010101000'"}],
+          "fields": [{"field": "LimiteCredito", "edit": ["Gerente de ventas"]}, {"field": "Vendedor", "edit": ["Gerente de ventas"]}]
+        }
+      },
+      {"op": "setSecurity", "entity": "Cobro", "security": {"fields": [{"field": "TipoCambio", "edit": ["Gerente de ventas"]}]}},
+      {
+        "op": "setSecurity",
+        "entity": "Cotizacion",
+        "security": {
+          "owner": "Vendedor",
+          "records": [{"roles": ["Vendedor"], "scope": "own"}, {"roles": ["Gerente de ventas", "Facturación y cobranza", "Surtidor", "Vencimiento de cotizaciones"], "scope": "all"}],
+          "fields": [{"field": "Vendedor", "edit": ["Gerente de ventas"]}, {"field": "TipoCambio", "edit": ["Gerente de ventas"]}]
+        }
+      },
+      {
+        "op": "setSecurity",
+        "entity": "Pedido",
+        "security": {
+          "owner": "Vendedor",
+          "records": [{"roles": ["Vendedor"], "scope": "own"}, {"roles": ["Gerente de ventas", "Facturación y cobranza", "Surtidor"], "scope": "all"}],
+          "fields": [{"field": "Vendedor", "edit": ["Gerente de ventas"]}, {"field": "TipoCambio", "edit": ["Gerente de ventas"]}]
+        }
+      },
+      {"op": "setSecurity", "entity": "PedidoPartida", "security": {"fields": [{"field": "CostoSurtido", "read": ["Gerente de ventas", "Contador", "Supervisor de inventario"]}]}},
+      {
+        "op": "setSecurity",
+        "entity": "Factura",
+        "security": {
+          "owner": "Vendedor",
+          "records": [{"roles": ["Vendedor"], "scope": "own"}, {"roles": ["Gerente de ventas", "Facturación y cobranza", "Surtidor"], "scope": "all"}],
+          "fields": [{"field": "TipoCambio", "edit": ["Gerente de ventas"]}]
+        }
+      },
+      {"op": "setSecurity", "entity": "Embarque", "security": {"fields": [{"field": "CostoTotal", "read": ["Gerente de ventas", "Contador", "Supervisor de inventario"]}]}},
+      {"op": "setSecurity", "entity": "EmbarquePartida", "security": {"fields": [{"field": "Costo", "read": ["Gerente de ventas", "Contador", "Supervisor de inventario"]}]}},
+      {
+        "op": "setLayout",
+        "entity": "Cotizacion",
+        "layout": {
+          "sections": [
+            {"name": "Datos", "label": "Datos de la cotización", "fields": ["Folio", "Cliente", "Fecha", "Vigencia", "Almacen", "Vendedor", "Pedido"]},
+            {"name": "Condiciones", "label": "Condiciones", "fields": ["Moneda", {"field": "TipoCambio", "visibleWhen": "NOT ISBLANK(Moneda) AND Moneda.Clave <> BASECURRENCY()"}]},
+            {"name": "Notas", "label": "Notas", "columns": 1, "fields": ["Notas"]}
+          ]
+        }
+      },
+      {
+        "op": "setLayout",
+        "entity": "Pedido",
+        "layout": {
+          "sections": [
+            {"name": "Datos", "label": "Datos del pedido", "fields": ["Folio", "Cliente", "Cotizacion", "Fecha", "FechaEntrega", "Almacen", "Vendedor"]},
+            {"name": "Condiciones", "label": "Condiciones", "fields": ["Moneda", {"field": "TipoCambio", "visibleWhen": "NOT ISBLANK(Moneda) AND Moneda.Clave <> BASECURRENCY()"}, "CondicionPago"]},
+            {"name": "Notas", "label": "Notas", "columns": 1, "fields": ["Notas"]}
+          ]
+        }
+      },
+      {
+        "op": "setLayout",
+        "entity": "Factura",
+        "layout": {
+          "sections": [
+            {"name": "Datos", "label": "Datos de la factura", "fields": ["Folio", "Pedido", "Cliente", "Almacen", "Fecha", "Vendedor"]},
+            {
+              "name": "Condiciones",
+              "label": "Condiciones",
+              "fields": ["Moneda", {"field": "TipoCambio", "visibleWhen": "NOT ISBLANK(Moneda) AND Moneda.Clave <> BASECURRENCY()"}, "CondicionPago", "Vencimiento"]
+            },
+            {"name": "Notas", "label": "Notas", "columns": 1, "fields": ["Notas"]}
+          ]
+        }
+      },
+      {
+        "op": "setLayout",
+        "entity": "Cobro",
+        "layout": {
+          "sections": [
+            {"name": "Datos", "label": "Datos del cobro", "fields": ["Folio", "Cliente", "Fecha", "FormaPago", "Referencia", "CuentaBanco"]},
+            {"name": "Condiciones", "label": "Condiciones", "fields": ["Moneda", {"field": "TipoCambio", "visibleWhen": "NOT ISBLANK(Moneda) AND Moneda.Clave <> BASECURRENCY()"}]},
+            {"name": "Notas", "label": "Notas", "columns": 1, "fields": ["Notas"]}
+          ]
+        }
+      },
+      {
+        "op": "setViews",
+        "entity": "Cliente",
+        "views": [
+          {"name": "Mios", "label": "Mis clientes", "filters": [{"field": "Vendedor", "op": "eq", "value": "$me"}]},
+          {"name": "ConSaldo", "label": "Con saldo por cobrar", "filters": [{"field": "Saldo", "op": "gt", "value": 0}], "sort": "Saldo", "dir": "desc"}
+        ]
+      },
+      {
+        "op": "setViews",
+        "entity": "Pedido",
+        "views": [
+          {
+            "name": "PorSurtir",
+            "label": "Por surtir",
+            "filters": [{"field": "Estado", "op": "in", "value": ["Confirmado", "SurtidoParcial"]}],
+            "columns": ["Folio", "Cliente", "FechaEntrega", "PendientePorSurtir", "Estado"],
+            "sort": "FechaEntrega",
+            "dir": "asc"
+          },
+          {"name": "PorFacturar", "label": "Por facturar", "filters": [{"field": "PendientePorFacturar", "op": "gt", "value": 0}], "sort": "Fecha", "dir": "asc"}
+        ]
+      },
+      {
+        "op": "setViews",
+        "entity": "Factura",
+        "views": [
+          {
+            "name": "PorCobrar",
+            "label": "Por cobrar",
+            "filters": [{"field": "Estado", "op": "in", "value": ["Emitida", "PagadaParcial"]}],
+            "columns": ["Folio", "Cliente", "Fecha", "Vencimiento", "Total", "Saldo", "Estado"],
+            "sort": "Vencimiento",
+            "dir": "asc"
+          }
+        ]
+      },
+      {
+        "op": "setViews",
+        "entity": "Producto",
+        "merge": true,
+        "views": [{"name": "ParaVenta", "label": "Con precio de venta", "filters": [{"field": "Activo", "op": "eq", "value": true}, {"field": "PrecioVenta", "op": "notBlank"}]}]
+      },
+      {
+        "op": "setReports",
+        "entity": "Factura",
+        "reports": [
+          {
+            "name": "VentasPorMes",
+            "label": "Ventas por mes",
+            "description": "Venta neta (sin IVA) de las facturas emitidas, en la moneda base de la empresa.",
+            "groupBy": [{"field": "Fecha", "period": "month", "label": "Mes"}],
+            "measures": [{"fn": "sum", "field": "SubtotalBase", "label": "Venta neta"}, {"fn": "count", "label": "Facturas"}],
+            "filter": "Estado IN ('Emitida', 'PagadaParcial', 'Pagada')",
+            "chart": "column"
+          },
+          {
+            "name": "VentasPorCliente",
+            "label": "Ventas por cliente",
+            "groupBy": [{"field": "Cliente"}],
+            "measures": [{"fn": "sum", "field": "SubtotalBase", "label": "Venta neta"}],
+            "filter": "Estado IN ('Emitida', 'PagadaParcial', 'Pagada')",
+            "orderBy": "measure",
+            "limit": 20,
+            "chart": "bar"
+          },
+          {
+            "name": "MontoFacturado",
+            "label": "Venta neta facturada",
+            "measures": [{"fn": "sum", "field": "SubtotalBase", "label": "Venta neta"}],
+            "filter": "Estado IN ('Emitida', 'PagadaParcial', 'Pagada')"
+          },
+          {
+            "name": "CarteraPorCliente",
+            "label": "Cartera por cliente",
+            "description": "Saldo por cobrar de las facturas emitidas, en moneda base.",
+            "groupBy": [{"field": "Cliente"}],
+            "measures": [{"fn": "sum", "field": "SaldoBase", "label": "Saldo"}, {"fn": "count", "label": "Facturas"}],
+            "filter": "Estado IN ('Emitida', 'PagadaParcial')",
+            "orderBy": "measure",
+            "limit": 20,
+            "chart": "bar"
+          },
+          {
+            "name": "CarteraVencida",
+            "label": "Cartera vencida",
+            "measures": [{"fn": "sum", "field": "SaldoBase", "label": "Saldo vencido"}],
+            "filter": "Estado IN ('Emitida', 'PagadaParcial') AND Vencimiento < TODAY()"
+          }
+        ]
+      },
+      {
+        "op": "setReports",
+        "entity": "PedidoPartida",
+        "reports": [
+          {
+            "name": "ProductosMasVendidos",
+            "label": "Productos más vendidos",
+            "description": "Lo surtido por producto y su venta en moneda base (pedidos que ves).",
+            "groupBy": [{"field": "Producto"}],
+            "measures": [{"fn": "sum", "field": "CantidadSurtida", "label": "Surtido"}, {"fn": "sum", "field": "VentaSurtidaBase", "label": "Venta"}],
+            "filter": "CantidadSurtida > 0",
+            "orderBy": "measure",
+            "dir": "desc",
+            "limit": 15,
+            "chart": "bar"
+          },
+          {
+            "name": "MargenPorProducto",
+            "label": "Margen por producto",
+            "description": "Venta, costo de lo surtido y margen bruto por producto, en moneda base.",
+            "roles": ["Gerente de ventas", "Contador", "Supervisor de inventario"],
+            "groupBy": [{"field": "Producto"}],
+            "measures": [
+              {"fn": "sum", "field": "VentaSurtidaBase", "label": "Venta", "name": "venta"},
+              {"fn": "sum", "field": "CostoSurtido", "label": "Costo", "name": "costo"},
+              {"fn": "calc", "name": "margen", "expr": "venta - costo", "label": "Margen"},
+              {"fn": "calc", "name": "margenPct", "expr": "(venta - costo) / venta * 100", "label": "Margen %", "scale": 1}
+            ],
+            "filter": "CantidadSurtida > 0",
+            "orderBy": "measure",
+            "dir": "desc",
+            "limit": 15,
+            "chart": "column"
+          }
+        ]
+      },
+      {
+        "op": "setReports",
+        "entity": "Pedido",
+        "reports": [{"name": "PedidosAbiertos", "label": "Pedidos por surtir", "measures": [{"fn": "count", "label": "Pedidos"}], "filter": "Estado IN ('Confirmado', 'SurtidoParcial')"}]
+      },
+      {
+        "op": "setReports",
+        "entity": "Cotizacion",
+        "reports": [{"name": "PorEstado", "label": "Cotizaciones por estado", "groupBy": [{"field": "Estado"}], "measures": [{"fn": "count", "label": "Cotizaciones"}], "chart": "donut"}]
+      },
+      {
+        "op": "setDashboard",
+        "dashboard": {
+          "name": "Ventas",
+          "label": "Ventas",
+          "icon": "badge-dollar-sign",
+          "description": "Venta del periodo, cartera, pedidos por surtir, tendencia mensual, clientes y productos.",
+          "widgets": [
+            {"type": "kpi", "entity": "Factura", "report": "MontoFacturado", "label": "Venta neta facturada"},
+            {"type": "kpi", "entity": "Factura", "report": "CarteraVencida"},
+            {"type": "kpi", "entity": "Pedido", "report": "PedidosAbiertos"},
+            {"type": "chart", "entity": "Cotizacion", "report": "PorEstado"},
+            {"type": "chart", "entity": "Factura", "report": "VentasPorMes", "wide": true},
+            {"type": "chart", "entity": "Factura", "report": "CarteraPorCliente", "wide": true},
+            {"type": "table", "entity": "PedidoPartida", "report": "ProductosMasVendidos", "wide": true},
+            {"type": "table", "entity": "PedidoPartida", "report": "MargenPorProducto", "wide": true}
+          ]
+        }
+      },
+      {
+        "op": "setSchedules",
+        "entity": "Cotizacion",
+        "schedules": [
+          {
+            "name": "VencerCotizaciones",
+            "label": "Vencer cotizaciones",
+            "description": "Cada día a la 1:00 marca como vencidas las cotizaciones enviadas cuya vigencia pasó. Llega en pausa: actívala cuando lo quieras automático.",
+            "every": "day",
+            "at": "01:00",
+            "where": "Estado = 'Enviada' AND Vigencia < TODAY()",
+            "role": "Vencimiento de cotizaciones",
+            "actions": [{"type": "transition", "transition": "vencer"}]
+          }
+        ]
+      },
+      {
+        "op": "setPrintTemplates",
+        "entity": "Cotizacion",
+        "templates": [
+          {
+            "name": "Cotizacion",
+            "label": "Cotización",
+            "default": true,
+            "page": {"size": "letter", "margin": 15},
+            "blocks": [
+              {"type": "header", "logo": true, "company": true, "title": "Cotización", "subtitle": "{{ Folio }}"},
+              {
+                "type": "fields",
+                "perRow": 2,
+                "items": [
+                  {"label": "Cliente", "value": "Cliente"},
+                  {"label": "RFC", "value": "Cliente.RFC"},
+                  {"label": "Fecha", "value": "Fecha", "format": "dateLong"},
+                  {"label": "Vigente hasta", "value": "Vigencia", "format": "dateLong"},
+                  {"label": "Moneda", "value": "Moneda.Clave"},
+                  {"label": "Vendedor", "value": "Vendedor"}
+                ]
+              },
+              {
+                "type": "table",
+                "lines": "Partidas",
+                "columns": [
+                  {"label": "Producto", "value": "Producto", "width": 5},
+                  {"label": "Cantidad", "value": "Cantidad", "format": "number", "width": 2},
+                  {"label": "Precio unitario", "value": "PrecioUnitario", "format": "number", "width": 3},
+                  {"label": "Desc.", "value": "DescuentoPct", "format": "percent", "width": 2},
+                  {"label": "Importe", "value": "Importe", "format": "number", "width": 3}
+                ]
+              },
+              {
+                "type": "totals",
+                "items": [
+                  {"label": "Subtotal", "value": "Subtotal", "format": "money", "currency": "Moneda.Clave"},
+                  {"label": "Descuento", "value": "Descuento", "format": "money", "currency": "Moneda.Clave"},
+                  {"label": "IVA", "value": "IVA", "format": "money", "currency": "Moneda.Clave"},
+                  {"label": "Total", "value": "Total", "format": "money", "currency": "Moneda.Clave", "bold": true}
+                ]
+              },
+              {"type": "text", "visibleWhen": "NOT ISBLANK(Notas)", "text": "Notas: {{ Notas }}"},
+              {"type": "footer", "text": "Cotización {{ Folio }} · precios vigentes hasta {{ Vigencia }}", "pageNumbers": true}
+            ]
+          }
+        ]
+      },
+      {
+        "op": "setPrintTemplates",
+        "entity": "Factura",
+        "templates": [
+          {
+            "name": "Factura",
+            "label": "Factura",
+            "default": true,
+            "when": "Estado IN ('Emitida', 'PagadaParcial', 'Pagada')",
+            "page": {"size": "letter", "margin": 15},
+            "blocks": [
+              {"type": "header", "logo": true, "company": true, "title": "Factura", "subtitle": "{{ Folio }}"},
+              {
+                "type": "fields",
+                "perRow": 2,
+                "items": [
+                  {"label": "Cliente", "value": "Cliente"},
+                  {"label": "RFC", "value": "Cliente.RFC"},
+                  {"label": "Fecha", "value": "Fecha", "format": "dateLong"},
+                  {"label": "Vencimiento", "value": "Vencimiento", "format": "dateLong"},
+                  {"label": "Pedido", "value": "Pedido"},
+                  {"label": "Moneda", "value": "Moneda.Clave"},
+                  {"label": "Vendedor", "value": "Vendedor"}
+                ]
+              },
+              {
+                "type": "table",
+                "lines": "Partidas",
+                "columns": [
+                  {"label": "Producto", "value": "Producto", "width": 5},
+                  {"label": "Cantidad", "value": "Cantidad", "format": "number", "width": 2},
+                  {"label": "Precio unitario", "value": "PrecioUnitario", "format": "number", "width": 3},
+                  {"label": "Desc.", "value": "DescuentoPct", "format": "percent", "width": 2},
+                  {"label": "Importe", "value": "Importe", "format": "number", "width": 3}
+                ]
+              },
+              {
+                "type": "totals",
+                "items": [
+                  {"label": "Subtotal", "value": "Subtotal", "format": "money", "currency": "Moneda.Clave"},
+                  {"label": "Descuento", "value": "Descuento", "format": "money", "currency": "Moneda.Clave"},
+                  {"label": "IVA", "value": "IVA", "format": "money", "currency": "Moneda.Clave"},
+                  {"label": "Total", "value": "Total", "format": "money", "currency": "Moneda.Clave", "bold": true}
+                ]
+              },
+              {"type": "text", "visibleWhen": "NOT ISBLANK(Notas)", "text": "Notas: {{ Notas }}"},
+              {"type": "footer", "text": "Factura {{ Folio }}", "pageNumbers": true}
+            ]
+          }
+        ]
+      },
+      {
+        "op": "setApp",
+        "app": {"name": "Ventas", "label": "Ventas", "icon": "badge-dollar-sign", "order": 15, "description": "Clientes, cotizaciones, pedidos, embarques con costo de ventas, facturas y cobranza."}
+      }
+    ]
+  },
+  "upgrades": [],
+  "roles": [
+    {
+      "name": "Vendedor",
+      "description": "Atiende a sus clientes: cotiza, convierte cotizaciones en pedidos y consulta sus facturas.",
+      "canManageModel": false,
+      "canManageUsers": false,
+      "canViewAudit": false,
+      "permissions": [
+        {"entity": "Cliente", "canRead": true, "canCreate": true, "canUpdate": true, "canDelete": false},
+        {"entity": "Cotizacion", "canRead": true, "canCreate": true, "canUpdate": true, "canDelete": true},
+        {"entity": "Pedido", "canRead": true, "canCreate": true, "canUpdate": true, "canDelete": true},
+        {"entity": "Factura", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false},
+        {"entity": "Existencia", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false},
+        {"entity": "Producto", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false},
+        {"entity": "UnidadMedida", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false},
+        {"entity": "Moneda", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false},
+        {"entity": "CondicionPago", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false},
+        {"entity": "Almacen", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false}
+      ]
+    },
+    {
+      "name": "Gerente de ventas",
+      "description": "Supervisa a todos los vendedores, autoriza descuentos y pedidos sobre el límite de crédito, y ve costos y márgenes.",
+      "canManageModel": false,
+      "canManageUsers": false,
+      "canViewAudit": true,
+      "permissions": [
+        {"entity": "Cliente", "canRead": true, "canCreate": true, "canUpdate": true, "canDelete": false},
+        {"entity": "Cotizacion", "canRead": true, "canCreate": true, "canUpdate": true, "canDelete": true},
+        {"entity": "Pedido", "canRead": true, "canCreate": true, "canUpdate": true, "canDelete": true},
+        {"entity": "Embarque", "canRead": true, "canCreate": true, "canUpdate": true, "canDelete": true},
+        {"entity": "Factura", "canRead": true, "canCreate": true, "canUpdate": true, "canDelete": true},
+        {"entity": "Cobro", "canRead": true, "canCreate": true, "canUpdate": true, "canDelete": true},
+        {"entity": "Existencia", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false},
+        {"entity": "CuentaContable", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false},
+        {"entity": "Producto", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false},
+        {"entity": "UnidadMedida", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false},
+        {"entity": "Moneda", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false},
+        {"entity": "CondicionPago", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false},
+        {"entity": "Almacen", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false}
+      ]
+    },
+    {
+      "name": "Facturación y cobranza",
+      "description": "Factura lo surtido y aplica los cobros de los clientes.",
+      "canManageModel": false,
+      "canManageUsers": false,
+      "canViewAudit": false,
+      "permissions": [
+        {"entity": "Cliente", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false},
+        {"entity": "Pedido", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false},
+        {"entity": "Embarque", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false},
+        {"entity": "Factura", "canRead": true, "canCreate": true, "canUpdate": true, "canDelete": true},
+        {"entity": "Cobro", "canRead": true, "canCreate": true, "canUpdate": true, "canDelete": true},
+        {"entity": "CuentaContable", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false},
+        {"entity": "Producto", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false},
+        {"entity": "UnidadMedida", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false},
+        {"entity": "Moneda", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false},
+        {"entity": "CondicionPago", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false},
+        {"entity": "Almacen", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false}
+      ]
+    },
+    {
+      "name": "Surtidor",
+      "description": "Surte los pedidos confirmados: registra los embarques que sacan la mercancía del almacén.",
+      "canManageModel": false,
+      "canManageUsers": false,
+      "canViewAudit": false,
+      "permissions": [
+        {"entity": "Cliente", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false},
+        {"entity": "Pedido", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false},
+        {"entity": "Embarque", "canRead": true, "canCreate": true, "canUpdate": true, "canDelete": true},
+        {"entity": "Existencia", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false},
+        {"entity": "Producto", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false},
+        {"entity": "UnidadMedida", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false},
+        {"entity": "Moneda", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false},
+        {"entity": "CondicionPago", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false},
+        {"entity": "Almacen", "canRead": true, "canCreate": false, "canUpdate": false, "canDelete": false}
+      ]
+    },
+    {
+      "name": "Vencimiento de cotizaciones",
+      "description": "Rol de servicio de la tarea «Vencer cotizaciones».",
+      "canManageModel": false,
+      "canManageUsers": false,
+      "canViewAudit": false,
+      "permissions": [{"entity": "Cotizacion", "canRead": true, "canCreate": false, "canUpdate": true, "canDelete": false}]
+    }
+  ],
+  "seed": [
+    {"entity": "CuentaContable", "key": "Codigo", "records": [{"Codigo": "2160", "Nombre": "IVA trasladado", "Tipo": "Pasivo"}]},
+    {"entity": "Cliente", "key": "RFC", "records": [{"RFC": "XAXX010101000", "RazonSocial": "Público en general", "Moneda": {"$ref": "Moneda", "Clave": "MXN"}}]}
+  ]
+}

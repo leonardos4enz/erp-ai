@@ -18,6 +18,11 @@ public static class AutomationRules
         : e.FindField(a.Lines) is { Type: FieldTypes.Lines, IsArchived: false, ChildEntity: { } c } && model.TryGetValue(c, out var child) ? child
         : null;
 
+    /// <summary>Spec 043: partida de origen de una plantilla con <c>from</c> (campo de partidas vigente del ámbito).</summary>
+    public static EntityDef? FromScope(EntityDef scope, LineTemplate lt, IReadOnlyDictionary<string, EntityDef> model) =>
+        lt.From is not null && scope.FindField(lt.From) is { Type: FieldTypes.Lines, IsArchived: false, ChildEntity: { } c } &&
+        model.TryGetValue(c, out var child) && !child.IsArchived ? child : null;
+
     /// <summary>Catálogo destino de una acción (para update/transition/rollup por referencia, el de <c>target</c>).</summary>
     public static EntityDef? Target(EntityDef scope, AutomationAction a, IReadOnlyDictionary<string, EntityDef> model)
     {
@@ -86,8 +91,24 @@ public static class AutomationRules
             for (var j = 0; j < (a.CreateLines?.Count ?? 0); j++)
             {
                 var lt = a.CreateLines![j];
-                Check(lt.When, scope, $"{at} › partida {j + 1} (cuándo)");
-                foreach (var s in lt.Set ?? []) Check(s.Value, scope, $"{at} › partida {j + 1} › {s.Field}");
+                // Spec 043: con `from`, la plantilla se calcula en la partida de origen (solo desde el encabezado).
+                var ltScope = scope;
+                if (lt.From is not null)
+                {
+                    if (a.Lines is not null)
+                    {
+                        msgs.Add($"{where} › {at} › partida {j + 1}: 'from' no se combina con 'lines' (la acción ya corre por partida).");
+                        continue;
+                    }
+                    if (FromScope(scope, lt, model) is not { } source)
+                    {
+                        msgs.Add($"{where} › {at} › partida {j + 1}: '{lt.From}' no es un campo de partidas de {scope.Name}.");
+                        continue;
+                    }
+                    ltScope = source;
+                }
+                Check(lt.When, ltScope, $"{at} › partida {j + 1} (cuándo)");
+                foreach (var s in lt.Set ?? []) Check(s.Value, ltScope, $"{at} › partida {j + 1} › {s.Field}");
             }
             Check(a.Method, scope, $"{at} (método)");
             Check(a.UnitCost, scope, $"{at} (costo unitario)");

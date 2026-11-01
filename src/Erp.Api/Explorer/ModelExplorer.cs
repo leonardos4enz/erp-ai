@@ -130,7 +130,7 @@ public static class ModelExplorer
     {
         AutomationActions.Update => $"asigna {string.Join(", ", (a.Set ?? []).Select(s => s.Field))}",
         AutomationActions.Transition => $"ejecuta «{target.Workflow?.Transitions.FirstOrDefault(t => Ci.Equals(t.Name, a.Transition))?.Label ?? a.Transition}»",
-        AutomationActions.Create => $"crea {target.Label}{(a.CreateLines is { Count: > 0 } ? " con partidas" : "")}{(a.Transition is null ? "" : $" y ejecuta {a.Transition}")}",
+        AutomationActions.Create => $"crea {target.Label}{(a.CreateLines is { Count: > 0 } lt ? lt.Any(l => l.From is not null) ? " con las partidas del origen" : " con partidas" : "")}{(a.Transition is null ? "" : $" y ejecuta {a.Transition}")}",
         AutomationActions.Rollup => $"suma {a.Sum} en {a.Field}",
         AutomationActions.Cost => $"valúa con capas en {a.Field}",
         _ => a.Type,

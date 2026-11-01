@@ -24,7 +24,7 @@ async function pageAs(browser: Browser, user: string, pwd = PWD): Promise<Page> 
 }
 
 type Report = { rows: Record<string, unknown>[]; totals: Record<string, unknown>; columns: { key: string; label: string }[] };
-const report = async (w: Who | 'admin', name: string, filters?: object[], entity = 'Pedido') => {
+const report = async (w: Who | 'admin', name: string, filters?: object[], entity = 'IfzPedido') => {
   const res = await (await as(w)).get(`/api/reports/${entity}/${name}`, { params: filters ? { filters: JSON.stringify(filters) } : {} });
   return { status: res.status(), body: (await res.json().catch(() => null)) as Report };
 };
@@ -59,7 +59,7 @@ test('preparar: roles, catálogos con layout, vistas, reportes, tablero y datos'
       { name: 'Clave', label: 'Clave', type: 'text', required: true },
       { name: 'Nombre', label: 'Nombre', type: 'text', required: true },
     ] },
-    { op: 'createEntity', name: 'Pedido', label: 'Pedido', labelPlural: 'Pedidos', icon: 'package', displayField: 'Folio', fields: [
+    { op: 'createEntity', name: 'IfzPedido', label: 'Pedido', labelPlural: 'Pedidos', icon: 'package', displayField: 'Folio', fields: [
       { name: 'Folio', label: 'Folio', type: 'autonumber', prefix: 'PE-', padding: 4 },
       { name: 'Cliente', label: 'Cliente', type: 'text', required: true },
       { name: 'Zona', label: 'Zona', type: 'reference', referenceEntity: 'Zona' },
@@ -72,13 +72,13 @@ test('preparar: roles, catálogos con layout, vistas, reportes, tablero y datos'
       { name: 'Notas', label: 'Notas', type: 'longtext', showInList: false },
       { name: 'Urgente', label: 'Urgente', type: 'boolean' },
     ] },
-    { op: 'createEntity', name: 'PedidoPartida', label: 'Partida de pedido', labelPlural: 'Partidas de pedido', fields: [
-      { name: 'Pedido', label: 'Pedido', type: 'parent', referenceEntity: 'Pedido' },
+    { op: 'createEntity', name: 'IfzPedidoPartida', label: 'Partida de pedido', labelPlural: 'Partidas de pedido', fields: [
+      { name: 'Pedido', label: 'Pedido', type: 'parent', referenceEntity: 'IfzPedido' },
       { name: 'Concepto', label: 'Concepto', type: 'text', required: true },
       { name: 'Cantidad', label: 'Cantidad', type: 'decimal' },
     ] },
-    { op: 'addField', entity: 'Pedido', field: { name: 'Partidas', label: 'Partidas', type: 'lines', childEntity: 'PedidoPartida' } },
-    { op: 'setWorkflow', entity: 'Pedido', workflow: {
+    { op: 'addField', entity: 'IfzPedido', field: { name: 'Partidas', label: 'Partidas', type: 'lines', childEntity: 'IfzPedidoPartida' } },
+    { op: 'setWorkflow', entity: 'IfzPedido', workflow: {
       initial: 'Abierto',
       states: [{ name: 'Abierto', label: 'Abierto', color: 'accent' }, { name: 'Cerrado', label: 'Cerrado', color: 'success' }],
       transitions: [{ name: 'cerrar', label: 'Cerrar', from: ['Abierto'], to: 'Cerrado' }],
@@ -86,19 +86,19 @@ test('preparar: roles, catálogos con layout, vistas, reportes, tablero y datos'
     { op: 'setSecurity', entity: 'Zona', security: { records: [
       { roles: ['Capturista'], where: "Clave = 'N'", access: 'read' }, { roles: ['Analista'] },
     ] } },
-    { op: 'setSecurity', entity: 'Pedido', security: {
+    { op: 'setSecurity', entity: 'IfzPedido', security: {
       owner: 'Responsable',
       fields: [{ field: 'Costo', read: ['Analista'] }],
       records: [{ roles: ['Capturista'], scope: 'own' }, { roles: ['Analista'] }],
     } },
-    { op: 'setLayout', entity: 'Pedido', layout },
-    { op: 'setViews', entity: 'Pedido', views: [
+    { op: 'setLayout', entity: 'IfzPedido', layout },
+    { op: 'setViews', entity: 'IfzPedido', views: [
       { name: 'Urgentes', label: 'Urgentes', roles: ['Analista'], default: true, columns: ['Folio', 'Cliente', 'Monto'],
         filters: [{ field: 'Urgente', op: 'eq', value: true }], sort: 'Monto', dir: 'desc' },
       { name: 'Caros', label: 'Caros', filters: [{ field: 'Costo', op: 'gt', value: 100 }] },
       { name: 'Mios', label: 'Mis pedidos', filters: [{ field: 'Responsable', op: 'eq', value: '$me' }] },
     ] },
-    { op: 'setReports', entity: 'Pedido', reports: [
+    { op: 'setReports', entity: 'IfzPedido', reports: [
       { name: 'PorZona', label: 'Pedidos por zona', groupBy: [{ field: 'Zona' }], measures: [{ fn: 'count' }, { fn: 'sum', field: 'Monto' }], chart: 'bar' },
       { name: 'PorMes', label: 'Pedidos por mes', groupBy: [{ field: 'Fecha', period: 'month' }], measures: [{ fn: 'sum', field: 'Monto' }, { fn: 'count' }], chart: 'line' },
       { name: 'PorCliente', label: 'Pedidos por cliente', groupBy: [{ field: 'Cliente' }], measures: [{ fn: 'sum', field: 'Monto' }] },
@@ -107,19 +107,19 @@ test('preparar: roles, catálogos con layout, vistas, reportes, tablero y datos'
       { name: 'CostoTotal', label: 'Costo total', measures: [{ fn: 'sum', field: 'Costo' }] },
       { name: 'Abiertos', label: 'Abiertos', measures: [{ fn: 'count' }], filter: "Estado = 'Abierto'" },
     ] },
-    { op: 'setReports', entity: 'PedidoPartida', reports: [
+    { op: 'setReports', entity: 'IfzPedidoPartida', reports: [
       { name: 'CantidadPorZona', label: 'Cantidad por zona', groupBy: [{ field: 'Pedido.Zona' }], measures: [{ fn: 'sum', field: 'Cantidad' }] },
     ] },
     { op: 'setDashboard', dashboard: { name: 'Pedidos', label: 'Pedidos', icon: 'package', description: 'Tablero de prueba', widgets: [
-      { type: 'kpi', entity: 'Pedido', report: 'Total', measure: 1, label: 'Monto vendido' },
-      { type: 'kpi', entity: 'Pedido', report: 'CostoTotal' },
-      { type: 'chart', entity: 'Pedido', report: 'PorZona', measure: 1 },
-      { type: 'table', entity: 'Pedido', report: 'PorMes', wide: true },
+      { type: 'kpi', entity: 'IfzPedido', report: 'Total', measure: 1, label: 'Monto vendido' },
+      { type: 'kpi', entity: 'IfzPedido', report: 'CostoTotal' },
+      { type: 'chart', entity: 'IfzPedido', report: 'PorZona', measure: 1 },
+      { type: 'table', entity: 'IfzPedido', report: 'PorMes', wide: true },
     ] } },
   ] });
 
   const perms = [
-    { entity: 'Pedido', canRead: true, canCreate: true, canUpdate: true, canDelete: false },
+    { entity: 'IfzPedido', canRead: true, canCreate: true, canUpdate: true, canDelete: false },
     { entity: 'Zona', canRead: true, canCreate: false, canUpdate: false, canDelete: false },
   ];
   for (const name of ['Capturista', 'Analista']) {
@@ -135,7 +135,7 @@ test('preparar: roles, catálogos con layout, vistas, reportes, tablero y datos'
   const norte = await zona('N', 'Norte');
   const sur = await zona('S', 'Sur');
   const pedido = async (w: Who, data: object) => {
-    const res = await (await as(w)).post('/api/data/Pedido', { data: { Envio: 'Recoger', ...data } });
+    const res = await (await as(w)).post('/api/data/IfzPedido', { data: { Envio: 'Recoger', ...data } });
     expect(res.status(), await res.text()).toBe(201);
     return res.json();
   };
@@ -146,13 +146,13 @@ test('preparar: roles, catálogos con layout, vistas, reportes, tablero y datos'
   const cap2 = await (await as('analista')).get('/api/users/lookup', { params: { search: username('cap2') } });
   const cap2Id = (await cap2.json())[0].id;
   // El pedido de cap2 en la zona Sur: él lo ve, pero no la zona (cuenta como «sin acceso» en sus reportes).
-  const res = await (await as('admin')).post('/api/data/Pedido', { data: { Cliente: 'Gamma', Zona: sur, Fecha: '2026-02-21', Monto: 70, Envio: 'Recoger', Responsable: cap2Id } });
+  const res = await (await as('admin')).post('/api/data/IfzPedido', { data: { Cliente: 'Gamma', Zona: sur, Fecha: '2026-02-21', Monto: 70, Envio: 'Recoger', Responsable: cap2Id } });
   expect(res.status(), await res.text()).toBe(201);
 });
 
 test('H1 CA1 · CA2 · CA3: secciones, pestañas, condición en vivo y la pestaña con el error se abre sola', async ({ browser }) => {
   const page = await pageAs(browser, username('cap1'));
-  await page.goto('/c/Pedido/new');
+  await page.goto('/c/IfzPedido/new');
   const tabs = page.getByRole('tablist', { name: 'Secciones de pedido' });
   await expect(tabs.getByRole('tab')).toHaveText(['General', 'Importes']);
   await expect(page.getByRole('heading', { name: 'Datos del pedido' })).toBeVisible();
@@ -191,36 +191,36 @@ test('H1 CA1 · CA2 · CA3: secciones, pestañas, condición en vivo y la pesta�
 
 test('H1 CA2 · CA4: el servidor exige solo lo visible y nunca evalúa una condición con un dato oculto', async () => {
   const cap1 = await as('cap1');
-  const missing = await cap1.post('/api/data/Pedido', { data: { Cliente: 'Sin dirección', Envio: 'Domicilio' } });
+  const missing = await cap1.post('/api/data/IfzPedido', { data: { Cliente: 'Sin dirección', Envio: 'Domicilio' } });
   expect(missing.status()).toBe(400);
   expect(JSON.stringify((await missing.json()).errors)).toContain('Dirección es obligatorio');
-  expect((await cap1.post('/api/data/Pedido', { data: { Cliente: 'Recoge', Envio: 'Recoger' } })).status()).toBe(201);
+  expect((await cap1.post('/api/data/IfzPedido', { data: { Cliente: 'Recoge', Envio: 'Recoger' } })).status()).toBe(201);
 
   // /compute devuelve qué ocultar con los valores capturados.
-  const comp = await (await cap1.post('/api/data/Pedido/compute', { data: { values: { Envio: 'Domicilio' } } })).json();
+  const comp = await (await cap1.post('/api/data/IfzPedido/compute', { data: { values: { Envio: 'Domicilio' } } })).json();
   expect(comp.values).toBeDefined();
   expect(comp.layout.hiddenFields).not.toContain('Direccion');
   expect(comp.layout.hiddenSections).not.toContain('Revision'); // el capturista no ve el costo: condición ignorada
 
   const analista = await as('analista');
-  const low = await (await analista.post('/api/data/Pedido/compute', { data: { values: { Envio: 'Recoger', Costo: 50 } } })).json();
+  const low = await (await analista.post('/api/data/IfzPedido/compute', { data: { values: { Envio: 'Recoger', Costo: 50 } } })).json();
   expect(low.layout.hiddenSections).toContain('Revision');
   expect(low.layout.hiddenFields).toContain('Direccion');
-  const high = await (await analista.post('/api/data/Pedido/compute', { data: { values: { Costo: 500 } } })).json();
+  const high = await (await analista.post('/api/data/IfzPedido/compute', { data: { values: { Costo: 500 } } })).json();
   expect(high.layout.hiddenSections).not.toContain('Revision');
   // El registro también trae su estado de layout.
-  const row = await (await cap1.get(`/api/data/Pedido/${pedidoNorte}`)).json();
+  const row = await (await cap1.get(`/api/data/IfzPedido/${pedidoNorte}`)).json();
   expect(row._layout.hiddenFields).toContain('Direccion');
   expect(row.Costo).toBeUndefined();
 });
 
 test('H1 CA5: la vista previa rechaza layouts inválidos', async () => {
   const res = await (await as('admin')).post('/api/model/plan/preview', { data: { description: 'mal', operations: [
-    { op: 'setLayout', entity: 'Pedido', layout: { sections: [
+    { op: 'setLayout', entity: 'IfzPedido', layout: { sections: [
       { name: 'A1', label: 'A', fields: ['Cliente', 'NoExiste'] },
       { name: 'B1', label: 'B', visibleWhen: 'Inventado = 1', fields: ['Cliente', 'Partidas'] },
     ] } },
-    { op: 'setLayout', entity: 'PedidoPartida', layout: { sections: [{ name: 'A1', label: 'A', fields: ['Concepto'] }] } },
+    { op: 'setLayout', entity: 'IfzPedidoPartida', layout: { sections: [{ name: 'A1', label: 'A', fields: ['Concepto'] }] } },
   ] } });
   const preview = await res.json();
   expect(preview.valid).toBe(false);
@@ -234,7 +234,7 @@ test('H1 CA5: la vista previa rechaza layouts inválidos', async () => {
 
 test('H2 CA1 · CA2 · CA3: vista predeterminada, filtros, columnas y vista personal desde el listado', async ({ browser }) => {
   const page = await pageAs(browser, username('analista'));
-  await page.goto('/c/Pedido');
+  await page.goto('/c/IfzPedido');
   // CA3: la vista compartida predeterminada del rol se aplica al abrir (columnas, filtro y orden).
   await expect(page).toHaveURL(/view=Urgentes/);
   await expect(page.getByLabel('Vista', { exact: true })).toHaveValue('Urgentes');
@@ -271,7 +271,7 @@ test('H2 CA1 · CA2 · CA3: vista predeterminada, filtros, columnas y vista pers
   await dialog.getByLabel(/^Nombre de la vista/).fill('Clientes con «ac»');
   await dialog.getByRole('button', { name: 'Guardar' }).click();
   await expect(page.getByText('Vista guardada')).toBeVisible();
-  await page.goto('/c/Pedido?view=todos');
+  await page.goto('/c/IfzPedido?view=todos');
   await page.getByLabel('Vista', { exact: true }).selectOption({ label: 'Clientes con «ac»' });
   await expect(page.getByRole('list', { name: 'Filtros aplicados' })).toContainText('Cliente contiene ac');
   await expect(table.getByRole('columnheader', { name: /Costo/ })).toBeVisible();
@@ -287,32 +287,32 @@ test('H2 CA4: vistas y filtros respetan la seguridad por campo y las vistas pers
   const cap1 = await as('cap1');
   const analista = await as('analista');
   // Filtrar por un campo oculto: 400 (ordenar por él se ignora, como en la 006).
-  const hidden = await cap1.get('/api/data/Pedido', { params: { filters: JSON.stringify([{ field: 'Costo', op: 'gt', value: 100 }]) } });
+  const hidden = await cap1.get('/api/data/IfzPedido', { params: { filters: JSON.stringify([{ field: 'Costo', op: 'gt', value: 100 }]) } });
   expect(hidden.status()).toBe(400);
-  const bad = await cap1.get('/api/data/Pedido', { params: { filters: '{no es json' } });
+  const bad = await cap1.get('/api/data/IfzPedido', { params: { filters: '{no es json' } });
   expect(bad.status()).toBe(400);
-  const ok = await (await cap1.get('/api/data/Pedido', { params: { filters: JSON.stringify([{ field: 'Responsable', op: 'eq', value: '$me' }]), pageSize: 200 } })).json();
+  const ok = await (await cap1.get('/api/data/IfzPedido', { params: { filters: JSON.stringify([{ field: 'Responsable', op: 'eq', value: '$me' }]), pageSize: 200 } })).json();
   expect(ok.items.length).toBeGreaterThanOrEqual(2);
 
   // Compartidas: «Urgentes» es solo para analistas y «Caros» filtra por el costo: al capturista no se le ofrecen.
-  const views = await (await cap1.get('/api/views/Pedido')).json();
+  const views = await (await cap1.get('/api/views/IfzPedido')).json();
   expect(views.shared.map((v: { name: string }) => v.name)).toEqual(['Mios']);
-  const aViews = await (await analista.get('/api/views/Pedido')).json();
+  const aViews = await (await analista.get('/api/views/IfzPedido')).json();
   expect(aViews.shared.map((v: { name: string }) => v.name)).toEqual(['Urgentes', 'Caros', 'Mios']);
 
   // Personales: el capturista no puede guardar una con un campo oculto; la del analista no la ve ni la toca nadie más.
-  expect((await cap1.post('/api/views/Pedido', { data: { label: 'Con costo', filters: [{ field: 'Costo', op: 'gt', value: 1 }] } })).status()).toBe(400);
-  expect((await cap1.post('/api/views/Pedido', { data: { label: 'Por costo', sort: 'Costo' } })).status()).toBe(400);
-  const mine = await (await analista.post('/api/views/Pedido', { data: { label: 'Privada', columns: ['Cliente', 'Costo'] } })).json();
-  expect((await analista.post('/api/views/Pedido', { data: { label: 'Privada' } })).status()).toBe(400); // nombre repetido
-  expect((await (await cap1.get('/api/views/Pedido')).json()).personal).toEqual([]);
-  expect((await cap1.put(`/api/views/Pedido/${mine.id}`, { data: { label: 'Mía ahora' } })).status()).toBe(404);
-  expect((await cap1.delete(`/api/views/Pedido/${mine.id}`)).status()).toBe(404);
-  expect((await analista.delete(`/api/views/Pedido/${mine.id}`)).status()).toBe(204);
+  expect((await cap1.post('/api/views/IfzPedido', { data: { label: 'Con costo', filters: [{ field: 'Costo', op: 'gt', value: 1 }] } })).status()).toBe(400);
+  expect((await cap1.post('/api/views/IfzPedido', { data: { label: 'Por costo', sort: 'Costo' } })).status()).toBe(400);
+  const mine = await (await analista.post('/api/views/IfzPedido', { data: { label: 'Privada', columns: ['Cliente', 'Costo'] } })).json();
+  expect((await analista.post('/api/views/IfzPedido', { data: { label: 'Privada' } })).status()).toBe(400); // nombre repetido
+  expect((await (await cap1.get('/api/views/IfzPedido')).json()).personal).toEqual([]);
+  expect((await cap1.put(`/api/views/IfzPedido/${mine.id}`, { data: { label: 'Mía ahora' } })).status()).toBe(404);
+  expect((await cap1.delete(`/api/views/IfzPedido/${mine.id}`)).status()).toBe(404);
+  expect((await analista.delete(`/api/views/IfzPedido/${mine.id}`)).status()).toBe(204);
   // Sin permiso de lectura del catálogo, tampoco hay vistas.
-  expect((await (await as('ajeno')).get('/api/views/Pedido')).status()).toBe(403);
+  expect((await (await as('ajeno')).get('/api/views/IfzPedido')).status()).toBe(403);
   // Las vistas personales quedan en la auditoría.
-  const audit = await (await (await as('admin')).get('/api/audit', { params: { entity: 'Pedido', pageSize: 50, page: 1 } })).json();
+  const audit = await (await (await as('admin')).get('/api/audit', { params: { entity: 'IfzPedido', pageSize: 50, page: 1 } })).json();
   expect(audit.items.some((a: { action: string }) => a.action === 'view.change')).toBe(true);
 });
 
@@ -331,8 +331,8 @@ test('H3 CA1 · CA2 · CA3: agrupaciones, totales y seguridad por registro y por
   // Por periodo.
   expect(byGroup((await report('analista', 'PorMes')).body)).toMatchObject({ '2026-01': [100, 1], '2026-02': [320, 3] });
   // Partidas por el documento relacionado: hereda el alcance del documento.
-  expect(byGroup((await report('analista', 'CantidadPorZona', undefined, 'PedidoPartida')).body)).toEqual({ Norte: [3, undefined], Sur: [7, undefined] });
-  expect(byGroup((await report('cap1', 'CantidadPorZona', undefined, 'PedidoPartida')).body)).toEqual({ Norte: [3, undefined] });
+  expect(byGroup((await report('analista', 'CantidadPorZona', undefined, 'IfzPedidoPartida')).body)).toEqual({ Norte: [3, undefined], Sur: [7, undefined] });
+  expect(byGroup((await report('cap1', 'CantidadPorZona', undefined, 'IfzPedidoPartida')).body)).toEqual({ Norte: [3, undefined] });
   // Regresión (revisión exploratoria 007, F-04): una suma sin registros es 0, no vacío (el indicador mostraba «—»).
   expect((await report('analista', 'Total', [{ field: 'Monto', op: 'gt', value: 99999 }])).body.totals).toEqual({ m0: 0, m1: 0 });
   // Filtro fijo y filtros del usuario.
@@ -350,15 +350,15 @@ test('H3 CA1 · CA2 · CA3: agrupaciones, totales y seguridad por registro y por
   expect(names).toContain('CantidadPorZona');
   // Sin permiso de lectura: ningún reporte del catálogo.
   expect((await report('ajeno', 'PorZona')).status).toBe(404);
-  expect((await (await (await as('ajeno')).get('/api/reports')).json()).filter((r: { entity: string }) => r.entity.startsWith('Pedido'))).toEqual([]);
+  expect((await (await (await as('ajeno')).get('/api/reports')).json()).filter((r: { entity: string }) => r.entity.startsWith('IfzPedido'))).toEqual([]);
 });
 
 test('H3 CA5: exportación a CSV (sin inyección de fórmulas) y a Excel', async () => {
   const cap1 = await as('cap1');
-  const csv = await cap1.get('/api/reports/Pedido/PorCliente/export', { params: { format: 'csv' } });
+  const csv = await cap1.get('/api/reports/IfzPedido/PorCliente/export', { params: { format: 'csv' } });
   expect(csv.status()).toBe(200);
   expect(csv.headers()['content-type']).toContain('text/csv');
-  expect(csv.headers()['content-disposition']).toMatch(/attachment; filename=Pedido-PorCliente-\d{8}\.csv/);
+  expect(csv.headers()['content-disposition']).toMatch(/attachment; filename=IfzPedido-PorCliente-\d{8}\.csv/);
   const text = (await csv.body()).toString('utf8');
   expect(text.charCodeAt(0)).toBe(0xfeff);
   expect(text).toContain('Cliente,Monto');
@@ -366,12 +366,12 @@ test('H3 CA5: exportación a CSV (sin inyección de fórmulas) y a Excel', async
   expect(text).not.toContain('Beta'); // registro de otro usuario
   expect(text).toContain('Total,');
 
-  const xlsx = await cap1.get('/api/reports/Pedido/PorCliente/export', { params: { format: 'xlsx' } });
+  const xlsx = await cap1.get('/api/reports/IfzPedido/PorCliente/export', { params: { format: 'xlsx' } });
   expect(xlsx.status()).toBe(200);
   expect(xlsx.headers()['content-type']).toContain('spreadsheetml');
   expect((await xlsx.body()).subarray(0, 2).toString()).toBe('PK');
-  expect((await cap1.get('/api/reports/Pedido/CostoTotal/export', { params: { format: 'csv' } })).status()).toBe(404);
-  expect((await cap1.get('/api/reports/Pedido/PorCliente/export', { params: { format: 'pdf' } })).status()).toBe(400);
+  expect((await cap1.get('/api/reports/IfzPedido/CostoTotal/export', { params: { format: 'csv' } })).status()).toBe(404);
+  expect((await cap1.get('/api/reports/IfzPedido/PorCliente/export', { params: { format: 'pdf' } })).status()).toBe(400);
 });
 
 test('H3 CA4 · CA6: el reporte en pantalla con gráfica, tabla, filtros y descargas', async ({ browser }) => {
@@ -396,7 +396,7 @@ test('H3 CA4 · CA6: el reporte en pantalla con gráfica, tabla, filtros y desca
   await expect(page.getByRole('link', { name: 'CSV' })).toHaveAttribute('href', /filters=/);
   const download = page.waitForEvent('download');
   await page.getByRole('link', { name: 'Excel' }).click();
-  expect((await download).suggestedFilename()).toMatch(/^Pedido-PorZona-\d{8}\.xlsx$/);
+  expect((await download).suggestedFilename()).toMatch(/^IfzPedido-PorZona-\d{8}\.xlsx$/);
 
   await page.context().close();
 });
@@ -445,7 +445,7 @@ test('H4 CA1 · CA2 · CA3: tableros con indicadores y gráficas, filtrados por 
 });
 
 test('H5: el modelador edita layout, vistas, reportes y tableros como JSON validado', async ({ page }) => {
-  await page.goto('/admin/model?edit=Pedido&tab=vistas');
+  await page.goto('/admin/model?edit=IfzPedido&tab=vistas');
   await expect(await openJson(page, 'Vistas compartidas (JSON)')).toHaveValue(/"Urgentes"/);
   await expect(await openJson(page, 'Reportes (JSON)')).toHaveValue(/"PorZona"/);
   // Spec 019: el layout está en la pestaña Formulario (diseñador o JSON, sobre el mismo borrador).

@@ -331,11 +331,14 @@ public sealed class UsageIndex
             {
                 Name(site, target, lt.Field);
                 var child = target?.FindField(lt.Field) is { ChildEntity: { } c } && _model.TryGetValue(c, out var ce) ? ce : null;
-                Expr(site, scope, lt.When);
+                // Spec 043: con `from`, la plantilla se calcula en la partida de origen.
+                var ltScope = lt.From is null || scope is null ? scope : AutomationRules.FromScope(scope, lt, _model);
+                Name(site, scope, lt.From);
+                Expr(site, ltScope, lt.When);
                 foreach (var s in lt.Set)
                 {
                     Name(site, child, s.Field);
-                    Expr(site, scope, s.Value);
+                    Expr(site, ltScope, s.Value);
                 }
             }
             foreach (var x in new[] { a.Method, a.UnitCost, a.FallbackCost, a.TotalCost }) Expr(site, scope, x);

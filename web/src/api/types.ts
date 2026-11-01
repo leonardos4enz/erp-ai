@@ -382,7 +382,7 @@ export interface AutomationAction {
   sum?: string;
   filter?: string;
   /** Spec 020: partidas del documento que crea una acción create. */
-  createLines?: { field: string; when?: string; set: { field: string; value: string }[] }[];
+  createLines?: { field: string; when?: string; set: { field: string; value: string }[]; from?: string }[];
   /** Spec 020: valuación con capas (type: cost). */
   quantity?: string;
   method?: string;

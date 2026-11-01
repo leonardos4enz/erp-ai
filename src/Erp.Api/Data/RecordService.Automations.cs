@@ -130,16 +130,21 @@ public sealed partial class RecordService
                     var newDraft = new DocDraft { CreatorId = c.User.Id };
                     foreach (var s in a.Set ?? [])
                         if (target.FindField(s.Field) is { } f) newDraft.Header[f.Name] = Coerce(f, ExprEvaluator.Evaluate(s.Value, scope, env));
-                    // Spec 020: partidas del documento nuevo (p. ej. las de una póliza), en el ámbito de la acción.
+                    // Spec 020: partidas del documento nuevo (p. ej. las de una póliza), en el ámbito de la acción. Spec 043: con
+                    // `from`, una por cada partida del origen, en el ámbito de esa partida (su documento, por el campo padre).
                     foreach (var lt in a.CreateLines ?? [])
                     {
-                        if (lt.When is not null && !ExprEvaluator.Test(lt.When, scope, env, whenNull: false)) continue;
                         var linesField = target.FindField(lt.Field)!;
                         var child = c.Model[linesField.ChildEntity!];
-                        var line = new LineDraft();
-                        foreach (var s in lt.Set)
-                            if (child.FindField(s.Field) is { } f) line.Values[f.Name] = Coerce(f, ExprEvaluator.Evaluate(s.Value, scope, env));
-                        (newDraft.Lines.TryGetValue(linesField.Name, out var list) ? list : newDraft.Lines[linesField.Name] = []).Add(line);
+                        IEnumerable<IExprScope> sources = lt.From is null ? [scope] : lineScopes.GetValueOrDefault(lt.From) ?? [];
+                        foreach (var src in sources)
+                        {
+                            if (lt.When is not null && !ExprEvaluator.Test(lt.When, src, env, whenNull: false)) continue;
+                            var line = new LineDraft();
+                            foreach (var s in lt.Set)
+                                if (child.FindField(s.Field) is { } f) line.Values[f.Name] = Coerce(f, ExprEvaluator.Evaluate(s.Value, src, env));
+                            (newDraft.Lines.TryGetValue(linesField.Name, out var list) ? list : newDraft.Lines[linesField.Name] = []).Add(line);
+                        }
                     }
                     var newId = await SystemCreateAsync(c, target, newDraft);
                     if (a.Transition is not null)

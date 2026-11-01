@@ -109,12 +109,12 @@ test('preparar: roles, catálogo con política de seguridad y usuarios con unida
       { field: 'Costo', read: SALES }, { field: 'Cantidad', editableIn: ['Abierta'] },
     ] } },
     // Cotización: referencia a la oportunidad; al crearse, una automatización toca un campo oculto del destino.
-    { op: 'createEntity', name: 'Cotizacion', label: 'Cotización', labelPlural: 'Cotizaciones', icon: 'file-text', fields: [
+    { op: 'createEntity', name: 'SegCotizacion', label: 'Cotización', labelPlural: 'Cotizaciones', icon: 'file-text', fields: [
       { name: 'Folio', label: 'Folio', type: 'autonumber', prefix: 'COT-', padding: 4 },
       { name: 'Oportunidad', label: 'Oportunidad', type: 'reference', referenceEntity: 'Oportunidad', required: true },
       { name: 'NombreOportunidad', label: 'De la oportunidad', type: 'text', defaultValue: 'Oportunidad.Nombre' },
     ] },
-    { op: 'setAutomations', entity: 'Cotizacion', automations: [
+    { op: 'setAutomations', entity: 'SegCotizacion', automations: [
       { name: 'SubirMargen', label: 'Sumar un punto de margen', on: 'create', actions: [
         { type: 'update', target: 'Oportunidad', set: [{ field: 'Margen', value: 'COALESCE(Oportunidad.Margen, 0) + 1' }] },
       ] },
@@ -127,7 +127,7 @@ test('preparar: roles, catálogo con política de seguridad y usuarios con unida
     const r = roles.find((x: { name: string }) => x.name === name);
     const write = name !== 'Gerente de ventas';
     const res = await admin.put(`/api/admin/roles/${r.id}`, { data: { name, description: r.description, ...flags,
-      permissions: [perms('Oportunidad', write), perms('Cotizacion', true)] } });
+      permissions: [perms('Oportunidad', write), perms('SegCotizacion', true)] } });
     expect(res.status(), await res.text()).toBe(200);
   }
   // Spec 015: la unidad del usuario es una unidad dada de alta (antes era texto libre).
@@ -256,9 +256,9 @@ test('H2 CA1 · CA4: propios, de mi unidad y todos; fuera de alcance responde 40
   // Buscador y referencias: no se elige ni se lee (por fórmulas) un registro que no se ve.
   const options = await (await v2api.get('/api/data/Oportunidad/lookup')).json();
   expect(options.map((x: { id: number }) => x.id)).toEqual([ids.o2.id]);
-  const peek = await (await v2api.post('/api/data/Cotizacion/compute', { data: { values: { Oportunidad: o1 } } })).json();
+  const peek = await (await v2api.post('/api/data/SegCotizacion/compute', { data: { values: { Oportunidad: o1 } } })).json();
   expect(peek.values.NombreOportunidad ?? null).toBeNull();
-  const stolen = await create('vend2', 'Cotizacion', { Oportunidad: o1 });
+  const stolen = await create('vend2', 'SegCotizacion', { Oportunidad: o1 });
   expect(stolen.status).toBe(400);
   expect(JSON.stringify(stolen.body)).toContain('El registro seleccionado no existe.');
 });
@@ -298,7 +298,7 @@ test('H2 CA5: no se crea ni se deja un registro fuera del propio alcance de escr
 test('Las automatizaciones actúan con autoridad del motor: escriben un campo oculto para quien dispara', async () => {
   // vend2 no ve el margen ni puede capturarlo; el gerente sí lo ve.
   const g0 = Number((await get('gerente', 'Oportunidad', ids.o2.id)).body.Margen ?? 0);
-  const cot = await create('vend2', 'Cotizacion', { Oportunidad: ids.o2.id });
+  const cot = await create('vend2', 'SegCotizacion', { Oportunidad: ids.o2.id });
   expect(cot.status).toBe(201);
   expect(cot.body.NombreOportunidad).toBe('Tienda Sur');
   expect((await get('gerente', 'Oportunidad', ids.o2.id)).body.Margen).toBe(g0 + 1);
