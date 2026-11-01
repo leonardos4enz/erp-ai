@@ -36,9 +36,10 @@ public static class McpEndpoints
         app.MapPost("/oauth/revoke", (HttpContext http, McpOAuthService svc, CancellationToken ct) => svc.RevokeAsync(http, ct))
             .Requires(Capability.Anonymous).Writes(Effect.Session).RequireRateLimiting("oauth").DisableAntiforgery();
 
-        // Solo el token MCP llega aquí (el selector de esquema ignora la cookie en /mcp: sin CSRF posible).
+        // Solo el token MCP llega aquí (el selector de esquema ignora la cookie en /mcp: sin CSRF posible). Spec 044: escribe en la
+        // copia aislada de la conexión y deja propuestas en Studio (lo personal de quien llama), nunca en el entorno real.
         app.MapPost("/mcp", (HttpContext http, McpServer server, CancellationToken ct) => server.HandleAsync(http, ct))
-            .Requires(Capability.Authenticated).ReadsOnly().Costly("despacha herramientas del catálogo de Studio", "Mcp:Burst y Mcp:CallsPerMinute por persona, más los del despachador")
+            .Requires(Capability.Authenticated).Writes(Effect.Session).Costly("despacha herramientas del catálogo de Studio", "Mcp:Burst y Mcp:CallsPerMinute por persona, más los del despachador")
             .DisableAntiforgery();
         app.MapMethods("/mcp", ["GET", "DELETE"], (McpOptions options) => options.Enabled
                 ? Results.Json(new { title = "Este servidor MCP no abre flujos ni sesiones: usa POST.", status = 405 }, statusCode: 405)
@@ -55,6 +56,12 @@ public static class McpEndpoints
         g.MapDelete("/connections/{id:int}", async (int id, HttpContext http, McpOAuthService svc, CancellationToken ct) =>
         {
             await svc.RevokeConnectionAsync(id, http, ct);
+            return Results.NoContent();
+        }).Requires(Capability.Authenticated).Writes(Effect.Session);
+        // Spec 044 (H6 CA2): descartar la copia aislada de una conexión propia.
+        g.MapDelete("/connections/{id:int}/sandbox", async (int id, HttpContext http, McpOAuthService svc, CancellationToken ct) =>
+        {
+            await svc.DiscardSandboxAsync(id, http, ct);
             return Results.NoContent();
         }).Requires(Capability.Authenticated).Writes(Effect.Session);
     }

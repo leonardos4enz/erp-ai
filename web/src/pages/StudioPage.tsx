@@ -61,21 +61,8 @@ export function StudioPage() {
       </div>
     );
   }
-  if (!st.configured) {
-    return (
-      <div className="page">
-        <h1 className="page-title" style={{ marginBottom: 'var(--space-6)' }}>ERP AI Studio</h1>
-        <div className="card">
-          <EmptyState
-            icon={KeyRound}
-            title="ERP AI Studio no está configurado"
-            description={<>Usa la clave de Anthropic del asistente. Un administrador la guarda en <Link to="/admin/assistant">Configuración › Asistente IA</Link>; el resto del ERP funciona igual.</>}
-          />
-        </div>
-      </div>
-    );
-  }
-
+  // Spec 044 (H5 CA4): sin clave de Anthropic, las conversaciones y las propuestas (p. ej. las que llegan por MCP) se siguen
+  // viendo; solo la bienvenida dice que el agente no está configurado.
   return (
     <div className={`chat-page${barOpen ? ' bar-open' : ''}`}>
       <ConversationBar items={sessions.data ?? null} current={sessionId} onOpen={open} onClose={closeBar} open={barOpen} />
@@ -123,6 +110,7 @@ function ConversationBar({ items, current, open, onOpen, onClose }: {
               <button type="button" className="chat-bar-item" aria-current={x.id === current ? 'page' : undefined} title={x.title} onClick={() => onOpen(x.id)}>
                 <span className="chat-bar-item-title">{x.title}</span>
                 {isActive(x.status) && <span className="chat-dot" role="img" aria-label="Trabajando" />}
+                {x.origin === 'mcp' && <span className="chat-bar-tag">MCP</span>}
                 {x.status === 'proposed' && <span className="chat-bar-tag">Propuesta</span>}
               </button>
             </li>
@@ -150,6 +138,28 @@ function Welcome({ status, onStarted, onOpen, onOpenBar }: {
   const composer = useRef<ComposerHandle>(null);
   useEffect(() => { composer.current?.focus(); }, []);
   const name = me?.displayName?.split(/\s+/)[0] ?? '';
+
+  if (!status.configured) {
+    return (
+      <div className="chat-pane">
+        <header className="chat-header">
+          <button type="button" className="chat-icon-btn chat-bar-open" aria-label="Conversaciones" onClick={onOpenBar}><MessagesSquare size={17} aria-hidden /></button>
+          <h1 className="chat-brand">ERP AI Studio</h1>
+        </header>
+        <div className="chat-welcome-scroll">
+          <div className="chat-welcome">
+            <div className="card">
+              <EmptyState
+                icon={KeyRound}
+                title="ERP AI Studio no está configurado"
+                description={<>Usa la clave de Anthropic del asistente. Un administrador la guarda en <Link to="/admin/assistant">Configuración › Asistente IA</Link>; el resto del ERP funciona igual. Las propuestas que te entregue tu Claude por MCP aparecen en las conversaciones.</>}
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   async function submit() {
     const text = prompt.trim();

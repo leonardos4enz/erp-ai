@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type Ref } from 'react';
-import { ArrowDown, Gauge, Info, MessagesSquare, Pencil, RotateCcw, Rocket, StopCircle, WifiOff, XCircle } from 'lucide-react';
+import { ArrowDown, Gauge, Inbox, Info, MessagesSquare, Pencil, RotateCcw, Rocket, StopCircle, WifiOff, XCircle } from 'lucide-react';
 import { ApiError } from '../../api/client';
 import { studioApi } from '../../api/endpoints';
 import type { StudioSession, StudioStatusInfo, StudioStep } from '../../api/types';
@@ -264,7 +264,13 @@ export function ChatView({ id, status, dataTools, onListChanged, onOpenBar }: {
             const last = i === lastIdx && !pending;
             return (
               <section key={t.turn} className="chat-turn" aria-label={`Mensaje ${t.turn}`} style={last ? { minHeight: minH } : undefined}>
-                {last && editing !== null ? (
+                {/* Spec 044 (H5 CA1): una propuesta por MCP no tiene mensaje de la persona: se dice de dónde llegó. */}
+                {s.origin === 'mcp' && t.turn === 1 ? (
+                  <div className="chat-notice">
+                    <Inbox size={16} aria-hidden />
+                    <span>Propuesta de <strong>{s.client ?? 'un cliente MCP'}</strong> por MCP · <time dateTime={s.createdAt} title={new Date(s.createdAt).toLocaleString('es-MX')}>{relativeTime(s.createdAt, now)}</time></span>
+                  </div>
+                ) : last && editing !== null ? (
                   <EditBox value={editing} original={t.user.text} onChange={setEditing} onCancel={cancelEdit} onSend={sendEdit} />
                 ) : (
                   <UserBubble text={t.user.text} at={t.user.at} now={now} innerRef={last ? lastBubble : undefined}
@@ -279,7 +285,7 @@ export function ChatView({ id, status, dataTools, onListChanged, onOpenBar }: {
                     return (
                       <div key={seg.seq} className="chat-deliver">
                         {seg.delivery.summary && <Markdown text={seg.delivery.summary} />}
-                        {seg.delivery.report && <ReportView report={seg.delivery.report} steps={t.steps} id={`informe-${seg.seq}`} />}
+                        {seg.delivery.report && <ReportView report={seg.delivery.report} steps={t.steps} id={`informe-${seg.seq}`} client={s.origin === 'mcp' ? s.client ?? 'el cliente MCP' : undefined} />}
                         {isProposal && (
                           <ProposalCard s={s} replaced={seg.seq !== proposalSeq} working={active} refreshed={refreshed} busy={busy}
                             onApply={() => setConfirm(true)} onDiscard={() => void discard()}

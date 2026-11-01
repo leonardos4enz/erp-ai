@@ -286,47 +286,9 @@ public sealed class StudioAgent(Db db, StudioOptions options, AssistantOptions a
     /// </summary>
     private async Task<(Outcome? Done, StudioBlock? Result)> DeliverAsync(Run run, StudioToolUse use, CancellationToken ct)
     {
-        string? error = null;
-        ChangePlan? plan = null;
-        string? planJson = null;
-        string summary = "";
-        JsonObject report = [];
-        try
-        {
-            var input = JsonNode.Parse(use.Input.GetRawText()) as JsonObject ?? throw new ToolInputException("La entrada debe ser un objeto JSON.");
-            summary = StudioTools.Req(input, "summary", 4000);
-            report = new JsonObject
-            {
-                // F-04: una prueba puede llegar como texto suelto; no debe tumbar la entrega.
-                ["tested"] = new JsonArray((input["tested"] as JsonArray ?? []).Take(50).Select(t => (JsonNode)(t is JsonObject o
-                    ? new JsonObject
-                    {
-                        ["description"] = Cut(o["description"]?.ToString() ?? "", 500),
-                        ["ok"] = o["ok"]?.GetValueKind() == JsonValueKind.True,
-                        ["detail"] = o["detail"] is { } d ? Cut(d.ToString(), 1000) : null,
-                    }
-                    : new JsonObject { ["description"] = Cut(t?.ToString() ?? "", 500), ["ok"] = false })).ToArray()),
-                ["failures"] = Texts(input["failures"]),
-                ["risks"] = Texts(input["risks"]),
-            };
-            if (input["plan"] is JsonObject p)
-            {
-                if ((p["operations"] as JsonArray)?.Count is not > 0) throw new ToolInputException("El plan no tiene operaciones: omite «plan» si no propones cambios.");
-                if ((p["operations"] as JsonArray)!.Count > StudioTools.MaxOperations) throw new ToolInputException($"El plan admite hasta {StudioTools.MaxOperations} operaciones.");
-                try { plan = p.Deserialize<ChangePlan>(json); }
-                catch (JsonException ex) { throw new ToolInputException("El plan no es un Plan de Cambios válido: " + Cut(ex.Message, 300)); }
-                plan = plan! with { BaseHash = null, BaseVersions = null };
-                var model = await store.GetAsync(ct);
-                IReadOnlySet<string> roles;
-                await using (var cn = await db.OpenAsync(ct)) roles = await PlanService.LoadRolesAsync(cn, null);
-                var preview = PlanCompiler.Compile(plan, model, roles, await store.GetDashboardsAsync(ct), await store.GetAppsAsync(ct)).Preview;
-                if (!preview.Valid)
-                    error = "El plan no compila contra el modelo real; corrígelo y vuelve a entregar:\n- "
-                            + string.Join("\n- ", preview.Errors.Take(30).Select(e => e.Operation >= 0 ? $"Operación {e.Operation + 1}: {e.Message}" : e.Message));
-                else planJson = JsonSerializer.Serialize(plan, json);
-            }
-        }
-        catch (ToolInputException ex) { error = ex.Message; }
+        var d = await StudioDelivery.ParseAsync(use.Input, json, store, db, ct);
+        var (error, summary, planJson) = (d.Error, d.Summary, d.PlanJson);
+        var report = d.Report;
 
         await StepAsync(run, "deliver", StudioTools.Deliver, Cut(use.Input.GetRawText(), 8000),
             error is null ? new JsonObject { ["summary"] = summary } : new JsonObject { ["error"] = error }, error is null ? "ok" : "error",
@@ -336,9 +298,6 @@ public sealed class StudioAgent(Db db, StudioOptions options, AssistantOptions a
             return (null, new StudioToolResult(use.Id, StudioPrompt.Untrusted(StudioTools.Deliver, new JsonObject { ["error"] = error }, options.MaxToolResultChars), true));
         return (new(planJson is null ? StudioStatus.Answered : StudioStatus.Proposed, null, summary, planJson, report.ToJsonString()), null);
     }
-
-    private static JsonArray Texts(JsonNode? n) =>
-        new((n as JsonArray ?? []).Take(50).Select(x => (JsonNode)JsonValue.Create(Cut(x?.ToString() ?? "", 1000))!).ToArray());
 
     private async Task<Outcome> LimitAsync(Run run, string code, string message)
     {

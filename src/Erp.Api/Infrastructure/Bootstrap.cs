@@ -860,6 +860,42 @@ public static class Bootstrap
         IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_McpToken_Grant')
             CREATE INDEX IX_McpToken_Grant ON meta.McpToken (GrantId, ExpiresAt);
 
+        -- Spec 044: copia aislada por conexión MCP (una por conexión; el nombre de la base usa el Id) y claves de idempotencia de
+        -- las escrituras por MCP (por conexión). Sin llaves foráneas a McpGrant: el barrido de clientes (040) borra conexiones
+        -- muertas y el de copias trata como muerta una fila sin conexión. Las propuestas por MCP son conversaciones de Studio.
+        IF OBJECT_ID('meta.McpSandbox') IS NULL
+        CREATE TABLE meta.McpSandbox (
+            Id int IDENTITY PRIMARY KEY,
+            GrantId int NOT NULL CONSTRAINT UX_McpSandbox_Grant UNIQUE,
+            UserId int NOT NULL,
+            DbName nvarchar(128) NOT NULL,
+            Token uniqueidentifier NOT NULL,
+            Status varchar(10) NOT NULL,
+            CreatedAt datetime2(3) NOT NULL DEFAULT SYSUTCDATETIME(),
+            LastUsedAt datetime2(3) NOT NULL,
+            LeaseUntil datetime2(3) NOT NULL
+        );
+        IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_McpSandbox_User')
+            CREATE INDEX IX_McpSandbox_User ON meta.McpSandbox (UserId);
+        IF OBJECT_ID('meta.McpWrite') IS NULL
+        CREATE TABLE meta.McpWrite (
+            Id bigint IDENTITY PRIMARY KEY,
+            GrantId int NOT NULL,
+            IdemKey varchar(100) COLLATE Latin1_General_BIN2 NOT NULL, -- revisión adversarial 044 (A-03): «Ab» y «ab» son claves distintas
+            Tool nvarchar(60) NOT NULL,
+            InputHash varbinary(32) NOT NULL,
+            SandboxId int NULL,
+            Status varchar(8) NOT NULL,
+            Attempt uniqueidentifier NOT NULL,
+            PendingUntil datetime2(3) NULL,
+            ResultJson nvarchar(max) NULL,
+            CreatedAt datetime2(3) NOT NULL DEFAULT SYSUTCDATETIME(),
+            CONSTRAINT UX_McpWrite_Key UNIQUE (GrantId, IdemKey)
+        );
+        IF COL_LENGTH('meta.StudioSession', 'Origin') IS NULL ALTER TABLE meta.StudioSession ADD Origin varchar(8) NULL;
+        IF COL_LENGTH('meta.StudioSession', 'McpGrantId') IS NULL ALTER TABLE meta.StudioSession ADD McpGrantId int NULL;
+        IF COL_LENGTH('meta.StudioSession', 'McpClient') IS NULL ALTER TABLE meta.StudioSession ADD McpClient nvarchar(100) NULL;
+
         -- Constitución II.4: la auditoría es de solo inserción, incluso para la propia aplicación.
         IF OBJECT_ID('meta.TR_AuditLog_Immutable') IS NULL
             EXEC('CREATE TRIGGER meta.TR_AuditLog_Immutable ON meta.AuditLog INSTEAD OF UPDATE, DELETE AS

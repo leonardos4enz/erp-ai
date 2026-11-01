@@ -10,7 +10,8 @@ using Microsoft.AspNetCore.WebUtilities;
 
 namespace Erp.Api.Mcp;
 
-public sealed record McpConnectionDto(int Id, string Client, string RedirectHost, IReadOnlyList<string> Scopes, DateTime CreatedAt, DateTime? LastUsedAt);
+public sealed record McpConnectionDto(int Id, string Client, string RedirectHost, IReadOnlyList<string> Scopes, DateTime CreatedAt, DateTime? LastUsedAt,
+    McpSandboxInfo? Sandbox = null);
 public sealed record McpConnectionsDto(string ServerUrl, IReadOnlyList<McpConnectionDto> Connections);
 public sealed record McpAuthorizeRequest(string? Query, bool Approve, string[]? Scopes);
 
@@ -20,7 +21,8 @@ public sealed record McpAuthorizeRequest(string? Query, bool Approve, string[]? 
 /// con detección de reuso y revocación (RFC 7009). La persona consiente desde su sesión (cookie + CSRF); el token resultante
 /// solo sirve en <c>/mcp</c> (<see cref="BearerScope"/>).
 /// </summary>
-public sealed class McpOAuthService(Db db, McpOptions options, UserContextLoader loader, ILogger<McpOAuthService> log)
+public sealed class McpOAuthService(Db db, McpOptions options, UserContextLoader loader, Studio.StudioOptions studio, McpSandboxes sandboxes,
+    ILogger<McpOAuthService> log)
 {
     public const int MaxRegistration = 8 * 1024;
     public const int MaxState = 500;
@@ -241,7 +243,7 @@ public sealed class McpOAuthService(Db db, McpOptions options, UserContextLoader
         var challenge = One("code_challenge");
         if (One("code_challenge_method") != "S256" || !McpFormat.IsChallenge(challenge))
             return Fail("invalid_request", "PKCE es obligatorio: code_challenge con code_challenge_method=S256.");
-        if (McpScopes.Parse(One("scope")) is not { } scopes) return Fail("invalid_scope", "Los alcances admitidos son modelo y datos.");
+        if (McpScopes.Parse(One("scope")) is not { } scopes) return Fail("invalid_scope", "Los alcances admitidos son modelo, datos, aislado y proponer.");
         if (One("resource") is { } resource && !SameResource(resource, resourceUrl))
             return Fail("invalid_target", "El recurso pedido no es este servidor MCP.");
         return new(client, redirect, state, scopes, challenge, resourceUrl, null, null, null);
@@ -266,6 +268,17 @@ public sealed class McpOAuthService(Db db, McpOptions options, UserContextLoader
         error = a.Error, errorDescription = a.ErrorDescription, redirectHost = RedirectUris.Host(a.RedirectUri!),
     };
 
+    /// <summary>
+    /// Spec 044 (H1 CA2, CA3): por qué esta persona no puede conceder un alcance aquí (null si puede). La copia aislada y las
+    /// propuestas son de quien modela (la copia corre como su administrador, 034); la copia, además, si el servidor la permite.
+    /// </summary>
+    private string? Unavailable(string scope, UserContext u) => scope switch
+    {
+        McpScopes.Sandbox or McpScopes.Propose when !EndpointCapabilities.Has(Capability.Modeler, u) => "Solo para quien modela.",
+        McpScopes.Sandbox when !studio.Sandbox => "Este servidor no tiene copia aislada.",
+        _ => null,
+    };
+
     /// <summary><c>GET /api/mcp/authorize</c>: lo que verá la persona (H2 CA1), o el error (H2 CA2).</summary>
     public async Task<object> CheckAsync(HttpContext http, CancellationToken ct)
     {
@@ -279,7 +292,10 @@ public sealed class McpOAuthService(Db db, McpOptions options, UserContextLoader
         {
             client = new { name = a.Client!.Name, redirectHost = RedirectUris.Host(a.RedirectUri!), trusted = RedirectUris.Trusted(a.RedirectUri!, options.TrustedRedirectHosts) },
             user = new { u.Username, u.DisplayName },
-            scopes = McpScopes.All.Select(s => new { name = s, required = s == McpScopes.Model, requested = a.Scopes.Contains(s) }),
+            scopes = McpScopes.All.Select(s => new
+            {
+                name = s, required = s == McpScopes.Model, requested = a.Scopes.Contains(s), available = Unavailable(s, u) is null, reason = Unavailable(s, u),
+            }),
         };
     }
 
@@ -300,8 +316,9 @@ public sealed class McpOAuthService(Db db, McpOptions options, UserContextLoader
         if (a.Error is not null) return ErrorRedirect(http, a);
         if (!req.Approve) return new { redirect = Redirect(http, a.RedirectUri!, a.State, ("error", "access_denied"), ("error_description", "La persona no autorizó el acceso.")) };
         await RequireRoomAsync(u, a.Client!.Id, ct);
-        // Lo que la persona marcó, dentro de lo pedido: nunca más de lo que el cliente pidió.
-        var chosen = McpScopes.Normalize((req.Scopes ?? []).Where(a.Scopes.Contains).Append(McpScopes.Model));
+        // Lo que la persona marcó, dentro de lo pedido: nunca más de lo que el cliente pidió. Spec 044 (H1 CA3): ni más de lo que
+        // ella puede conceder (aunque el POST lo traiga).
+        var chosen = McpScopes.Normalize((req.Scopes ?? []).Where(s => a.Scopes.Contains(s) && Unavailable(s, u) is null).Append(McpScopes.Model));
         var code = McpFormat.New(McpFormat.CodePrefix);
         await using var cn = await db.OpenAsync(ct);
         await cn.ExecuteAsync("""
@@ -541,9 +558,10 @@ public sealed class McpOAuthService(Db db, McpOptions options, UserContextLoader
              ORDER BY g.CreatedAt DESC
             """, new { u.Id });
         static DateTime Utc(DateTime d) => DateTime.SpecifyKind(d, DateTimeKind.Utc);
+        var copies = await sandboxes.InfoAsync(u.Id, ct);
         return new(options.Resource(http), rows.Select(r => new McpConnectionDto(r.Id, r.Client,
             string.Join(", ", (JsonSerializer.Deserialize<string[]>(r.RedirectUris) ?? []).Select(RedirectUris.Host).Distinct()),
-            McpScopes.Normalize(r.Scopes.Split(' ')), Utc(r.CreatedAt), r.LastUsedAt is { } l ? Utc(l) : null)).ToList());
+            McpScopes.Normalize(r.Scopes.Split(' ')), Utc(r.CreatedAt), r.LastUsedAt is { } l ? Utc(l) : null, copies.GetValueOrDefault(r.Id))).ToList());
     }
 
     public async Task RevokeConnectionAsync(int id, HttpContext http, CancellationToken ct)
@@ -557,5 +575,18 @@ public sealed class McpOAuthService(Db db, McpOptions options, UserContextLoader
             throw new NotFound("La conexión no existe o ya estaba desconectada.");
         await RevokeGrantAsync(cn, tx, http, id, "person", Trail.Revoke, new { reason = "person" }, u);
         await tx.CommitAsync(ct);
+        // Spec 044 (H2 CA3): su copia aislada se va en el acto (las de otras revocaciones, en la siguiente vuelta del barrido).
+        await sandboxes.ReleaseAsync(id, u.Id, "revoked");
+    }
+
+    /// <summary>Spec 044 (H6 CA2): descarta la copia de una conexión viva propia; la de otra persona, o sin copia, es 404.</summary>
+    public async Task DiscardSandboxAsync(int id, HttpContext http, CancellationToken ct)
+    {
+        RequireEnabled();
+        var u = http.CurrentUser();
+        await using (var cn = await db.OpenAsync(ct))
+            if (await cn.ExecuteScalarAsync<int?>("SELECT 1 FROM meta.McpGrant WHERE Id = @id AND UserId = @uid AND RevokedAt IS NULL", new { id, uid = u.Id }) is null)
+                throw new NotFound("La conexión no existe o ya estaba desconectada.");
+        if (!await sandboxes.ReleaseAsync(id, u.Id, "person")) throw new NotFound("Esta conexión no tiene una copia aislada.");
     }
 }

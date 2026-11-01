@@ -108,4 +108,4 @@ y cada sesión queda como registro de una sola entrega. Al cerrar la spec:
 | 041 | [Reportes personales y exploración al vuelo](specs/041-reportes-personales/spec.md) | Implementado |
 | 042 | [Tableros personales y compartir](specs/042-tableros-personales/spec.md) | Implementado |
 | 043 | [Módulo de Ventas](specs/043-modulo-ventas/spec.md) | Implementado |
-| 044 | MCP 2: copia aislada y propuestas por MCP | Planeado |
+| 044 | [MCP 2: copia aislada y propuestas por MCP](specs/044-mcp-2/spec.md) | Implementado |

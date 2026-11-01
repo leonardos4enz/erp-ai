@@ -88,6 +88,10 @@ public static class AuditActions
     public const string McpConnect = "mcp.connect";
     public const string McpRevoke = "mcp.revoke";
     public const string McpReuse = "mcp.reuse";
+    /// <summary>Spec 044: propuesta entregada por MCP (sesión de Studio, cliente, operaciones) y copia aislada de una conexión
+    /// preparada o borrada (con el motivo).</summary>
+    public const string McpProposal = "mcp.proposal";
+    public const string McpSandbox = "mcp.sandbox";
 }
 
 public static class Audit

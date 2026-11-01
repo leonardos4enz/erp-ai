@@ -5,14 +5,20 @@ import { formatDateTime } from '../../lib/format';
 import { PLAN_LABEL, reportNotes } from '../../lib/studio';
 import { PlanPreviewView } from '../modeler/PlanReviewDialog';
 
-/** R-033-11: lo que el agente dice haber probado, como afirmación suya, comparada con los pasos de su turno. */
-export function ReportView({ report, steps, id }: { report: StudioReport; steps: StudioStep[]; id: string }) {
+/**
+ * R-033-11: lo que el agente dice haber probado, como afirmación suya, comparada con los pasos de su turno. Spec 044 (revisión
+ * exploratoria F-01): con `client` (una propuesta por MCP) el informe es del cliente y este ERP no vio sus pruebas: no se
+ * compara con pasos que no tiene.
+ */
+export function ReportView({ report, steps, id, client }: { report: StudioReport; steps: StudioStep[]; id: string; client?: string | null }) {
   if (report.tested.length === 0 && report.failures.length === 0 && report.risks.length === 0) return null;
-  const notes = reportNotes(report, steps);
+  const notes = client ? [] : reportNotes(report, steps);
   return (
     <section className="chat-report" aria-labelledby={id}>
-      <h3 id={id} className="chat-report-title"><FlaskConical size={14} aria-hidden /> Lo que el agente informa</h3>
-      <p className="chat-muted">Es una afirmación del agente: compárala con sus herramientas.</p>
+      <h3 id={id} className="chat-report-title"><FlaskConical size={14} aria-hidden /> {client ? `Lo que informa ${client}` : 'Lo que el agente informa'}</h3>
+      <p className="chat-muted">{client
+        ? 'Es una afirmación del cliente: sus pruebas las hizo por su cuenta y este ERP no las vio.'
+        : 'Es una afirmación del agente: compárala con sus herramientas.'}</p>
       {notes.map((n) => <Alert key={n} tone="warning" icon={AlertTriangle} title={n} />)}
       {report.tested.length > 0 && (
         <>

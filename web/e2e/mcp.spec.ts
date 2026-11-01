@@ -194,9 +194,9 @@ test('H2 CA2: un retorno no registrado se explica aquí y no se redirige', async
 // registrado por cualquiera, el ERP era un redirector abierto.
 test('H2 CA2: un error del cliente (alcance desconocido) se explica y la persona decide volver', async ({ page }) => {
   const clientId = await register();
-  await page.goto(`/conectar?${authorizeQuery(clientId, pkce().challenge, 'modelo aislado')}`);
+  await page.goto(`/conectar?${authorizeQuery(clientId, pkce().challenge, 'modelo escribir')}`);
   await expect(page.getByRole('heading', { name: 'No se puede conectar' })).toBeFocused();
-  await expect(page.getByRole('alert')).toContainText('Los alcances admitidos son modelo y datos');
+  await expect(page.getByRole('alert')).toContainText('Los alcances admitidos son modelo, datos, aislado y proponer');
   expect(page.url()).toContain('/conectar?');
   await expectAccessible(page);
   await page.getByRole('button', { name: `Volver a ${new URL(callback).host}` }).click();

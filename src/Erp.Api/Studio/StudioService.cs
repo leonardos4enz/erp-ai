@@ -22,7 +22,7 @@ public sealed record StudioStatusDto(bool Configured, string? Model, bool Sandbo
     decimal CostTodayUsd, int? Active, bool DirectChanges);
 
 public sealed record StudioSummaryDto(int Id, string Title, string Status, DateTime CreatedAt, DateTime? FinishedAt, int Steps, decimal CostUsd,
-    int Turns, DateTime UpdatedAt);
+    int Turns, DateTime UpdatedAt, string Origin = "studio");
 
 public sealed record StudioStepDto(int Seq, string Kind, string? Tool, string Status, string Summary, JsonNode? Input, JsonNode? Output, int DurationMs, DateTime At,
     int Turn);
@@ -63,6 +63,10 @@ public sealed record StudioSessionDto
     /// <summary>Spec 036: si la persona puede mandar otro mensaje ahora, y si no, por qué.</summary>
     public bool CanSend { get; init; }
     public string? SendBlockedReason { get; init; }
+    /// <summary>Spec 044 (H5 CA1): <c>studio</c> (el agente de Studio) o <c>mcp</c> (una propuesta entregada por un cliente MCP).</summary>
+    public string Origin { get; init; } = "studio";
+    /// <summary>Spec 044: el nombre del cliente MCP que la entregó (nombre registrado, sin verificar).</summary>
+    public string? Client { get; init; }
 }
 
 /// <summary>
@@ -110,7 +114,7 @@ public sealed class StudioService(Db db, MetadataStore store, PlanService plans,
         await cn.QuerySingleAsync<(int, long)>("""
             SELECT ISNULL(SUM(CASE WHEN CreatedAt > DATEADD(day, -1, SYSUTCDATETIME()) THEN 1 ELSE 0 END), 0),
                    ISNULL(SUM(CostMicros + ReservedMicros), 0) FROM meta.StudioSession
-             WHERE UserId = @userId AND (@except IS NULL OR Id <> @except)
+             WHERE UserId = @userId AND (@except IS NULL OR Id <> @except) AND Origin IS NULL -- spec 044: las propuestas por MCP no cuestan modelo
                AND (CreatedAt > DATEADD(day, -1, SYSUTCDATETIME()) OR LastActivityAt > DATEADD(day, -1, SYSUTCDATETIME()))
             """, new { userId, except }, tx);
 
@@ -166,6 +170,9 @@ public sealed class StudioService(Db db, MetadataStore store, PlanService plans,
 
     private const string Working = "El agente está trabajando en esta conversación: espera a que termine o detenlo.";
 
+    private static string FromMcp(string? client) =>
+        $"Esta propuesta llegó por MCP desde {client ?? "un cliente MCP"}: sigue la conversación en ese cliente. Aquí puedes revisarla, aplicarla o descartarla.";
+
     /// <summary>
     /// Spec 036 (H1): un mensaje de seguimiento encola otro turno de la conversación. Bajo el bloqueo de la fila y el de la
     /// persona (el mismo de pedir una sesión): dueña, sin turno en curso, sin otra conversación en curso, topes de la
@@ -174,6 +181,11 @@ public sealed class StudioService(Db db, MetadataStore store, PlanService plans,
     public async Task<StudioSessionDto> SendAsync(int id, StudioMessageBody body, HttpContext http, CancellationToken ct)
     {
         var user = http.CurrentUser();
+        // Spec 044 (H5 CA3): una propuesta por MCP lo dice aunque el agente no esté configurado (se vuelve a mirar bajo bloqueo).
+        await using (var pre = await db.OpenAsync(ct))
+            if ((await pre.QueryAsync<(string? Origin, string? McpClient)>(
+                    "SELECT Origin, McpClient FROM meta.StudioSession WHERE Id = @id AND UserId = @UserId", new { id, UserId = user.Id })).FirstOrDefault() is { Origin: not null } mcp)
+                throw new Conflict(FromMcp(mcp.McpClient));
         if (await keys.GetAsync(ct) is null)
             throw new AppException(StatusCodes.Status503ServiceUnavailable, "ERP AI Studio usa la clave del asistente: un administrador debe guardarla en Configuración › Asistente IA.");
         var text = body.Text?.Trim() ?? "";
@@ -184,12 +196,14 @@ public sealed class StudioService(Db db, MetadataStore store, PlanService plans,
         await using (var tx = await cn.BeginTransactionAsync(ct))
         {
             await LockAsync(cn, tx, user.Id);
-            var s = (await cn.QueryAsync<(string Status, int Turns, int Steps, int ToolCalls, long Tokens, long CostMicros, int Messages, string Scopes, int? CompanyId)>("""
+            var s = (await cn.QueryAsync<(string Status, int Turns, int Steps, int ToolCalls, long Tokens, long CostMicros, int Messages, string Scopes, int? CompanyId, string? Origin, string? McpClient)>("""
                 SELECT Status, Turns, Steps, ToolCalls, InputTokens + OutputTokens, CostMicros,
-                       (SELECT COUNT(*) FROM meta.StudioMessage m WHERE m.SessionId = s.Id), Scopes, CompanyId
+                       (SELECT COUNT(*) FROM meta.StudioMessage m WHERE m.SessionId = s.Id), Scopes, CompanyId, Origin, McpClient
                   FROM meta.StudioSession s WITH (UPDLOCK, ROWLOCK) WHERE Id = @id AND UserId = @UserId
                 """, new { id, UserId = user.Id }, tx)).SingleOrDefault();
             if (s.Status is null) throw new NotFound("La sesión no existe.");
+            // Spec 044 (H5 CA3): no hay agente de Studio detrás de una propuesta por MCP (la conversación sigue en el cliente).
+            if (s.Origin is not null) throw new Conflict(FromMcp(s.McpClient));
             if (StudioStatus.Active(s.Status)) throw new Conflict(Working);
             if (s.Messages == 0) throw new Conflict("Esta sesión es anterior al chat de ERP AI Studio: empieza una conversación nueva.");
             // Spec 040 (auditoría 7, D-07): con «datos», lo que el modelo escribió citando registros de una empresa no viaja en un
@@ -245,11 +259,11 @@ public sealed class StudioService(Db db, MetadataStore store, PlanService plans,
     {
         await using var cn = await db.OpenAsync(ct);
         // Spec 036: como un chat, la conversación con actividad más reciente primero.
-        return (await cn.QueryAsync<(int Id, string Prompt, string Status, DateTime CreatedAt, DateTime? FinishedAt, int Steps, long CostMicros, int Turns, DateTime LastActivityAt)>("""
-            SELECT TOP 30 Id, Prompt, Status, CreatedAt, FinishedAt, Steps, CostMicros, Turns, LastActivityAt FROM meta.StudioSession
+        return (await cn.QueryAsync<(int Id, string Prompt, string Status, DateTime CreatedAt, DateTime? FinishedAt, int Steps, long CostMicros, int Turns, DateTime LastActivityAt, string? Origin)>("""
+            SELECT TOP 30 Id, Prompt, Status, CreatedAt, FinishedAt, Steps, CostMicros, Turns, LastActivityAt, Origin FROM meta.StudioSession
              WHERE UserId = @Id ORDER BY LastActivityAt DESC, Id DESC
             """, new { user.Id })).Select(r => new StudioSummaryDto(r.Id, r.Prompt.Length <= 80 ? r.Prompt : r.Prompt[..77].TrimEnd() + "…",
-            r.Status, Utc(r.CreatedAt), Utc(r.FinishedAt), r.Steps, r.CostMicros / 1_000_000m, r.Turns, Utc(r.LastActivityAt))).ToList();
+            r.Status, Utc(r.CreatedAt), Utc(r.FinishedAt), r.Steps, r.CostMicros / 1_000_000m, r.Turns, Utc(r.LastActivityAt), r.Origin ?? "studio")).ToList();
     }
 
     public async Task<StudioSessionDto> GetAsync(int id, int? after, UserContext user, CancellationToken ct)
@@ -550,6 +564,7 @@ public sealed class StudioService(Db db, MetadataStore store, PlanService plans,
             Trail = steps.Select(ToStep).ToList(),
             Turns = r.Turns, PlanStatus = r.PlanStatus,
             CanSend = SendBlocked(r, user) is null, SendBlockedReason = SendBlocked(r, user),
+            Origin = r.Origin ?? "studio", Client = r.McpClient,
         };
     }
 
@@ -584,16 +599,18 @@ public sealed class StudioService(Db db, MetadataStore store, PlanService plans,
     private const string SelectRow = """
         SELECT Id, Prompt, Scopes, Status, ErrorCode, Model, Steps, ToolCalls, InputTokens, OutputTokens, CostMicros, CreatedAt, StartedAt,
                FinishedAt, Summary, ReportJson, PlanJson, AppliedAt, ChangeSetId, Turns, PlanStatus,
-               (SELECT COUNT(*) FROM meta.StudioMessage m WHERE m.SessionId = meta.StudioSession.Id) AS Messages, CompanyId FROM meta.StudioSession
+               (SELECT COUNT(*) FROM meta.StudioMessage m WHERE m.SessionId = meta.StudioSession.Id) AS Messages, CompanyId, Origin, McpClient FROM meta.StudioSession
         """;
 
     private sealed record Row(int Id, string Prompt, string Scopes, string Status, string? ErrorCode, string Model, int Steps, int ToolCalls,
         long InputTokens, long OutputTokens, long CostMicros, DateTime CreatedAt, DateTime? StartedAt, DateTime? FinishedAt, string? Summary,
-        string? ReportJson, string? PlanJson, DateTime? AppliedAt, int? ChangeSetId, int Turns, string? PlanStatus, int Messages, int? CompanyId);
+        string? ReportJson, string? PlanJson, DateTime? AppliedAt, int? ChangeSetId, int Turns, string? PlanStatus, int Messages, int? CompanyId,
+        string? Origin, string? McpClient);
 
     /// <summary>Spec 036: por qué no se puede mandar otro mensaje ahora (lo mismo que comprueba <see cref="SendAsync"/>, sin el día).</summary>
     private string? SendBlocked(Row r, UserContext user) =>
-        StudioStatus.Active(r.Status) ? Working
+        r.Origin is not null ? FromMcp(r.McpClient)
+        : StudioStatus.Active(r.Status) ? Working
         : r.Messages == 0 ? "Esta sesión es anterior al chat de ERP AI Studio: empieza una conversación nueva."
         : OtherCompany(r.Scopes, r.CompanyId, user) ? OtherCompanyMessage
         : r.Turns >= options.MaxTurns ? $"Esta conversación llegó al tope de {options.MaxTurns} mensajes: empieza una nueva."

@@ -28,6 +28,20 @@ public sealed class McpOptions
     public int Ipv6PrefixLength { get; init; } = Infrastructure.ClientAddress.DefaultIpv6Prefix;
     public IReadOnlyList<string> TrustedRedirectHosts { get; init; } = ["claude.ai", "claude.com"];
     public IReadOnlyList<string> AllowedOrigins { get; init; } = [];
+    /// <summary>Spec 044: copias aisladas vivas de una persona (entre sus conexiones) y en el entorno.</summary>
+    public int SandboxesPerUser { get; init; } = 2;
+    public int MaxSandboxes { get; init; } = 10;
+    /// <summary>Spec 044: la copia sin uso por este tiempo se borra.</summary>
+    public int SandboxIdleMinutes { get; init; } = 30;
+    /// <summary>Spec 044: <i>lease</i> de una llamada sobre la copia (se renueva cada tercio mientras corre).</summary>
+    public int SandboxLeaseSeconds { get; init; } = 120;
+    public int ProposalsPerDay { get; init; } = 20;
+    /// <summary>Spec 044: cuánto vive una clave de idempotencia y cuánto puede quedar «en curso» antes de poder reintentarse.</summary>
+    public int IdempotencyHours { get; init; } = 24;
+    public int WriteLeaseSeconds { get; init; } = 300;
+    public int SweepSeconds { get; init; } = 30;
+    /// <summary>Revisión adversarial 044 (A-02): copias que una persona puede preparar por hora.</summary>
+    public int SandboxCreationsPerHour { get; init; } = 6;
 
     public static McpOptions From(IConfiguration config)
     {
@@ -50,6 +64,15 @@ public sealed class McpOptions
             Ipv6PrefixLength = Infrastructure.ClientAddress.Ipv6Prefix(config),
             TrustedRedirectHosts = trusted is { Length: > 0 } ? trusted : ["claude.ai", "claude.com"],
             AllowedOrigins = s.GetSection("AllowedOrigins").Get<string[]>() ?? [],
+            SandboxesPerUser = Clamp(s.GetValue("SandboxesPerUser", 2), 1, 100),
+            MaxSandboxes = Clamp(s.GetValue("MaxSandboxes", 10), 1, 1000),
+            SandboxIdleMinutes = Clamp(s.GetValue("SandboxIdleMinutes", 30), 1, 24 * 60),
+            SandboxLeaseSeconds = Clamp(s.GetValue("SandboxLeaseSeconds", 120), 6, 3600),
+            ProposalsPerDay = Clamp(s.GetValue("ProposalsPerDay", 20), 1, 10_000),
+            IdempotencyHours = Clamp(s.GetValue("IdempotencyHours", 24), 1, 24 * 30),
+            WriteLeaseSeconds = Clamp(s.GetValue("WriteLeaseSeconds", 300), 5, 24 * 3600),
+            SweepSeconds = Clamp(s.GetValue("SweepSeconds", 30), 1, 3600),
+            SandboxCreationsPerHour = Clamp(s.GetValue("SandboxCreationsPerHour", 6), 1, 10_000),
         };
     }
 
@@ -60,17 +83,26 @@ public sealed class McpOptions
     public string Resource(HttpContext http) => Origin(http) + "/mcp";
 }
 
-/// <summary>Spec 038: alcances que una persona consiente a su cliente MCP (los de Studio, sin la copia aislada: CLARIFY 2).</summary>
+/// <summary>
+/// Spec 038: alcances que una persona consiente a su cliente MCP (los de Studio). Spec 044: la copia aislada (<c>aislado</c>) y
+/// dejar propuestas en Studio (<c>proponer</c>), solo para modeladores; <c>proponer</c> va aparte de <c>modelo</c> para que una
+/// conexión anterior no gane esa capacidad sin un consentimiento nuevo (CLARIFY 3).
+/// </summary>
 public static class McpScopes
 {
     public const string Model = Studio.StudioScopes.Model;
     public const string Data = Studio.StudioScopes.Data;
+    public const string Sandbox = Studio.StudioScopes.Sandbox;
+    public const string Propose = "proponer";
 
     /// <summary>En este orden se guardan y se responden.</summary>
-    public static readonly IReadOnlyList<string> All = [Model, Data];
+    public static readonly IReadOnlyList<string> All = [Model, Data, Sandbox, Propose];
+
+    /// <summary>Spec 044: los que solo puede conceder quien modela.</summary>
+    public static readonly IReadOnlyList<string> ModelerOnly = [Sandbox, Propose];
 
     /// <summary>
-    /// Lista separada por espacios; null si trae uno desconocido (p. ej. <c>aislado</c>). Vacía o ausente = <c>modelo</c>.
+    /// Lista separada por espacios; null si trae uno desconocido. Vacía o ausente = <c>modelo</c>.
     /// <c>modelo</c> va siempre: sin él no hay herramientas.
     /// </summary>
     public static string[]? Parse(string? value)

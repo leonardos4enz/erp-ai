@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Database, Globe, Plug, ShieldAlert, User, Workflow } from 'lucide-react';
+import { Database, FlaskConical, Globe, Inbox, Plug, ShieldAlert, User, Workflow } from 'lucide-react';
 import { ApiError } from '../api/client';
 import { mcpApi } from '../api/endpoints';
 import { BrandLogo } from '../components/Brand';
@@ -17,6 +17,9 @@ export function ConnectPage() {
   const query = useLocation().search.replace(/^\?/, '');
   const info = useAsync((signal) => mcpApi.check(query, signal), [query]);
   const [datos, setDatos] = useState(false);
+  // Spec 044 (H1 CA2): la copia aislada y las propuestas, apagadas por omisión.
+  const [aislado, setAislado] = useState(false);
+  const [proponer, setProponer] = useState(false);
   const [busy, setBusy] = useState<'approve' | 'deny' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [leaving, setLeaving] = useState<string | null>(null);
@@ -34,7 +37,7 @@ export function ConnectPage() {
     setBusy(approve ? 'approve' : 'deny');
     setError(null);
     try {
-      const res = await mcpApi.decide(query, approve, datos ? ['modelo', 'datos'] : ['modelo']);
+      const res = await mcpApi.decide(query, approve, ['modelo', ...(datos ? ['datos'] : []), ...(aislado ? ['aislado'] : []), ...(proponer ? ['proponer'] : [])]);
       setLeaving(res.redirect);
       window.location.assign(res.redirect);
     } catch (e) {
@@ -45,6 +48,14 @@ export function ConnectPage() {
 
   const atLimit = info.error instanceof ApiError && info.error.status === 409;
   const requestedDatos = !!data?.scopes?.find((s) => s.name === 'datos')?.requested;
+  /** Spec 044 (H1 CA2): por qué una casilla está deshabilitada (no lo pidió, no modela, el servidor no tiene copia). */
+  const blockedReason = (name: string) => {
+    const s = data?.scopes?.find((x) => x.name === name);
+    if (!s?.requested) return 'No lo pidió.';
+    return s.available ? null : s.reason ?? 'No disponible.';
+  };
+  const aisladoBlocked = blockedReason('aislado');
+  const proponerBlocked = blockedReason('proponer');
 
   return (
     <div className="consent-shell">
@@ -119,10 +130,18 @@ export function ConnectPage() {
                   Lo que lea viajará a {data.client.redirectHost} y al proveedor de IA de esa aplicación.
                 </Alert>
               )}
+              <div className="consent-scope">
+                <Checkbox checked={aislado} disabled={!!aisladoBlocked} onChange={setAislado}
+                  label={<span><FlaskConical size={14} aria-hidden /> <strong>Copia aislada</strong>: probar planes y crear registros de prueba en una copia del modelo sin datos reales, que se borra sola.{aisladoBlocked && ` (${aisladoBlocked})`}</span>} />
+              </div>
+              <div className="consent-scope">
+                <Checkbox checked={proponer} disabled={!!proponerBlocked} onChange={setProponer}
+                  label={<span><Inbox size={14} aria-hidden /> <strong>Proponer</strong>: dejarte propuestas de cambios al modelo, que revisas y aplicas tú en ERP AI Studio.{proponerBlocked && ` (${proponerBlocked})`}</span>} />
+              </div>
             </fieldset>
             <p className="subtle consent-note">
-              Nada se escribe en el ERP por esta conexión. Puedes desconectarla cuando quieras en <em>Conexiones de Claude</em> (menú de tu
-              usuario).
+              Por esta conexión no se escriben registros reales ni se cambia el modelo: las pruebas van en una copia aislada y las propuestas las
+              aplicas tú en ERP AI Studio. Puedes desconectarla cuando quieras en <em>Conexiones de Claude</em> (menú de tu usuario).
             </p>
             {error && <Alert tone="danger" title="No se pudo completar">{error}</Alert>}
             <div className="consent-actions">

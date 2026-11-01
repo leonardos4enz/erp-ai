@@ -9,16 +9,51 @@ namespace Erp.Api.Mcp;
 public sealed record McpTool(StudioTool Tool, string Title, JsonObject OutputSchema, Func<JsonNode?, JsonObject, JsonObject> Structure)
 {
     public string Name => Tool.Name;
+    /// <summary>Spec 044: el alcance MCP que la habilita (el de Studio, salvo <c>entregar</c>: <c>proponer</c>).</summary>
+    public string Scope { get; init; } = Tool.Scope;
+    public string Description { get; init; } = Tool.Description;
+    public bool ReadOnly { get; init; } = true;
+    public bool Idempotent { get; init; } = true;
+    public bool Destructive { get; init; }
+    /// <summary>Spec 044 (H3 CA1): una escritura que no es idempotente exige clave.</summary>
+    public bool NeedsKey => !Idempotent;
+    public bool UsesSandbox => Tool.Target == ToolTarget.Sandbox;
+
+    /// <summary>El de la herramienta de Studio; con clave de idempotencia (obligatoria) si la necesita.</summary>
+    public JsonObject InputSchema
+    {
+        get
+        {
+            var schema = (JsonObject)Tool.InputSchema.DeepClone();
+            if (!NeedsKey) return schema;
+            schema["properties"]![McpIdempotency.Field] = new JsonObject
+            {
+                ["type"] = "string", ["minLength"] = 8, ["maxLength"] = 100, ["pattern"] = "^[A-Za-z0-9._:-]{8,100}$", ["description"] = McpIdempotency.Description,
+            };
+            ((JsonArray)schema["required"]!).Add(McpIdempotency.Field);
+            return schema;
+        }
+    }
 }
 
 /// <summary>
-/// Spec 038 (H4, H5): el catálogo de Studio (033) tal como se publica por MCP. Solo las herramientas del entorno real (todas de
-/// lectura: el despachador niega escrituras); la copia aislada y <c>entregar</c> no se exponen (CLARIFY 2). Cada una declara su
+/// Spec 038 (H4, H5): el catálogo de Studio (033) tal como se publica por MCP. Las herramientas del entorno real son todas de
+/// lectura (el despachador niega escrituras). Spec 044: con <c>aislado</c>, las de la copia aislada de la conexión y
+/// <c>aislado_descartar</c>; con <c>proponer</c>, <c>entregar</c> (una propuesta que la persona aplica en Studio). Cada una declara su
 /// esquema de salida y cómo se forma su <c>structuredContent</c> (siempre un objeto: un arreglo de la API va en <c>items</c>),
 /// para que un cliente en <i>code mode</i> genere tipos fiables (H5 CA1).
 /// </summary>
 public static class McpTools
 {
+
+    public const string DiscardName = "aislado_descartar";
+
+    /// <summary>Spec 044 (H2 CA3): solo del MCP (Studio suelta su copia al terminar la conversación).</summary>
+    private static readonly StudioTool Discard = new(DiscardName,
+        "Borra la copia aislada de esta conexión; la siguiente herramienta aislada prepara otra desde el modelo actual. Úsala al terminar de probar.",
+        StudioScopes.Sandbox, ToolTarget.Server,
+        new JsonObject { ["type"] = "object", ["properties"] = new JsonObject(), ["required"] = new JsonArray(), ["additionalProperties"] = false },
+        null, null, false, null);
 
     public static readonly IReadOnlyList<McpTool> All =
     [
@@ -61,11 +96,34 @@ public static class McpTools
                 ("nextPage", new JsonObject { ["type"] = new JsonArray("integer", "null") })),
             Page),
         new(Studio("leer_registro"), "Leer un registro", Obj(["id"], ("id", Int())), (body, _) => AsObject(body)),
+
+        // Spec 044 (H2): la copia aislada de la conexión. Las que escriben exigen clave (H3).
+        Sbx("aislado_aplicar_plan", "Aplicar un plan en la copia aislada", Obj(["applied", "operations"], ("applied", Bool()), ("operations", Int())), write: true),
+        Sbx("aislado_crear", "Crear un registro de prueba en la copia", Obj(["id"], ("id", Int())), write: true),
+        Sbx("aislado_actualizar", "Cambiar un registro de la copia", Obj(["id"], ("id", Int())), write: true),
+        Sbx("aislado_transicion", "Ejecutar una transición en la copia", Obj(["id"], ("id", Int())), write: true),
+        Sbx("aislado_leer", "Leer un registro de la copia", Obj(["id"], ("id", Int()))),
+        Sbx("aislado_listar", "Listar registros de la copia", Obj(["items"], ("items", Arr(Obj(["id"], ("id", Int())))), ("total", Int()))),
+        Sbx("aislado_procesar_asincronas", "Procesar las automatizaciones asíncronas de la copia", Obj(["processed", "runs"],
+            ("processed", Int()), ("runs", Arr(Obj(["id", "status"], ("id", Int()), ("status", Str()))))), write: true),
+        new(Discard, "Descartar la copia aislada", Obj(["discarded"], ("discarded", Bool())), (body, _) => AsObject(body))
+            { ReadOnly = false, Idempotent = true, Destructive = true },
+        // Spec 044 (H4): la entrega como propuesta que la persona revisa en Studio.
+        new(StudioTools.Find(StudioTools.Deliver)!, "Entregar una propuesta", Obj(["proposalId", "status", "url"],
+                ("proposalId", Int(1)), ("status", new JsonObject { ["type"] = "string", ["enum"] = new JsonArray("proposed", "answered") }), ("url", Str())),
+            (body, _) => AsObject(body))
+        {
+            Scope = McpScopes.Propose, ReadOnly = false, Idempotent = false,
+            Description = "Entrega tu trabajo a la persona como propuesta, que ella revisa y aplica (o descarta) en ERP AI Studio: el Plan de Cambios " +
+                          "(omítelo si no propones cambios), un resumen, lo que probaste con su resultado, lo que falló y los riesgos. No aplica nada. " +
+                          "El plan se compila contra el modelo real: si no compila, recibes los errores para corregirlo.",
+        },
     ];
+
 
     /// <summary>Las herramientas que esta persona, con estos alcances, puede usar: las que <c>tools/list</c> le da (H4 CA1).</summary>
     public static IEnumerable<McpTool> For(UserContext user, IReadOnlySet<string> scopes, RouteDispatcher routes) =>
-        All.Where(t => scopes.Contains(t.Tool.Scope)
+        All.Where(t => scopes.Contains(t.Scope)
                        && t.Tool.Capability(routes) is { } required && required.AnyOf.Any(c => EndpointCapabilities.Has(c, user)));
 
     public static McpTool? Find(string? name) => All.FirstOrDefault(t => t.Name == name);
@@ -75,12 +133,12 @@ public static class McpTools
     {
         ["name"] = t.Name,
         ["title"] = t.Title,
-        ["description"] = t.Tool.Description,
-        ["inputSchema"] = t.Tool.InputSchema.DeepClone(),
+        ["description"] = t.Description,
+        ["inputSchema"] = t.InputSchema,
         ["outputSchema"] = t.OutputSchema.DeepClone(),
         ["annotations"] = new JsonObject
         {
-            ["title"] = t.Title, ["readOnlyHint"] = true, ["destructiveHint"] = false, ["idempotentHint"] = true, ["openWorldHint"] = false,
+            ["title"] = t.Title, ["readOnlyHint"] = t.ReadOnly, ["destructiveHint"] = t.Destructive, ["idempotentHint"] = t.Idempotent, ["openWorldHint"] = false,
         },
     };
 
@@ -110,6 +168,11 @@ public static class McpTools
             ["nextPage"] = (long)page * size < total ? page + 1 : null,
         };
     }
+
+    private static McpTool Sbx(string name, string title, JsonObject schema, bool write = false) =>
+        new(StudioTools.Find(name) is { Target: ToolTarget.Sandbox } t ? t : throw new InvalidOperationException($"La herramienta {name} no es de la copia aislada."),
+            title, schema, (body, _) => AsObject(body))
+        { ReadOnly = !write, Idempotent = !write };
 
     private static StudioTool Studio(string name) =>
         StudioTools.Find(name) is { Target: ToolTarget.Real } t ? t : throw new InvalidOperationException($"La herramienta {name} no es del entorno real.");

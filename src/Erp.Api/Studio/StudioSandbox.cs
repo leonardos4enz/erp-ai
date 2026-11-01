@@ -59,6 +59,15 @@ public sealed partial class SandboxFactory(ServiceBlueprint blueprint, Db db, IC
 
     public static string NameFor(string realDb, int sessionId) => Validate($"{Prefix(realDb)}{sessionId}{Suffix}", realDb);
 
+    /// <summary>
+    /// Spec 044: la copia de una conexión MCP, por el id de su fila (<c>meta.McpSandbox</c>): <c>&lt;prefijo&gt;M&lt;id&gt;_SBX</c>.
+    /// Una copia nueva nunca reusa el nombre de una que se está borrando, y el barrido de Studio no la reconoce como suya.
+    /// </summary>
+    public static string McpNameFor(string realDb, int sandboxId) => Validate($"{Prefix(realDb)}M{sandboxId}{Suffix}", realDb);
+
+    public static int? McpSandboxOf(string name, string realDb) =>
+        name.StartsWith(Prefix(realDb), StringComparison.Ordinal) && McpSandboxId().Match(name) is { Success: true } m ? int.Parse(m.Groups[1].Value) : null;
+
     /// <summary>Solo letras, números y «_», empieza con letra, termina en <c>_SBX</c> y no es la base real.</summary>
     public static string Validate(string name, string realDb)
     {
@@ -75,13 +84,22 @@ public sealed partial class SandboxFactory(ServiceBlueprint blueprint, Db db, IC
 
     public string NameFor(int sessionId) => NameFor(RealDb, sessionId);
 
+    public string McpNameFor(int sandboxId) => McpNameFor(RealDb, sandboxId);
+
     /// <summary>
     /// Spec 036 (H4 CA1): la copia que creó esta conversación (su base existe y su marca es <paramref name="token"/>), lista
     /// para otro turno sin volver a copiar el modelo. Null si no está o no es suya: entonces se crea otra (033 F-09).
     /// </summary>
-    public async Task<Sandbox?> OpenAsync(int sessionId, Guid token, CancellationToken ct)
+    public Task<Sandbox?> OpenAsync(int sessionId, Guid token, CancellationToken ct) => OpenAsync(NameFor(sessionId), token, ct);
+
+    /// <summary>
+    /// Spec 044: la copia <paramref name="name"/> si existe y lleva la marca <paramref name="token"/>. Revisión adversarial 044
+    /// (A-04): con <paramref name="strict"/>, un error al abrirla (la base existe pero no responde) es
+    /// <see cref="SandboxUnavailable"/> y no null: quien la reabre no la confunde con una copia perdida y no la borra.
+    /// </summary>
+    public async Task<Sandbox?> OpenAsync(string name, Guid token, CancellationToken ct, bool strict = false)
     {
-        var name = NameFor(sessionId);
+        Validate(name, RealDb);
         var master = new SqlConnectionStringBuilder(db.ConnectionString) { InitialCatalog = "master" }.ConnectionString;
         await using (var cn = new SqlConnection(master))
         {
@@ -101,14 +119,18 @@ public sealed partial class SandboxFactory(ServiceBlueprint blueprint, Db db, IC
         {
             log.LogWarning("No se pudo reabrir la copia aislada {Db}: {Message}", name, ex.Message);
             await provider.DisposeAsync();
+            if (strict) throw new SandboxUnavailable("La copia aislada no responde en este momento: intenta de nuevo en unos segundos.", ex);
             return null;
         }
     }
 
     /// <summary>Spec 036: <paramref name="token"/> queda como marca en la copia y en la sesión (para reabrirla en otro turno).</summary>
-    public async Task<Sandbox> CreateAsync(int sessionId, Guid token, CancellationToken ct)
+    public Task<Sandbox> CreateAsync(int sessionId, Guid token, CancellationToken ct) => CreateAsync(NameFor(sessionId), token, ct);
+
+    /// <summary>Spec 044: la copia con el nombre dado (validado: termina en <c>_SBX</c> y nunca es la base real).</summary>
+    public async Task<Sandbox> CreateAsync(string name, Guid token, CancellationToken ct)
     {
-        var name = NameFor(sessionId);
+        Validate(name, RealDb);
         var provider = Build(name);
         try
         {
@@ -328,9 +350,37 @@ public sealed partial class SandboxFactory(ServiceBlueprint blueprint, Db db, IC
         return dropped;
     }
 
+    /// <summary>
+    /// Spec 044: borra las copias de conexiones MCP de este entorno cuya fila ya no existe (<paramref name="live"/>). Como el de
+    /// Studio, las filas vivas se leen después de las bases (F-11).
+    /// </summary>
+    public async Task<int> SweepMcpAsync(Func<Task<IReadOnlySet<int>>> live, CancellationToken ct)
+    {
+        var prefix = Prefix(RealDb) + "M";
+        var master = new SqlConnectionStringBuilder(db.ConnectionString) { InitialCatalog = "master" }.ConnectionString;
+        List<string> names;
+        await using (var cn = new SqlConnection(master))
+        {
+            await cn.OpenAsync(ct);
+            names = (await cn.QueryAsync<string>("SELECT name FROM sys.databases WHERE LEFT(name, LEN(@prefix)) = @prefix", new { prefix })).ToList();
+        }
+        var rows = await live();
+        var dropped = 0;
+        foreach (var n in names)
+            if (McpSandboxOf(n, RealDb) is { } id && !rows.Contains(id) && SandboxName().IsMatch(n))
+            {
+                await DropAsync(n);
+                dropped++;
+            }
+        return dropped;
+    }
+
     [GeneratedRegex("^[A-Za-z][A-Za-z0-9_]{1,58}_SBX$")]
     private static partial Regex SandboxName();
 
     [GeneratedRegex(@"_S(\d{1,9})_SBX$")]
     private static partial Regex SessionId();
+
+    [GeneratedRegex(@"_SM(\d{1,9})_SBX$")]
+    private static partial Regex McpSandboxId();
 }

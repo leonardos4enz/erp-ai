@@ -102,6 +102,11 @@ public static class ErpApp
         services.AddSingleton<Erp.Api.Mcp.McpLimits>();
         services.AddScoped<Erp.Api.Mcp.McpOAuthService>();
         services.AddScoped<Erp.Api.Mcp.McpServer>();
+        // Spec 044: copia aislada por conexión (con su barrido), claves de idempotencia y propuestas por MCP.
+        services.AddSingleton<Erp.Api.Mcp.McpSandboxes>();
+        services.AddSingleton<Erp.Api.Mcp.McpWrites>();
+        services.AddScoped<Erp.Api.Mcp.McpProposals>();
+        services.AddHostedService<Erp.Api.Mcp.McpSandboxSweeper>();
 
         // ---------- Autenticación: cookie (ADR-0002) ----------
         // Spec 008: con «Authorization: Bearer» se usa la clave de API (y nunca la cookie); si no, la cookie. Spec 018: «Bearer erpat_…» es un token OAuth.

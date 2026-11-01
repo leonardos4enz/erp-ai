@@ -41,6 +41,9 @@
 .connection-title { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
 .connection-host { color: var(--text-muted); overflow-wrap: anywhere; }
 .connection-dates { font-size: var(--text-sm); }
+.connection-dates svg { vertical-align: -2px; }
+/* Spec 044: descartar la copia aislada junto a desconectar. */
+.connection-actions { display: flex; gap: var(--space-2); flex-wrap: wrap; }
 
 @media (max-width: 560px) {
   .consent-panel { padding: var(--space-5); }

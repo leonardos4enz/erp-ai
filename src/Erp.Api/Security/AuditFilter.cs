@@ -52,6 +52,7 @@ public static class AuditFilter
         AuditActions.SecurityApprove, AuditActions.SecurityReject, AuditActions.FileChange, AuditActions.StudioStart,
         AuditActions.StudioFinish, AuditActions.StudioCancel, AuditActions.StudioDiscard, AuditActions.StudioApply,
         AuditActions.StudioMessage, AuditActions.McpConnect, AuditActions.McpRevoke, AuditActions.McpReuse,
+        AuditActions.McpProposal, AuditActions.McpSandbox, // spec 044
         AuditActions.PersonalDashboardChange, // spec 042: no es de un catálogo (sus tarjetas pueden ser de varios)
     ];
 

@@ -376,4 +376,6 @@ export const mcpApi = {
     api<{ redirect: string }>('/mcp/authorize', { method: 'POST', body: { query, approve, scopes } }),
   connections: (signal?: AbortSignal) => api<McpConnections>('/mcp/connections', { signal }),
   disconnect: (id: number) => api<void>(`/mcp/connections/${id}`, { method: 'DELETE' }),
+  /** Spec 044 (H6 CA2). */
+  discardSandbox: (id: number) => api<void>(`/mcp/connections/${id}/sandbox`, { method: 'DELETE' }),
 };

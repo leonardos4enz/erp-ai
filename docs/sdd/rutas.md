@@ -9,7 +9,7 @@ sin compuerta, si es costosa sin límite o si aplica lo revisado sin huella. `we
 Capacidades: **anónima** (lista blanca) · **sesión** (lo propio del usuario) · **registros** (el motor exige permiso del
 catálogo, alcance por registro y seguridad por campo) · **modelador** · **usuarios** · **auditoría** · **superusuario**.
 
-Total: 181 rutas.
+Total: 182 rutas.
 
 | Método | Ruta | Capacidad | Efecto | Compuerta | Costosa | Huella |
 |---|---|---|---|---|---|---|
@@ -126,6 +126,7 @@ Total: 181 rutas.
 | POST | `/api/mcp/authorize` | sesión | sesión |  |  |  |
 | GET | `/api/mcp/connections` | sesión |  |  |  |  |
 | DELETE | `/api/mcp/connections/{id:int}` | sesión | sesión |  |  |  |
+| DELETE | `/api/mcp/connections/{id:int}/sandbox` | sesión | sesión |  |  |  |
 | GET | `/api/model/apps` | sesión |  |  |  |  |
 | GET | `/api/model/changes` | modelador |  |  |  |  |
 | GET | `/api/model/entities` | sesión |  |  |  |  |
@@ -176,7 +177,7 @@ Total: 181 rutas.
 | * | `/api/{**path}` | anónima |  |  |  |  |
 | DELETE | `/mcp` | sesión | ninguno |  |  |  |
 | GET | `/mcp` | sesión | ninguno |  |  |  |
-| POST | `/mcp` | sesión | ninguno |  | despacha herramientas del catálogo de Studio (Mcp:Burst y Mcp:CallsPerMinute por persona, más los del despachador) |  |
+| POST | `/mcp` | sesión | sesión |  | despacha herramientas del catálogo de Studio (Mcp:Burst y Mcp:CallsPerMinute por persona, más los del despachador) |  |
 | GET | `/oauth/authorize` | anónima |  |  |  |  |
 | POST | `/oauth/register` | anónima | configuración |  |  |  |
 | POST | `/oauth/revoke` | anónima | sesión |  |  |  |

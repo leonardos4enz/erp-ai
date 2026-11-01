@@ -199,7 +199,7 @@ public class McpTests(McpTests.Host host) : IClassFixture<McpTests.Host>
             Assert.Equal(200, pr.Status);
             Assert.Equal(Resource, pr.Body!.Str("resource"));
             Assert.Equal("https://localhost", pr["authorization_servers"]![0]!.GetValue<string>());
-            Assert.Equal(["modelo", "datos"], pr["scopes_supported"]!.AsArray().Select(x => x!.GetValue<string>()));
+            Assert.Equal(["modelo", "datos", "aislado", "proponer"], pr["scopes_supported"]!.AsArray().Select(x => x!.GetValue<string>()));
         }
         var asm = (await api.GetAsync("/.well-known/oauth-authorization-server")).Body!;
         Assert.Equal("https://localhost", asm.Str("issuer"));
@@ -318,7 +318,7 @@ public class McpTests(McpTests.Host host) : IClassFixture<McpTests.Host>
                  {
                      (Query(client, Callback, v, method: "plain", challenge: v), "invalid_request"),
                      (Query(client, Callback, v, challenge: "corto"), "invalid_request"),
-                     (Query(client, Callback, v, scope: "modelo aislado"), "invalid_scope"),
+                     (Query(client, Callback, v, scope: "modelo escribir"), "invalid_scope"), // spec 044: «aislado» ya es un alcance
                      (Query(client, Callback, v, resource: "https://otro.example/mcp"), "invalid_target"),
                      (Query(client, Callback, v).Replace("response_type=code", "response_type=token"), "unsupported_response_type"),
                      (Query(client, Callback, v) + "&scope=datos", "invalid_request"),
@@ -556,7 +556,7 @@ public class McpTests(McpTests.Host host) : IClassFixture<McpTests.Host>
         Assert.Equal(["leer_registro", "leer_registros", "listar_catalogos"], await ToolsAsync(lector.Access));
         var call = await RpcAsync(lector.Access, "tools/call", new { name = "ver_catalogo", arguments = new { entity = "McTarea" } });
         Assert.Equal(-32602, call["error"]!["code"]!.GetValue<int>());
-        // Ni la copia aislada ni entregar existen por MCP.
+        // Sin los alcances «aislado» y «proponer» (spec 044), ni la copia aislada ni entregar existen para esta conexión.
         foreach (var name in new[] { "aislado_crear", "aislado_aplicar_plan", "entregar" })
             Assert.Equal(-32602, (await RpcAsync(ana.Access, "tools/call", new { name, arguments = new { } }))["error"]!["code"]!.GetValue<int>());
         var catalogs = (await CallAsync(lector.Access, "listar_catalogos"))["structuredContent"]!["items"]!.AsArray().Select(x => x!.Str("name")).ToList();

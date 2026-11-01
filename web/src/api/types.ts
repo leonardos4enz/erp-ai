@@ -817,6 +817,8 @@ export interface StudioSummary {
   id: number; title: string; status: StudioSessionStatus; createdAt: string; finishedAt?: string; steps: number; costUsd: number;
   /** Spec 036: la lista viene ordenada por `updatedAt` (última actividad). */
   turns: number; updatedAt: string;
+  /** Spec 044: `mcp` si la entregó un cliente MCP. */
+  origin?: 'studio' | 'mcp';
 }
 export type StudioPlanStatus = 'proposed' | 'applied' | 'discarded';
 /** Un paso del agente: texto del modelo, herramienta, entrega o tope. Entrada y salida son datos no confiables. */
@@ -836,6 +838,8 @@ export interface StudioSession {
   canApply: boolean; blockedReason?: string | null; appliedAt?: string | null; changeSetId?: number | null; trail: StudioStep[];
   /** Spec 036: mensajes de la persona; la propuesta vigente (o aplicada/descartada); si se puede mandar otro mensaje y por qué no. */
   turns: number; planStatus?: StudioPlanStatus | null; canSend: boolean; sendBlockedReason?: string | null;
+  /** Spec 044: de dónde llegó (el agente de Studio o un cliente MCP) y el nombre del cliente. */
+  origin?: 'studio' | 'mcp'; client?: string | null;
 }
 /** Spec 036: eventos del flujo SSE (`…/stream`). */
 export interface StudioLive { kind: 'waiting' | 'text' | 'tool' | 'none'; text?: string; tool?: string; input?: unknown }
@@ -894,9 +898,15 @@ export interface McpAuthorizeInfo {
   redirectHost?: string;
   client?: { name: string; redirectHost: string; trusted: boolean };
   user?: { username: string; displayName: string };
-  scopes?: { name: 'modelo' | 'datos'; required: boolean; requested: boolean }[];
+  /** Spec 044: `available` y `reason` (aislado y proponer solo para quien modela; aislado, si el servidor tiene copia). */
+  scopes?: { name: McpScope; required: boolean; requested: boolean; available: boolean; reason?: string | null }[];
 }
 
 /** Spec 038: una conexión MCP vigente de la persona. */
-export interface McpConnection { id: number; client: string; redirectHost: string; scopes: string[]; createdAt: string; lastUsedAt?: string | null }
+export type McpScope = 'modelo' | 'datos' | 'aislado' | 'proponer';
+/** Spec 044: la copia aislada viva de una conexión. */
+export interface McpSandboxInfo { status: 'creating' | 'ready'; createdAt: string; lastUsedAt: string }
+export interface McpConnection {
+  id: number; client: string; redirectHost: string; scopes: string[]; createdAt: string; lastUsedAt?: string | null; sandbox?: McpSandboxInfo | null;
+}
 export interface McpConnections { serverUrl: string; connections: McpConnection[] }

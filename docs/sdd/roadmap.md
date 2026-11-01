@@ -49,7 +49,7 @@ en orden, no en paralelo: casi todas tocan el núcleo del motor (`PlanCompiler`,
 | 041 Reportes personales y exploración al vuelo | Implementado ([spec](specs/041-reportes-personales/spec.md)) |
 | 042 Tableros personales y compartir | Implementado ([spec](specs/042-tableros-personales/spec.md)) |
 | 043 Módulo de Ventas | Implementado ([spec](specs/043-modulo-ventas/spec.md)) |
-| 044 MCP 2: copia aislada y propuestas por MCP | Planeado |
+| 044 MCP 2: copia aislada y propuestas por MCP | Implementado ([spec](specs/044-mcp-2/spec.md)) |
 
 ## Diagnóstico
 | Brecha señalada | Situación actual | Spec |
@@ -399,6 +399,7 @@ ya marcados) y sus hallazgos se vuelven una spec de endurecimiento.
 | 2026-10-25, auditoría 5 (origen de la 031), adelantada | 029 (y la 030 en curso) | 5 defectos (1 alto: la importación calculaba avisos sin el alcance de quien importa) y 9 observaciones del canario y el inventario |
 | 2026-10-27, auditoría 6 (origen de la 034), al cerrar la 033 | 031–033 | 7 defectos (1 alto: quien administra usuarios cambiaba la contraseña o desactivaba al superusuario) y huecos del catálogo de Studio antes del MCP; R-009-1 y R-032-6 confirmados |
 | 2026-10-31, auditoría 7, al cerrar la 039 (servidor MCP, flujo SSE y multi-turno de Studio, reportes a dos saltos) | 034–039 | 12 defectos (1 medio: el registro dinámico del MCP se agota —con direcciones IPv6 sin cuenta, o para siempre con una cuenta, porque los clientes que tuvieron conexión no se barren— y bloquea conexiones nuevas; 11 bajos: tope de pendientes por dirección detrás de un proxy, cola de Studio que vence sesiones en un solo lote, `RenewSeconds` sin relación con `LeaseSeconds`, salidas de `datos` sin purgar si el servidor no vuelve, conversación que cambia de empresa, tope de uniones de la 039 que no existe, «#id» en lugar de «(sin acceso)», canario sin reportes a dos saltos, entre otros) y 3 observaciones. Sin fugas ni escaladas verificadas; los 25 riesgos marcados siguen abiertos. Propone la **040 — Endurecimiento 6**; el dueño la puso antes de los reportes personales (2026-10-31), que pasan a la 041, Ventas a la 042 y MCP 2 a la 043 |
+| **Siguiente: auditoría 8**, al cerrar la 044 (decisión del dueño, 2026-11-01) | 040–044 (registro dinámico endurecido, reportes y tableros personales con reparto, Ventas, copia aislada por conexión MCP con su barrido, escrituras con clave y propuestas por MCP) | Pendiente, en una sesión aparte |
 
 La auditoría 5 (adelantada, sobre la 029) confirmó que las 139 rutas conservan una capacidad igual o más estricta y
 encontró que la regla «lo vivo con el alcance de quien lo ve» de la 029 no llegaba a la importación, a las transiciones ni
@@ -650,10 +651,19 @@ En este orden, por decisión del dueño (2026-10-25):
    documentos creados por referencia, 043 decisión 8); que la vista previa de un módulo diga qué permisos agrega a roles que
    ya existen (R-043-3).
 14. ~~**CFDI 4.0 con PAC.**~~ Retirada del plan por decisión del dueño (2026-10-29). Si vuelve, se numera al abrirla.
-    **044 — MCP 2: copia aislada y propuestas por MCP** (antes 043; lo que la 038 dejó fuera, CLARIFY 2): la copia aislada con un ciclo
-    de vida propio por conexión (*lease*, barrido), `entregar` como propuesta que la persona revisa en Studio y escrituras
-    con clave de idempotencia. Va después de Ventas. Suma la bitácora del primer `leer_registros` por conexión y catálogo
-    si el dueño la pide (R-040-3, O-01 de la auditoría 7).
+    ~~**044 — MCP 2: copia aislada y propuestas por MCP**~~ Implementado ([spec](specs/044-mcp-2/spec.md),
+    [verify](specs/044-mcp-2/verify.md); antes 043; lo que la 038 dejó fuera, CLARIFY 2; no se dividió: un criterio). Alcances
+    `aislado` y `proponer` (solo para quien modela, apagados en **Conectar**); una copia aislada por conexión
+    (`meta.McpSandbox`: preparación única bajo bloqueo, *lease* renovado por llamada, inactividad, muerte con la conexión o el
+    sello, descartar, preparaciones a medias y bases huérfanas barridas por `McpSandboxSweeper`, topes por persona, entorno y
+    hora); las herramientas `aislado_*` de Studio y `aislado_descartar` por MCP; toda escritura con `idempotencyKey`
+    (`meta.McpWrite`, por conexión, con huella de la entrada); `entregar` deja una conversación de Studio con origen MCP que la
+    persona revisa y aplica con huella (exactamente una vez por clave, tope diario); Studio muestra conversaciones sin clave
+    de Anthropic; **Conexiones de Claude** muestra y descarta la copia. Pendiente, si se pide: **escrituras en el entorno
+    real por MCP** (exigen ADR por la constitución II.8), la bitácora del primer `leer_registros` por conexión y catálogo
+    (R-040-3), seguir con el agente de Studio una conversación que empezó por MCP, un tope común de copias entre Studio y MCP
+    (R-044-2). **Auditoría 8** (040–044) a continuación, en una sesión aparte (decisión del dueño, 2026-11-01): la 044 agrega
+    un trabajo asíncrono (el barrido) y escrituras por un punto de entrada existente.
 15. **Pólizas en moneda extranjera** (pendiente de la 020).
 16. **Revaluación de existencias** (pendiente de la 020).
 17. **Reversa de pólizas con otra póliza** (pendiente de la 020).
