@@ -42,6 +42,9 @@ capturas nuevas del editor).
 | 2 | `--veces=3` sobre `e2e/tableros-personales.spec.ts`, `e2e/canario.spec.ts`, `e2e/reportes-personales.spec.ts` (lento) | 2 vueltas en verde; en la segunda falló `reportes-personales › visual móvil` en `uiLogin` (F-06) | 3 min 42 s |
 | 3 | `--veces=3` sobre los mismos y `e2e/login.spec.ts` (lento), tras F-06 | 3 × 59 en verde | 6 min 32 s |
 
+**CI** (segunda corrida completa): `283db37` en `main`, integración y E2E completa en `windows-2025`: **success**
+(2026-11-01, 16:33–16:55 UTC, 22 min).
+
 Archivos nuevos: `tableros-personales.spec.ts` (14 pruebas: una por CA, más preparar y tres capturas; no depende de otro
 archivo). Modificados: `canario.spec.ts` (`H4 (042)`: un reporte y un tablero del administrador que llegan al canario —dos
 saltos, campo oculto, etiqueta de un filtro— compartidos con el rol del lector; control positivo: el dueño sí ve el canario).
