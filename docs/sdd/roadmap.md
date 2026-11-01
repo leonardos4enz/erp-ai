@@ -635,7 +635,8 @@ En este orden, por decisión del dueño (2026-10-25):
    lo compartido corre con el alcance, la empresa y los campos de quien lo ve, que no recibe la definición que no puede correr.
    Tope de 4 corridas costosas a la vez por persona en explorar, exportar y el tablero personal (R-041-1, en parte).
    Pendiente, si se pide: copiar un tablero compartido, compartir con personas o equipos, el mismo tope en los reportes y
-   tableros del modelo. **Auditoría 8** pendiente (la 042 agrega puntos de entrada y delegación por reparto).
+   tableros del modelo. **Auditoría 8** pendiente (la 042 agrega puntos de entrada y delegación por reparto); el dueño decidió (2026-11-01) hacerla
+   **después de la 043 (Ventas) y la 044 (MCP 2)**, cubriendo 040–044.
 13. **043 — Módulo de Ventas** (antes 042): clientes, cotización, pedido, salida de almacén con costo de ventas (póliza de salidas),
    factura y cobranza. Usa `merge` para extender Producto e Inventario, avisos (límite de crédito) y rutas de tres niveles;
    declara su módulo con `setApp` (orden 15, entre Compras e Inventario). Sus reportes usan los de la 039.
