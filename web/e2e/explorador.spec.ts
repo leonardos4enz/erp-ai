@@ -4,7 +4,7 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import type { APIRequestContext, Browser, Locator, Page } from '@playwright/test';
-import { ADMIN, DB, apiAs, applyPlan, expect, expectAccessible, test, uiLogin } from './helpers';
+import { ADMIN, DB, apiAs, applyPlan, expect, expectAccessible, test, tras, uiLogin } from './helpers';
 
 const PWD = 'frase larga del explorador 2026';
 const users = { modelador: 'e2e-exp-modelador', lector: 'e2e-exp-lector' } as const;
@@ -42,8 +42,13 @@ async function toggle(scope: Page | Locator, name: string, on: boolean) {
 
 async function openDb(page: Page, app = 'Exploración') {
   await page.goto('/admin/explorer?vista=bd');
-  await page.getByLabel('Módulo', { exact: true }).selectOption({ label: app });
   await expect(page.getByText(/^\d+ tablas?/)).toBeVisible();
+  // Regresión (CI de 58e198e, R-030-5): «N tablas» ya se veía con la lista sin filtrar; el foco caía en una caja que la
+  // respuesta filtrada por módulo quitaba después y se iba a body. Se espera la respuesta filtrada.
+  const res = await tras(page.waitForResponse((r) => r.url().includes('/api/explorer/database?') && r.url().includes('app=') && r.ok()),
+    () => page.getByLabel('Módulo', { exact: true }).selectOption({ label: app }));
+  const n = ((await res.json()) as { tables: unknown[] }).tables.length;
+  await expect(page.getByText(new RegExp(`^${n} tablas?`))).toBeVisible();
 }
 
 test('preparar roles, usuarios y un módulo con catálogos, partidas, proceso, reglas y automatizaciones', async () => {

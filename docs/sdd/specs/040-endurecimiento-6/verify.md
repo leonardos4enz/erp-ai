@@ -138,3 +138,10 @@ la auditoría 7 pide que los decida o los pase a «Aceptado» con fecha.
 ## 6. CI
 La corrida 41234884587 de `9ae139e` (integración y E2E completa en `windows-2025`, la segunda corrida completa) terminó en
 `success`.
+La de `58e198e` (solo este `verify.md`) falló: `explorador.spec.ts › H1 CA9` leyó el foco en `null` («intermitente» al
+repetirse). Causa (sesión de la 041, 2026-11-01): `openDb` elegía el módulo y esperaba «N tablas», que ya se veía con la
+lista **sin filtrar**; la prueba enfocaba una caja que la respuesta filtrada quitaba después y el foco caía en `body`. La
+misma carrera explica la captura `visual: diagrama ER … tema oscuro` que difirió en `ccf8588` (R-030-5): con la respuesta
+filtrada retrasada 400 ms, el `openDb` anterior hace fallar las dos capturas del diagrama (fotografían el diagrama sin
+filtrar) y el nuevo pasa las 42 pruebas de `compras` + `explorador`. `openDb` ahora espera la respuesta filtrada y el
+conteo que ella trae.
