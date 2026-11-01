@@ -105,4 +105,5 @@ Registrados en [riesgos.md](../../riesgos.md#041): R-041-1 (sin tope de concurre
 reporte del modelo para credenciales), R-041-3 (F-05 sin prueba que falle), R-041-4 («Volver a abrir» descarta lo no guardado).
 
 ## 6. CI
-PENDIENTE
+La corrida 41316283801 de `f8c64b7` (integración y E2E completa en `windows-2025`, la segunda corrida completa) terminó en
+`success` (22 min 35 s).
