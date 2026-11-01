@@ -9,7 +9,7 @@ sin compuerta, si es costosa sin límite o si aplica lo revisado sin huella. `we
 Capacidades: **anónima** (lista blanca) · **sesión** (lo propio del usuario) · **registros** (el motor exige permiso del
 catálogo, alcance por registro y seguridad por campo) · **modelador** · **usuarios** · **auditoría** · **superusuario**.
 
-Total: 164 rutas.
+Total: 173 rutas.
 
 | Método | Ruta | Capacidad | Efecto | Compuerta | Costosa | Huella |
 |---|---|---|---|---|---|---|
@@ -137,6 +137,15 @@ Total: 164 rutas.
 | POST | `/api/model/print/preview` | modelador | ninguno |  | genera un PDF (print) |  |
 | GET | `/api/model/print/preview/{token}` | modelador |  |  |  |  |
 | GET | `/api/model/provenance` | modelador |  |  |  |  |
+| GET | `/api/my-reports/` | registros |  |  |  |  |
+| POST | `/api/my-reports/` | registros | sesión |  |  |  |
+| POST | `/api/my-reports/explore` | registros | ninguno |  | agrega el catálogo completo (aggregate) |  |
+| POST | `/api/my-reports/explore/export` | registros | ninguno |  | hasta 1000 grupos en un archivo (bulk) |  |
+| GET | `/api/my-reports/sources` | registros |  |  |  |  |
+| GET | `/api/my-reports/sources/{entity}` | registros |  |  |  |  |
+| DELETE | `/api/my-reports/{id:int}` | registros | sesión |  |  |  |
+| GET | `/api/my-reports/{id:int}` | registros |  |  |  |  |
+| PUT | `/api/my-reports/{id:int}` | registros | sesión |  |  |  |
 | GET | `/api/reports/` | registros |  |  |  |  |
 | GET | `/api/reports/{entity}/{name}` | registros |  |  | agrega el catálogo completo (aggregate) |  |
 | GET | `/api/reports/{entity}/{name}/export` | registros |  |  | hasta 1000 grupos en un archivo (bulk) |  |

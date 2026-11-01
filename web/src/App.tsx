@@ -22,6 +22,7 @@ import { StudioPage } from './pages/StudioPage';
 import { ExplorerPage } from './pages/ExplorerPage';
 import { ImagesPage } from './pages/ImagesPage';
 import { ReportPage, ReportsPage } from './pages/ReportsPage';
+import { ReportExplorerPage } from './pages/ReportExplorerPage';
 import { DashboardPage, DashboardsPage } from './pages/DashboardsPage';
 import { NotFoundPage, ForbiddenPage } from './pages/StatusPages';
 import { ConnectPage } from './pages/ConnectPage';
@@ -62,6 +63,8 @@ export function App() {
         <Route path="c/:entity/:id" element={<EntityFormPage />} />
         <Route path="reports" element={<ReportsPage />} />
         <Route path="reports/:entity/:name" element={<ReportPage />} />
+        {/* Spec 041: explorar al vuelo y reportes personales (fuera de reports/ para no chocar con un catálogo). */}
+        <Route path="explore/:id?" element={<ReportExplorerPage />} />
         <Route path="dashboards" element={<DashboardsPage />} />
         <Route path="dashboards/:name" element={<DashboardPage />} />
         <Route path="admin/model" element={<Guard allow={!!(me?.canManageModel || me?.isSuperuser)}><ModelerPage /></Guard>} />

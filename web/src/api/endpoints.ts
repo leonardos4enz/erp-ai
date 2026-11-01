@@ -2,6 +2,7 @@ import { api, ApiError } from './client';
 import type {
   AppSummary, SearchHit, AuditEntry, AutomationRun, AutomationRunDetail, ScheduleSummary, ChangePlan, Company, EntityOrigin, ExprFunction, FieldDef, ExchangeRate, ChangeSetSummary, DashboardResult, DashboardSummary, EntityDef, HistoryEntry, LayoutState, LookupItem, Me, PrintChoice, PrintTemplate, StoredImage,
   ApiKey, AssistantStatus, McpAuthorizeInfo, McpConnections, StudioScope, StudioSession, StudioStatusInfo, StudioSummary, OAuthClient, OAuthScope, BusinessUnit, PendingChange, SecurityChange, Team, Conversation, ConversationSummary, Proposal, EnvironmentInfo, ExportableCatalogs, ExportPreview, ExportRequest, ImportResult, ModuleInfo, PackageImport, ModulePreview, WebhookDelivery, WebhookSummary, Paged, PlanPreview, ReportResult, ReportSummary, Role, Row, RowList, SavedView, User, ViewFilter, ViewList,
+  PersonalReport, PersonalReportDef, PersonalReportSummary, ReportSource, ReportSourceFields,
 } from './types';
 
 const enc = encodeURIComponent;
@@ -157,6 +158,22 @@ export const reportsApi = {
 /** Spec 024 (H5): documentos por folio. */
 export const searchApi = {
   records: (q: string, signal?: AbortSignal) => api<SearchHit[]>('/search', { query: { q }, signal }),
+};
+
+/** Spec 041: reportes personales y exploración al vuelo (solo con sesión; todo corre con quien pide). */
+export const myReportsApi = {
+  sources: (signal?: AbortSignal) => api<ReportSource[]>('/my-reports/sources', { signal }),
+  fields: (entity: string, signal?: AbortSignal) => api<ReportSourceFields>(`/my-reports/sources/${enc(entity)}`, { signal }),
+  explore: (definition: PersonalReportDef, label: string | undefined, signal?: AbortSignal) =>
+    api<ReportResult>('/my-reports/explore', { method: 'POST', body: { label, definition }, signal }),
+  exportFile: (definition: PersonalReportDef, label: string | undefined, format: 'csv' | 'xlsx') =>
+    api<Blob>('/my-reports/explore/export', { method: 'POST', body: { label, definition, format }, asBlob: true }),
+  list: (signal?: AbortSignal) => api<PersonalReportSummary[]>('/my-reports', { signal }),
+  get: (id: number, signal?: AbortSignal) => api<PersonalReport>(`/my-reports/${id}`, { signal }),
+  create: (label: string, definition: PersonalReportDef) => api<PersonalReport>('/my-reports', { method: 'POST', body: { label, definition } }),
+  update: (id: number, label: string, definition: PersonalReportDef, version: number) =>
+    api<PersonalReport>(`/my-reports/${id}`, { method: 'PUT', body: { label, definition, version } }),
+  remove: (id: number, version: number) => api<void>(`/my-reports/${id}`, { method: 'DELETE', query: { version } }),
 };
 
 export const dashboardsApi = {

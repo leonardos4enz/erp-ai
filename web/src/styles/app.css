@@ -527,6 +527,18 @@ code, pre, .mono { font-family: var(--font-mono); font-size: 0.8125rem; }
 
 .report-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: var(--space-4); }
 .report-actions { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+/* Spec 041: explorador de reportes (diseño a la izquierda, resultado a la derecha; una columna en pantallas angostas). */
+.explorer-layout { display: grid; grid-template-columns: minmax(300px, 380px) minmax(0, 1fr); gap: var(--space-4); align-items: start; }
+.explorer-design { display: grid; gap: var(--space-3); min-width: 0; }
+.explorer-result { min-width: 0; }
+.explorer-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) auto; gap: var(--space-2); align-items: start; }
+.explorer-row-extra { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.explorer-row-wide { grid-template-columns: minmax(0, 1fr) auto; }
+.stack-sm { display: grid; gap: var(--space-2); justify-items: start; }
+.plain-list { margin: var(--space-1) 0 0; padding-left: var(--space-4); }
+.explorer-foot { margin-top: var(--space-4); }
+/* Revisión exploratoria 041 (F-03): en una columna, el resultado va primero (abajo del formulario largo no se veía al cambiar). */
+@media (max-width: 900px) { .explorer-layout { grid-template-columns: minmax(0, 1fr); } .explorer-result { order: -1; } }
 /* Regresión (revisión exploratoria 007, F-03): en móvil los tres botones tapaban el título; pasan a su propia fila. */
 @media (max-width: 640px) { .page-actions:has(.report-actions) { margin-left: 0; width: 100%; } }
 .report-total td { font-weight: 600; border-top: 1px solid var(--border-strong); }

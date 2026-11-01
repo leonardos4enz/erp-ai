@@ -70,6 +70,10 @@ function useBreadcrumb(): { label: string; to?: string }[] {
     if (reports && parts[1]) appCrumb(appOf(decodeURIComponent(parts[1])));
     crumbs.push({ label: reports ? 'Reportes' : 'Tableros', to: reports ? '/reports' : '/dashboards' });
     if (parts[1]) crumbs.push({ label: reports ? 'Reporte' : decodeURIComponent(parts[1]) });
+  } else if (parts[0] === 'explore') {
+    // Spec 041 (revisión exploratoria F-04): el explorador cuelga de Reportes (antes, la miga decía solo «Inicio»).
+    crumbs.push({ label: 'Reportes', to: '/reports' });
+    crumbs.push({ label: parts[1] ? 'Mi reporte' : 'Explorar' });
   } else if (parts[0] === 'conexiones') {
     crumbs.push({ label: 'Conexiones de Claude' }); // spec 038 (revisión exploratoria F-02)
   } else if (parts[0] === 'admin') {

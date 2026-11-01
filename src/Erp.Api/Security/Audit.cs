@@ -17,6 +17,8 @@ public static class AuditActions
     public const string RoleChange = "security.role";
     /// <summary>Spec 007: vista personal del listado creada, cambiada o borrada.</summary>
     public const string ViewChange = "view.change";
+    /// <summary>Spec 041: reporte personal creado, cambiado o borrado (nombre y definición antes y después).</summary>
+    public const string PersonalReportChange = "report.personal";
     /// <summary>Spec 008: destino, secreto, prueba o reintento de un webhook (nunca el secreto ni la URL completa).</summary>
     public const string WebhookChange = "integration.webhook";
     /// <summary>Spec 008: alta, cambio, rotación o revocación de una clave de API (nunca la clave).</summary>

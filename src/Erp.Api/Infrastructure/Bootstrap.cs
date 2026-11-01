@@ -327,6 +327,20 @@ public static class Bootstrap
         IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_SavedView_User')
             CREATE INDEX IX_SavedView_User ON meta.SavedView (UserId, EntityName);
 
+        -- Spec 041: reportes personales (dato de su dueño, no metadato: no viaja en paquetes ni en la reversión).
+        IF OBJECT_ID('meta.PersonalReport') IS NULL
+        CREATE TABLE meta.PersonalReport (
+            Id int IDENTITY PRIMARY KEY,
+            UserId int NOT NULL REFERENCES meta.[User](Id),
+            EntityName nvarchar(50) NOT NULL,
+            Label nvarchar(100) NOT NULL,
+            DefinitionJson nvarchar(max) NOT NULL,
+            Version int NOT NULL DEFAULT 1,
+            CreatedAt datetime2(3) NOT NULL DEFAULT SYSUTCDATETIME(),
+            UpdatedAt datetime2(3) NULL,
+            CONSTRAINT UQ_PersonalReport_Label UNIQUE (UserId, Label)
+        );
+
         IF OBJECT_ID('meta.Sequence') IS NULL
         CREATE TABLE meta.Sequence (
             EntityName nvarchar(50) NOT NULL,

@@ -46,9 +46,10 @@ en orden, no en paralelo: casi todas tocan el núcleo del motor (`PlanCompiler`,
 | 038 Servidor MCP por persona | Implementado ([spec](specs/038-servidor-mcp/spec.md)) |
 | 039 Reportes 2: gráficas personalizables y medidas calculadas | Implementado ([spec](specs/039-reportes-graficas/spec.md)) |
 | 040 Endurecimiento 6 (auditoría 7) | Implementado ([spec](specs/040-endurecimiento-6/spec.md)) |
-| 041 Reportes y tableros personales | Planeado |
-| 042 Módulo de Ventas | Planeado |
-| 043 MCP 2: copia aislada y propuestas por MCP | Planeado |
+| 041 Reportes personales y exploración al vuelo | Implementado ([spec](specs/041-reportes-personales/spec.md)) |
+| 042 Tableros personales y compartir | Planeado |
+| 043 Módulo de Ventas | Planeado |
+| 044 MCP 2: copia aislada y propuestas por MCP | Planeado |
 
 ## Diagnóstico
 | Brecha señalada | Situación actual | Spec |
@@ -287,7 +288,7 @@ reglas de negocio** (constitución I.1), configurables por metadatos con valores
   ventas) y revaluación, que siguen de la 020.
 
 ### 023 — Capacidades del motor: listas que se fusionan, reglas de aviso y rutas de tres niveles
-Origen: pendientes de la 022 que limitan a los módulos y que Ventas (024, luego 025, 026, 027, 028, 031, 032, 033, 036, 037, 039, 041, ahora 042) necesitará; plan del dueño (2026-10-24).
+Origen: pendientes de la 022 que limitan a los módulos y que Ventas (024, luego 025, 026, 027, 028, 031, 032, 033, 036, 037, 039, 041, 042, ahora 043) necesitará; plan del dueño (2026-10-24).
 - **Estado:** implementado en la [spec 023](specs/023-capacidades-motor/spec.md). `merge` en las seis listas del catálogo
   (reglas, automatizaciones, vistas, reportes, webhooks, tareas): agrega o reemplaza por nombre en su lugar; la vista previa
   ya no dice que quita lo que un `merge` conserva, y un paquete de Entornos que extiende un catálogo que no crea llega al
@@ -560,7 +561,7 @@ los límites de frecuencia en cada ruta). Punto de entrada nuevo: **auditoría 7
   Claude** (menú de usuario) para ver y desconectar. El token solo sirve en `/mcp`; `/mcp` solo lo acepta a él. Para *code
   mode*: `inputSchema` estrictos, `outputSchema` + `structuredContent` probados herramienta por herramienta, `pageSize` y
   `nextPage`, cubeta de fichas por persona con `retryAfterSeconds`, resultado de más de 256 KB como error que pide filtrar.
-- **Pendiente (diferido con razón):** copia aislada, `entregar` y escrituras por MCP (con idempotencia) → **043 — MCP 2** (antes 040; renumerada en la 039 y en la 040)
+- **Pendiente (diferido con razón):** copia aislada, `entregar` y escrituras por MCP (con idempotencia) → **044 — MCP 2** (antes 040; renumerada en la 039, la 040 y la 041)
   (CLARIFY 2); *Client ID Metadata Documents* y CORS (R-038-2); vista del superusuario de todas las conexiones (R-038-4).
 
 ## Specs planeadas (después de la 029)
@@ -622,15 +623,19 @@ En este orden, por decisión del dueño (2026-10-25):
    conocidos), la cola de Studio que no se atora (vencer sesión por sesión, `RenewSeconds`, cierre al apagar, origen de las
    fallas), la empresa de una conversación con `datos`, el tope de uniones de los reportes, «(sin acceso)» con el campo para
    mostrar oculto y el canario a dos saltos. Decisiones en riesgos: D-11, O-01–O-03.
-12. **041 — Reportes y tableros personales** (antes 040; la otra mitad del pedido, 039 CLARIFY 1): cualquier usuario arma sus reportes
-   y gráficas con lo que puede ver (sin ser modelador), explora al vuelo (cambia agrupación, medida o gráfica sin guardar) y
-   tiene tableros personales junto a los del modelo. Agrega rutas que escriben y datos por persona: STRIDE completo
-   (`RecordFilter`, `FieldAccess` y empresa del **dueño** del reporte al correrlo, un reporte compartido no hereda permisos).
-13. **042 — Módulo de Ventas** (antes 041): clientes, cotización, pedido, salida de almacén con costo de ventas (póliza de salidas),
+12. ~~**041 — Reportes personales y exploración al vuelo**~~ Implementado ([spec](specs/041-reportes-personales/spec.md), [verify](specs/041-reportes-personales/verify.md);
+   antes 040; la otra mitad del pedido, 039 CLARIFY 1): cualquier usuario arma sus reportes y gráficas con lo que ve (sin ser
+   modelador), explora al vuelo un reporte del modelo o el suyo (agrupación, medidas, gráfica, filtros) y guarda los suyos
+   con versión; corre siempre con el alcance, la empresa y los campos de **quien lo pide**, revalidado en cada corrida. Se
+   dividió en CLARIFY (seguridad con UI nueva y dos pantallas principales): los tableros personales van en la 042.
+   **042 — Tableros personales y compartir** (la mitad que la 041 dejó fuera, CLARIFY 1): tableros propios junto a los del
+   modelo, con tarjetas de reportes del modelo o personales, y compartir reportes y tableros personales por rol (sin roles que
+   quien comparte no tiene: 021-1); un reporte compartido corre con los permisos de quien lo ve, nunca con los de su dueño.
+13. **043 — Módulo de Ventas** (antes 042): clientes, cotización, pedido, salida de almacén con costo de ventas (póliza de salidas),
    factura y cobranza. Usa `merge` para extender Producto e Inventario, avisos (límite de crédito) y rutas de tres niveles;
    declara su módulo con `setApp` (orden 15, entre Compras e Inventario). Sus reportes usan los de la 039.
 14. ~~**CFDI 4.0 con PAC.**~~ Retirada del plan por decisión del dueño (2026-10-29). Si vuelve, se numera al abrirla.
-    **043 — MCP 2: copia aislada y propuestas por MCP** (antes 042; lo que la 038 dejó fuera, CLARIFY 2): la copia aislada con un ciclo
+    **044 — MCP 2: copia aislada y propuestas por MCP** (antes 043; lo que la 038 dejó fuera, CLARIFY 2): la copia aislada con un ciclo
     de vida propio por conexión (*lease*, barrido), `entregar` como propuesta que la persona revisa en Studio y escrituras
     con clave de idempotencia. Va después de Ventas. Suma la bitácora del primer `leer_registros` por conexión y catálogo
     si el dueño la pide (R-040-3, O-01 de la auditoría 7).

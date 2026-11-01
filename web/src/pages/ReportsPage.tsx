@@ -1,14 +1,14 @@
 import { useMemo, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
-import { BarChart3, FileSpreadsheet, FileText, Filter, Inbox } from 'lucide-react';
+import { BarChart3, Compass, FileSpreadsheet, FileText, Filter, Inbox, Plus } from 'lucide-react';
 import { ApiError } from '../api/client';
-import { reportsApi } from '../api/endpoints';
-import type { ReportSummary, ViewFilter } from '../api/types';
+import { myReportsApi, reportsApi } from '../api/endpoints';
+import type { PersonalReportSummary, ReportSummary, ViewFilter } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { FilterChips, FilterDialog } from '../components/FilterBuilder';
 import { ReportChart } from '../components/ReportChart';
 import { ReportTable } from '../components/ReportTable';
-import { Alert, Button, EmptyState, LoadingBlock, PageHeader, Spinner } from '../components/ui';
+import { Alert, Badge, Button, EmptyState, LoadingBlock, PageHeader, Spinner } from '../components/ui';
 import { useAsync } from '../lib/hooks';
 import { useEntityDef } from '../lib/entity';
 import { useApps } from '../lib/apps';
@@ -17,6 +17,8 @@ import { NotFoundPage } from './StatusPages';
 /** Spec 007: reportes disponibles para el usuario, agrupados por módulo. Spec 024 (H4): `?app=` los acota a un módulo. */
 export function ReportsPage() {
   const { data, loading, error } = useAsync<ReportSummary[]>((s) => reportsApi.list(s), []);
+  // Spec 041: los reportes personales de quien entra (solo los suyos).
+  const mine = useAsync<PersonalReportSummary[]>((s) => myReportsApi.list(s), []);
   const [params] = useSearchParams();
   const { appOfGroup, find } = useApps();
   const only = find(params.get('app'));
@@ -35,11 +37,31 @@ export function ReportsPage() {
     <div className="page">
       <PageHeader icon={BarChart3} title={only ? `Reportes de ${only.label}` : 'Reportes'}
         subtitle="Agrupaciones y totales calculados con los registros que puedes ver."
-        actions={only && <Link className="btn btn-secondary" to="/reports">Ver todos los reportes</Link>} />
+        actions={<>
+          {only && <Link className="btn btn-secondary" to="/reports">Ver todos los reportes</Link>}
+          <Link className="btn btn-primary" to="/explore"><Plus size={16} aria-hidden /> Nuevo reporte</Link>
+        </>} />
+      {!only && !!mine.data?.length && (
+        <section className="stack" style={{ marginBottom: 'var(--space-6)' }} aria-labelledby="rg-mine">
+          <h2 id="rg-mine" className="section-title">Mis reportes</h2>
+          <div className="report-grid">
+            {mine.data.map((r) => (
+              <Link key={r.id} to={`/explore/${r.id}`} className="card entity-card">
+                <div className="entity-card-icon"><Compass size={18} aria-hidden /></div>
+                <div>
+                  <div className="entity-card-title">{r.label}</div>
+                  {!r.available && <div className="entity-card-desc"><Badge tone="warning">No disponible: usa algo que ya no puedes ver</Badge></div>}
+                </div>
+                <div className="entity-card-foot"><span>{r.entityLabel}</span></div>
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
       {loading && !data ? <LoadingBlock />
         : error ? <Alert tone="danger" title={error instanceof ApiError ? error.title : 'No se pudieron cargar los reportes'} />
         : !groups.length ? (
-          <div className="card"><EmptyState icon={Inbox} title="No hay reportes" description="Cuando un modelador defina reportes para los catálogos que puedes consultar, aparecerán aquí." /></div>
+          <div className="card"><EmptyState icon={Inbox} title="No hay reportes del modelo" description="Cuando un modelador defina reportes para los catálogos que puedes consultar, aparecerán aquí. Mientras, arma el tuyo con «Nuevo reporte»." /></div>
         ) : groups.map(([g, list], gi) => (
           <section key={g} className="stack" style={{ marginBottom: 'var(--space-6)' }} aria-labelledby={`rg-${gi}`}>
             <h2 id={`rg-${gi}`} className="section-title">{g}</h2>
@@ -95,6 +117,9 @@ export function ReportPage() {
         subtitle={data.description ?? undefined}
         actions={
           <div className="report-actions">
+            {data.definition && (
+              <Link className="btn btn-secondary" to={`/explore?from=${encodeURIComponent(`${entity}/${name}`)}`}><Compass size={16} aria-hidden /> Explorar</Link>
+            )}
             {def && <Button icon={Filter} onClick={() => setFiltersOpen(true)} aria-haspopup="dialog">Filtros{filters.length ? ` (${filters.length})` : ''}</Button>}
             <a className="btn btn-secondary" href={reportsApi.exportUrl(entity, name, 'csv', filters)} download><FileText size={16} aria-hidden /> CSV</a>
             <a className="btn btn-secondary" href={reportsApi.exportUrl(entity, name, 'xlsx', filters)} download><FileSpreadsheet size={16} aria-hidden /> Excel</a>

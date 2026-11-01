@@ -11,6 +11,8 @@ public static class AnalyticsEndpoints
     /// <param name="Apps">Spec 024: módulos de los catálogos de sus tarjetas visibles para el usuario.</param>
     public sealed record DashboardSummary(string Name, string Label, string Icon, string? Description, IReadOnlyList<string> Apps);
     public sealed record WidgetResult(string Type, string Label, bool Wide, string Entity, string Report, int? Measure, ReportResult Result);
+    /// <param name="Format">Solo al exportar: csv (por omisión) o xlsx.</param>
+    public sealed record ExploreRequest(string? Label, PersonalReportDef? Definition, string? Format);
     public sealed record DashboardResult(string Name, string Label, string Icon, string? Description, IReadOnlyList<WidgetResult> Widgets,
         DashboardDef? Definition);
 
@@ -30,9 +32,18 @@ public static class AnalyticsEndpoints
 
         var reports = app.MapGroup("/api/reports").RequireAuthorization();
         reports.MapGet("/", (HttpContext http, ReportService svc, CancellationToken ct) => svc.ListAsync(http.CurrentUser(), ct)).Requires(Capability.Records);
-        reports.MapGet("/{entity}/{name}", (string entity, string name, string? filters, HttpContext http, ReportService svc, CancellationToken ct) =>
-            svc.RunAsync(entity, name, FilterSql.Parse(filters), http.CurrentUser(), ct)).Requires(Capability.Records)
-            .Costly("agrega el catálogo completo").RequireRateLimiting(RatePolicies.Aggregate);
+        reports.MapGet("/{entity}/{name}", async (string entity, string name, string? filters, HttpContext http, MetadataStore store,
+            ReportService svc, CancellationToken ct) =>
+        {
+            var u = http.CurrentUser();
+            var model = await store.GetAsync(ct);
+            var (e, r) = ReportService.Find(model, entity, name, u);
+            // Spec 041 (H1): la definición para explorarlo (sin roles ni filtro fijo, que no se copia: se avisa).
+            return (await svc.RunAsync(e, r, FilterSql.Parse(filters), u, model, ct)) with
+            {
+                Definition = PersonalReports.FromReport(e, r), FixedFilter = !string.IsNullOrWhiteSpace(r.Filter),
+            };
+        }).Requires(Capability.Records).Costly("agrega el catálogo completo").RequireRateLimiting(RatePolicies.Aggregate);
         reports.MapGet("/{entity}/{name}/export", async (string entity, string name, string? format, string? filters,
             HttpContext http, ReportService svc, CancellationToken ct) =>
         {
@@ -46,6 +57,43 @@ public static class AnalyticsEndpoints
                 _ => throw new AppException(400, "Formato no válido (csv o xlsx)."),
             };
         }).Requires(Capability.Records).Costly("hasta 1000 grupos en un archivo").RequireRateLimiting(RatePolicies.Bulk);
+
+        // Spec 041: reportes personales y exploración al vuelo. Solo con sesión: las claves de API y los tokens OAuth no llegan
+        // a /api/my-reports. Todo corre con quien pide (PersonalReports.Check en cada corrida).
+        var mine = app.MapGroup("/api/my-reports").RequireAuthorization();
+        mine.MapGet("/sources", async (HttpContext http, MetadataStore store, CancellationToken ct) =>
+            PersonalReports.Sources(http.CurrentUser(), await store.GetAsync(ct))).Requires(Capability.Records);
+        mine.MapGet("/sources/{entity}", async (string entity, HttpContext http, MetadataStore store, CancellationToken ct) =>
+            PersonalReports.Fields(entity, http.CurrentUser(), await store.GetAsync(ct))).Requires(Capability.Records);
+        mine.MapPost("/explore", async (ExploreRequest req, HttpContext http, MetadataStore store, ReportService svc, CancellationToken ct) =>
+            await ExploreAsync(req, http, store, svc, ct))
+            .Requires(Capability.Records).Writes(Effect.None).Costly("agrega el catálogo completo").RequireRateLimiting(RatePolicies.Aggregate);
+        mine.MapPost("/explore/export", async (ExploreRequest req, HttpContext http, MetadataStore store, ReportService svc, CancellationToken ct) =>
+        {
+            if (req.Format?.ToLowerInvariant() is not ("csv" or "xlsx" or null)) throw new AppException(400, "Formato no válido (csv o xlsx).");
+            var r = await ExploreAsync(req, http, store, svc, ct);
+            // El nombre del archivo sale del identificador del catálogo (metadatos), nunca de la petición.
+            var file = $"{r.Entity}-{PersonalReports.ReportName}-{DateTime.Now:yyyyMMdd}";
+            return req.Format?.ToLowerInvariant() == "xlsx"
+                ? Results.File(ReportExport.Xlsx(r), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", file + ".xlsx")
+                : Results.File(ReportExport.Csv(r), "text/csv; charset=utf-8", file + ".csv");
+        }).Requires(Capability.Records).Writes(Effect.None).Costly("hasta 1000 grupos en un archivo").RequireRateLimiting(RatePolicies.Bulk);
+        mine.MapGet("/", (HttpContext http, PersonalReportService svc, CancellationToken ct) => svc.ListAsync(http.CurrentUser(), ct))
+            .Requires(Capability.Records);
+        mine.MapGet("/{id:int}", (int id, HttpContext http, PersonalReportService svc, CancellationToken ct) => svc.GetAsync(id, http.CurrentUser(), ct))
+            .Requires(Capability.Records);
+        mine.MapPost("/", async (SavePersonalReportRequest req, HttpContext http, PersonalReportService svc, CancellationToken ct) =>
+        {
+            var saved = await svc.SaveAsync(null, req, http, ct);
+            return Results.Created($"/api/my-reports/{saved.Id}", saved);
+        }).Requires(Capability.Records).Writes(Effect.Session);
+        mine.MapPut("/{id:int}", (int id, SavePersonalReportRequest req, HttpContext http, PersonalReportService svc, CancellationToken ct) =>
+            svc.SaveAsync(id, req, http, ct)).Requires(Capability.Records).Writes(Effect.Session);
+        mine.MapDelete("/{id:int}", async (int id, int? version, HttpContext http, PersonalReportService svc, CancellationToken ct) =>
+        {
+            await svc.DeleteAsync(id, version, http, ct);
+            return Results.NoContent();
+        }).Requires(Capability.Records).Writes(Effect.Session);
 
         var boards = app.MapGroup("/api/dashboards").RequireAuthorization();
         boards.MapGet("/", async (HttpContext http, MetadataStore store, CancellationToken ct) =>
@@ -73,6 +121,15 @@ public static class AnalyticsEndpoints
             }
             return new DashboardResult(d.Name, d.Label, d.Icon ?? "layout-dashboard", d.Description, widgets, u.CanManageModel ? d : null);
         }).Requires(Capability.Records).Costly("corre un reporte por tarjeta").RequireRateLimiting(RatePolicies.Aggregate); // spec 031
+    }
+
+    /// <summary>Spec 041: corre una definición sin guardarla, validada contra quien la pide.</summary>
+    private static async Task<ReportResult> ExploreAsync(ExploreRequest req, HttpContext http, MetadataStore store, ReportService svc, CancellationToken ct)
+    {
+        var u = http.CurrentUser();
+        var model = await store.GetAsync(ct);
+        var (e, r) = PersonalReports.Check(req.Definition, req.Label, u, model);
+        return await svc.RunAsync(e, r, req.Definition!.Filters ?? [], u, model, ct);
     }
 
     private static IReadOnlyList<string> AppsOf(DashboardDef d, UserContext u, IReadOnlyDictionary<string, EntityDef> model) =>

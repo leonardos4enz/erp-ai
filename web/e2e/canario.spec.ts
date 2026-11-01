@@ -4,6 +4,7 @@
 // devuelven datos, como ese usuario, y ninguna respuesta puede contener el canario (JSON, CSV, XLSX ni el texto del PDF).
 // Spec 031 (auditoría 5): un parámetro de ruta sin resolver hace fallar el recorrido, las rutas que no son GET salen del
 // inventario y lo que se le dice al lector en la importación es lo mismo que en /compute (el bit, no solo la cadena).
+// Spec 041: también lo que el lector explora, exporta y guarda como reporte personal (H5 (041)).
 // Autocontenido: crea sus catálogos (grupo «Pruebas 029»), su empresa y su usuario, y los archiva al terminar.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -26,6 +27,22 @@ const AVISO = 'Aviso del canario: el dato secreto está vacío.';
 const AVISO_OCULTO = 'Aviso del canario: el campo oculto tiene valor.';
 const ENTITIES = ['CnDoc', 'CnPuente2', 'CnPuente', 'CnSecreto', 'CnEmpresa'] as const;
 const REPORTS = ['PorDato', 'PorCopia', 'PorPuente', 'Conteo', 'PorSecreto2', 'PorSecretoRef2', 'PorPuenteDoble'] as const;
+/**
+ * Spec 041: definiciones que el lector explora (y exporta, y guarda) por los mismos caminos que los reportes del modelo:
+ * fórmulas que llegan al secreto, el campo oculto, saltos por un registro fuera de alcance y de otra empresa, y filtros
+ * por lo oculto. Las que no valen para él responden 400 o 404; ninguna puede traer el canario.
+ */
+const EXPLORE = (canary: string) => [
+  ...['Dos', 'Tres', 'OtraEmpresa', 'Copia', 'Oculto', 'Puente', 'Puente.Secreto', 'Puente.Secreto.Dato', 'Puente.Etiqueta',
+    'Puente.Empresa', 'Puente.Empresa.Dato', 'Puente2.Puente', 'Puente2.Puente.Secreto', 'Puente2.Puente.Etiqueta']
+    .map((field) => ({ entity: 'CnDoc', groupBy: [{ field }], measures: [{ fn: 'count' }, { fn: 'count', field }] })),
+  { entity: 'CnDoc', measures: [{ fn: 'count', field: 'Puente.Secreto.Dato' }, { fn: 'min', field: 'Puente2.Puente.Secreto.Dato' }] },
+  { entity: 'CnDoc', groupBy: [{ field: 'Nombre' }], measures: [{ fn: 'count' }], filters: [{ field: 'Oculto', op: 'contains', value: canary }] },
+  { entity: 'CnDoc', groupBy: [{ field: 'Nombre' }], measures: [{ fn: 'count' }], filters: [{ field: 'Dos', op: 'contains', value: canary }] },
+  { entity: 'CnPuente', groupBy: [{ field: 'Secreto.Dato' }], measures: [{ fn: 'count' }] },
+  { entity: 'CnSecreto', groupBy: [{ field: 'Dato' }], measures: [{ fn: 'count' }] },
+  { entity: 'CnEmpresa', groupBy: [{ field: 'Dato' }], measures: [{ fn: 'count' }] },
+];
 
 // El canario se guarda en un archivo de la corrida (el proceso se reinicia tras una falla con E2E_INDEPENDENT).
 const STATE = path.join(HERE, '.results', 'canario-029.json');
@@ -343,6 +360,34 @@ test('H4 CA3 (040): los reportes a dos saltos, su exportación y el tablero: el 
   expect(await (await l.get('/api/dashboards/CnTablero')).text()).not.toContain(canary);
 });
 
+test('H5 (041): explorar, exportar y guardar a dos saltos: el administrador ve el canario y el lector no', async () => {
+  const a = await admin();
+  const l = await lector();
+  const { canary } = state;
+  // El control: por los mismos caminos el administrador sí lo ve (si no, que el lector no lo vea no probaría nada).
+  for (const field of ['Puente.Secreto.Dato', 'Dos', 'Oculto']) {
+    const definition = { entity: 'CnDoc', groupBy: [{ field }], measures: [{ fn: 'count' }] };
+    const own = await a.post('/api/my-reports/explore', { data: { definition } });
+    expect(own.status(), await own.text()).toBe(200);
+    expect(await own.text(), `${field} del administrador`).toContain(canary);
+    const exported = await a.post('/api/my-reports/explore/export', { data: { definition, format: 'csv' } });
+    expect(await exported.text()).toContain(canary);
+  }
+  const twoHops = await l.post('/api/my-reports/explore', { data: { definition: { entity: 'CnDoc', groupBy: [{ field: 'Puente.Secreto.Dato' }], measures: [{ fn: 'count' }] } } });
+  expect(twoHops.status(), await twoHops.text()).toBe(200);
+  expect(await twoHops.text()).toContain('(sin acceso)');
+  expect(await twoHops.text()).not.toContain(canary);
+  // Un reporte guardado: su lista, su apertura y su corrida, solo como el lector.
+  const saved = await l.post('/api/my-reports', { data: { label: 'Canario 041', definition: { entity: 'CnDoc', groupBy: [{ field: 'Puente.Secreto.Dato' }], measures: [{ fn: 'count' }] } } });
+  expect(saved.status(), await saved.text()).toBe(201);
+  const id = (await saved.json()).id as number;
+  for (const res of [saved, await l.get('/api/my-reports'), await l.get(`/api/my-reports/${id}`), await l.get('/api/my-reports/sources/CnDoc')])
+    expect(await res.text()).not.toContain(canary);
+  // El del lector no es del administrador (no lo hereda ni lo lee).
+  expect((await a.get(`/api/my-reports/${id}`)).status()).toBe(404);
+  expect((await l.delete(`/api/my-reports/${id}`, { params: { version: '1' } })).status()).toBe(204);
+});
+
 test('H2 CA2 (031): ordenar por una fórmula o un campo que no ve se ignora (el orden no es un oráculo)', async () => {
   const l = await lector();
   const order = async (params: Record<string, string>) =>
@@ -435,6 +480,16 @@ test('H2 CA2: tampoco las rutas que no son GET y devuelven datos (tomadas del in
       const mcp = await anonApi({ Authorization: `Bearer ${await mcpToken(l)}` });
       await check('MCP DELETE', await mcp.delete('/mcp'));
       await mcp.dispose();
+    },
+    // Spec 041: explorar y exportar lo explorado, con cada definición del lector.
+    'POST /api/my-reports/explore': async () => {
+      for (const definition of EXPLORE(canary))
+        await check(`explorar ${JSON.stringify(definition)}`, await l.post('/api/my-reports/explore', { data: { definition } }));
+    },
+    'POST /api/my-reports/explore/export': async () => {
+      for (const definition of EXPLORE(canary))
+        for (const format of ['csv', 'xlsx'])
+          await check(`exportar lo explorado (${format}) ${JSON.stringify(definition)}`, await l.post('/api/my-reports/explore/export', { data: { definition, format } }));
     },
     ...Object.fromEntries(['POST', 'PUT', 'PATCH', 'DELETE', 'MERGE'].map((method) => [`${method} /odata/{**rest}`, async () =>
       check(`OData ${method}`, await l.fetch('/odata/CnDoc', { method, data: { Nombre: canary } }))])),

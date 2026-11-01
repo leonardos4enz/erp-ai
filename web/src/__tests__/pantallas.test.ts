@@ -21,6 +21,8 @@ export const PANTALLAS: Record<string, Pantalla> = {
   'c/:entity/:id': { capturas: ['valuacion-rutas-avisos.spec.ts/aviso-formulario-light.png', 'valuacion-rutas-avisos.spec.ts/aviso-formulario-dark.png'] },
   reports: { sinCaptura: 'lista de reportes; la cubren axe y las guardias en interfaz.spec.ts (riesgo R-030-3)' },
   'reports/:entity/:name': { sinCaptura: 'gráfica y tabla con datos de cada corrida; interfaz.spec.ts (riesgo R-030-3)' },
+  // Spec 041: explorador y reportes personales (datos propios del archivo, deterministas).
+  'explore/:id?': { capturas: ['light', 'dark', 'movil'].map((t) => `reportes-personales.spec.ts/explorador-${t}.png`) },
   dashboards: { sinCaptura: 'lista de tableros; interfaz.spec.ts (riesgo R-030-3)' },
   'dashboards/:name': { sinCaptura: 'tablero con datos de cada corrida; interfaz.spec.ts (riesgo R-030-3)' },
   'admin/model': { capturas: ['visual.spec.ts/modelador-light.png', 'visual.spec.ts/modelador-dark.png',

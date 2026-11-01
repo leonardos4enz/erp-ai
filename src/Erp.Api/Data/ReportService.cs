@@ -16,7 +16,13 @@ public sealed record ReportColumn(string Key, string Label, string Kind, string 
 /// <param name="Comparison">Spec 039 (H4): último periodo y el anterior, solo para un indicador sobre un reporte por periodo.</param>
 public sealed record ReportResult(string Entity, string Name, string Label, string? Description, string? Chart,
     IReadOnlyList<ReportColumn> Columns, IReadOnlyList<Dictionary<string, object?>> Rows, Dictionary<string, object?> Totals, bool Truncated,
-    ReportChartOptions? ChartOptions = null, ReportComparison? Comparison = null);
+    ReportChartOptions? ChartOptions = null, ReportComparison? Comparison = null)
+{
+    /// <summary>Spec 041 (H1): solo en la pantalla de un reporte del modelo, su definición para explorarlo.</summary>
+    public PersonalReportDef? Definition { get; init; }
+    /// <summary>Spec 041 (H1 CA2): el reporte del modelo tiene un filtro fijo que el explorador no copia.</summary>
+    public bool FixedFilter { get; init; }
+}
 public sealed record ReportSummary(string Entity, string EntityLabel, string? Group, string Name, string Label, string? Description, string? Chart);
 public sealed record ReportPeriodValues(string Label, Dictionary<string, object?> Values);
 /// <param name="Previous">El periodo inmediato anterior del calendario (sin registros: conteo y suma en 0); null si no hay ninguno.</param>
@@ -77,7 +83,7 @@ public sealed class ReportService(Db db, MetadataStore store)
     /// Regresión (revisión adversarial 039, F-A): cada salto llega a un catálogo que el usuario debe poder leer. Sin ese
     /// permiso solo se ve lo que ofrece el buscador de una referencia: el campo para mostrar del último catálogo del camino.
     /// </summary>
-    private static bool CanReadPath(FieldPath p, UserContext user, IReadOnlyDictionary<string, EntityDef> model)
+    internal static bool CanReadPath(FieldPath p, UserContext user, IReadOnlyDictionary<string, EntityDef> model)
     {
         for (var i = 0; i < p.Hops.Count; i++)
         {

@@ -281,7 +281,28 @@ export interface ReportResult {
   rows: Record<string, string | number | boolean | null>[];
   totals: Record<string, number | string | null>;
   truncated: boolean;
+  /** Spec 041 (H1): solo en la pantalla de un reporte del modelo, su definición para explorarlo. */
+  definition?: PersonalReportDef | null;
+  /** Spec 041 (H1 CA2): el reporte del modelo tiene un filtro fijo que el explorador no copia. */
+  fixedFilter?: boolean;
 }
+/** Spec 041: definición de un reporte personal o explorado (la de `ReportDef` con filtros del listado, sin roles ni filtro fijo). */
+export interface PersonalReportDef {
+  entity: string;
+  groupBy?: ReportDef['groupBy'];
+  measures: ReportDef['measures'];
+  filters?: ViewFilter[];
+  orderBy?: 'group' | 'measure';
+  dir?: 'asc' | 'desc';
+  limit?: number;
+  chart?: ChartKind;
+  chartOptions?: ChartOptions;
+}
+export interface ReportSource { entity: string; label: string; group?: string | null; parent?: string | null }
+export interface ReportSourceField { path: string; label: string; type: string; kind: 'text' | 'longtext' | 'number' | 'date' | 'boolean' | 'id' }
+export interface ReportSourceFields { entity: string; label: string; fields: ReportSourceField[] }
+export interface PersonalReportSummary { id: number; label: string; entity: string; entityLabel: string; chart?: ChartKind | null; version: number; available: boolean; updatedAt: string }
+export interface PersonalReport { id: number; label: string; version: number; definition: PersonalReportDef; available: boolean; problems: string[] }
 export interface DashboardWidgetDef { type: 'kpi' | 'chart' | 'table'; label?: string; entity: string; report: string; measure?: number; wide?: boolean }
 export interface DashboardDef { name: string; label: string; icon?: string; description?: string; roles?: string[]; widgets: DashboardWidgetDef[] }
 /** Spec 024: `apps`, módulos de los catálogos de sus tarjetas visibles. */
