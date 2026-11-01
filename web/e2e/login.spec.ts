@@ -48,6 +48,29 @@ test('preparar: una cuenta que se bloqueará y otra para la contraseña incorrec
   await anon.dispose();
 });
 
+test('Regresión 042 (F-06): la consulta inicial de la sesión que llega después de entrar no la cierra', async ({ page }) => {
+  // Con la red lenta, el «¿hay sesión?» del arranque (401) llegaba después del inicio de sesión, borraba la sesión recién
+  // abierta y regresaba a un formulario vacío (lo encontró `--veces=3` con `--lento` en la 042).
+  let loggedIn!: () => void;
+  const done = new Promise<void>((resolve) => { loggedIn = resolve; });
+  let first = true;
+  await page.route('**/api/auth/me', async (route) => {
+    if (!first) return route.fallback();
+    first = false;
+    await done;
+    await route.fulfill({ status: 401, contentType: 'application/problem+json', body: JSON.stringify({ title: 'No autenticado.', status: 401 }) });
+  });
+  page.on('response', (r) => { if (r.url().endsWith('/api/auth/login') && r.status() === 200) loggedIn(); });
+  await page.goto('/login');
+  await usuario(page).fill(OTRO);
+  await contrasena(page).fill(PWD);
+  await entrar(page).click();
+  await expect(page.getByLabel('Navegación principal')).toBeVisible();
+  await page.waitForTimeout(300); // razón: deja llegar la respuesta rezagada antes de comprobar que no cerró la sesión
+  await expect(page).not.toHaveURL(/\/login/);
+  await expect(page.getByLabel('Navegación principal')).toBeVisible();
+});
+
 // ---------------- H1: composición, marca y accesibilidad ----------------
 
 for (const scheme of ['light', 'dark'] as const) {

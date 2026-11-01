@@ -301,8 +301,28 @@ export interface PersonalReportDef {
 export interface ReportSource { entity: string; label: string; group?: string | null; parent?: string | null }
 export interface ReportSourceField { path: string; label: string; type: string; kind: 'text' | 'longtext' | 'number' | 'date' | 'boolean' | 'id' }
 export interface ReportSourceFields { entity: string; label: string; fields: ReportSourceField[] }
-export interface PersonalReportSummary { id: number; label: string; entity: string; entityLabel: string; chart?: ChartKind | null; version: number; available: boolean; updatedAt: string }
-export interface PersonalReport { id: number; label: string; version: number; definition: PersonalReportDef; available: boolean; problems: string[] }
+export interface PersonalReportSummary { id: number; label: string; entity: string; entityLabel: string; chart?: ChartKind | null; version: number; available: boolean; updatedAt: string; shared: boolean }
+/** Spec 042: `definition` nula si es compartido y no corre para quien lo abre; `roles` y `shareableRoles`, solo al dueño. */
+export interface PersonalReport {
+  id: number; label: string; version: number; definition: PersonalReportDef | null; available: boolean; problems: string[];
+  owned: boolean; owner?: string | null; roles?: string[] | null; shareableRoles?: string[] | null;
+}
+/** Spec 042: reporte personal que otro compartió con uno de mis roles (catálogo solo si corre para mí). */
+export interface SharedReportSummary { id: number; label: string; owner: string; entity?: string | null; entityLabel?: string | null; chart?: ChartKind | null; available: boolean; updatedAt: string }
+export interface ShareResult { id: number; version: number; roles: string[] }
+/** Spec 042: tarjeta de un tablero personal: un reporte del modelo (`entity` + `report`) o uno personal (`personalReport`). */
+export interface PersonalWidget { type: 'kpi' | 'chart' | 'table'; label?: string | null; entity?: string | null; report?: string | null; personalReport?: number | null; wide?: boolean }
+export interface PersonalDashboardSummary { id: number; label: string; description?: string | null; version: number; shared: boolean; updatedAt: string }
+export interface SharedDashboardSummary { id: number; label: string; description?: string | null; owner: string; updatedAt: string }
+export interface PersonalDashboardList { mine: PersonalDashboardSummary[]; shared: SharedDashboardSummary[] }
+export interface PersonalCard {
+  type: 'kpi' | 'chart' | 'table'; label: string; wide: boolean; entity?: string | null; report?: string | null; personalReport?: number | null;
+  link?: string | null; available: boolean; problems: string[]; result?: ReportResult | null;
+}
+export interface PersonalDashboardResult {
+  id: number; label: string; description?: string | null; version: number; owned: boolean; owner: string;
+  roles?: string[] | null; shareableRoles?: string[] | null; widgets?: PersonalWidget[] | null; cards: PersonalCard[];
+}
 export interface DashboardWidgetDef { type: 'kpi' | 'chart' | 'table'; label?: string; entity: string; report: string; measure?: number; wide?: boolean }
 export interface DashboardDef { name: string; label: string; icon?: string; description?: string; roles?: string[]; widgets: DashboardWidgetDef[] }
 /** Spec 024: `apps`, módulos de los catálogos de sus tarjetas visibles. */

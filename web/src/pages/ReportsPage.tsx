@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
-import { BarChart3, Compass, FileSpreadsheet, FileText, Filter, Inbox, Plus } from 'lucide-react';
+import { BarChart3, Compass, FileSpreadsheet, FileText, Filter, Inbox, Plus, Users } from 'lucide-react';
 import { ApiError } from '../api/client';
 import { myReportsApi, reportsApi } from '../api/endpoints';
-import type { PersonalReportSummary, ReportSummary, ViewFilter } from '../api/types';
+import type { PersonalReportSummary, ReportSummary, SharedReportSummary, ViewFilter } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { FilterChips, FilterDialog } from '../components/FilterBuilder';
 import { ReportChart } from '../components/ReportChart';
@@ -19,6 +19,8 @@ export function ReportsPage() {
   const { data, loading, error } = useAsync<ReportSummary[]>((s) => reportsApi.list(s), []);
   // Spec 041: los reportes personales de quien entra (solo los suyos).
   const mine = useAsync<PersonalReportSummary[]>((s) => myReportsApi.list(s), []);
+  // Spec 042 (H2 CA2): los que otros compartieron con alguno de mis roles.
+  const shared = useAsync<SharedReportSummary[]>((s) => myReportsApi.shared(s), []);
   const [params] = useSearchParams();
   const { appOfGroup, find } = useApps();
   const only = find(params.get('app'));
@@ -52,7 +54,25 @@ export function ReportsPage() {
                   <div className="entity-card-title">{r.label}</div>
                   {!r.available && <div className="entity-card-desc"><Badge tone="warning">No disponible: usa algo que ya no puedes ver</Badge></div>}
                 </div>
-                <div className="entity-card-foot"><span>{r.entityLabel}</span></div>
+                <div className="entity-card-foot"><span>{r.entityLabel}</span>{r.shared && <Badge icon={Users}>Compartido</Badge>}</div>
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
+      {!only && !!shared.data?.length && (
+        <section className="stack" style={{ marginBottom: 'var(--space-6)' }} aria-labelledby="rg-shared">
+          <h2 id="rg-shared" className="section-title">Compartidos conmigo</h2>
+          <div className="report-grid">
+            {shared.data.map((r) => (
+              <Link key={r.id} to={`/explore/${r.id}`} className="card entity-card">
+                <div className="entity-card-icon"><Users size={18} aria-hidden /></div>
+                <div>
+                  <div className="entity-card-title">{r.label}</div>
+                  <div className="entity-card-desc">De {r.owner}</div>
+                  {!r.available && <div className="entity-card-desc"><Badge tone="warning">No disponible para ti</Badge></div>}
+                </div>
+                <div className="entity-card-foot"><span>{r.entityLabel ?? ''}</span></div>
               </Link>
             ))}
           </div>

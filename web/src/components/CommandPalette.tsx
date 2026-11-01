@@ -78,8 +78,9 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
       id: `r-${r.entity}.${r.name}`, group: 'Análisis', label: r.label, hint: `Reporte · ${r.entityLabel}`,
       to: `/reports/${encodeURIComponent(r.entity)}/${encodeURIComponent(r.name)}`, icon: BarChart3,
     })),
-    ...(boards.length ? [{ id: 'all-boards', group: 'Análisis', label: 'Todos los tableros', to: '/dashboards', icon: Gauge }] : []),
-    ...(reports.length ? [{ id: 'all-reports', group: 'Análisis', label: 'Todos los reportes', to: '/reports', icon: BarChart3 }] : []),
+    // Spec 042: con algún catálogo que leer, también para armar los propios (041) aunque no haya del modelo.
+    ...(boards.length || entities.length ? [{ id: 'all-boards', group: 'Análisis', label: 'Todos los tableros', to: '/dashboards', icon: Gauge }] : []),
+    ...(reports.length || entities.length ? [{ id: 'all-reports', group: 'Análisis', label: 'Todos los reportes', to: '/reports', icon: BarChart3 }] : []),
     ...adminGroupsFor(me).flatMap((g) => g.items.map((i) => ({
       id: `a-${i.to}`, group: 'Configuración', label: i.label, hint: g.label, to: i.to, icon: i.icon, keywords: i.description,
     }))),

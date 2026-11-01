@@ -23,6 +23,7 @@ import { ExplorerPage } from './pages/ExplorerPage';
 import { ImagesPage } from './pages/ImagesPage';
 import { ReportPage, ReportsPage } from './pages/ReportsPage';
 import { ReportExplorerPage } from './pages/ReportExplorerPage';
+import { PersonalDashboardPage } from './pages/PersonalDashboardPage';
 import { DashboardPage, DashboardsPage } from './pages/DashboardsPage';
 import { NotFoundPage, ForbiddenPage } from './pages/StatusPages';
 import { ConnectPage } from './pages/ConnectPage';
@@ -67,6 +68,7 @@ export function App() {
         <Route path="explore/:id?" element={<ReportExplorerPage />} />
         <Route path="dashboards" element={<DashboardsPage />} />
         <Route path="dashboards/:name" element={<DashboardPage />} />
+        <Route path="my-dashboards/:id?" element={<PersonalDashboardPage />} /> {/* spec 042 */}
         <Route path="admin/model" element={<Guard allow={!!(me?.canManageModel || me?.isSuperuser)}><ModelerPage /></Guard>} />
         {/* Spec 025: explorador del modelo y de la base de datos (solo lectura). */}
         <Route path="admin/explorer" element={<Guard allow={!!(me?.canManageModel || me?.isSuperuser)}><ExplorerPage /></Guard>} />

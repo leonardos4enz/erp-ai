@@ -25,6 +25,7 @@ export const PANTALLAS: Record<string, Pantalla> = {
   'explore/:id?': { capturas: ['light', 'dark', 'movil'].map((t) => `reportes-personales.spec.ts/explorador-${t}.png`) },
   dashboards: { sinCaptura: 'lista de tableros; interfaz.spec.ts (riesgo R-030-3)' },
   'dashboards/:name': { sinCaptura: 'tablero con datos de cada corrida; interfaz.spec.ts (riesgo R-030-3)' },
+  'my-dashboards/:id?': { capturas: ['light', 'dark', 'movil'].map((t) => `tableros-personales.spec.ts/editor-${t}.png`) },
   'admin/model': { capturas: ['visual.spec.ts/modelador-light.png', 'visual.spec.ts/modelador-dark.png',
     'visual-modelador.spec.ts/catalogos-por-modulo-light.png', 'visual-modelador.spec.ts/automatizaciones-light.png'] },
   'admin/explorer': { capturas: ['explorador.spec.ts/explorador-bd-light.png', 'explorador.spec.ts/explorador-bd-dark.png'] },

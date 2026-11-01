@@ -19,6 +19,8 @@ public static class AuditActions
     public const string ViewChange = "view.change";
     /// <summary>Spec 041: reporte personal creado, cambiado o borrado (nombre y definición antes y después).</summary>
     public const string PersonalReportChange = "report.personal";
+    /// <summary>Spec 042: tablero personal creado, cambiado, compartido o borrado (nombre, huella y roles; no la definición).</summary>
+    public const string PersonalDashboardChange = "dashboard.personal";
     /// <summary>Spec 008: destino, secreto, prueba o reintento de un webhook (nunca el secreto ni la URL completa).</summary>
     public const string WebhookChange = "integration.webhook";
     /// <summary>Spec 008: alta, cambio, rotación o revocación de una clave de API (nunca la clave).</summary>

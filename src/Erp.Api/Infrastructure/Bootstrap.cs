@@ -341,6 +341,33 @@ public static class Bootstrap
             CONSTRAINT UQ_PersonalReport_Label UNIQUE (UserId, Label)
         );
 
+        -- Spec 042: tableros personales y reparto por rol de reportes y tableros personales (datos de su dueño, como
+        -- meta.PersonalReport). Los roles no se borran (solo se renombran): el reparto guarda el id.
+        IF OBJECT_ID('meta.PersonalDashboard') IS NULL
+        CREATE TABLE meta.PersonalDashboard (
+            Id int IDENTITY PRIMARY KEY,
+            UserId int NOT NULL REFERENCES meta.[User](Id),
+            Label nvarchar(100) NOT NULL,
+            Description nvarchar(300) NULL,
+            DefinitionJson nvarchar(max) NOT NULL,
+            Version int NOT NULL DEFAULT 1,
+            CreatedAt datetime2(3) NOT NULL DEFAULT SYSUTCDATETIME(),
+            UpdatedAt datetime2(3) NULL,
+            CONSTRAINT UQ_PersonalDashboard_Label UNIQUE (UserId, Label)
+        );
+        IF OBJECT_ID('meta.PersonalReportShare') IS NULL
+        CREATE TABLE meta.PersonalReportShare (
+            ReportId int NOT NULL REFERENCES meta.PersonalReport(Id) ON DELETE CASCADE,
+            RoleId int NOT NULL REFERENCES meta.Role(Id),
+            PRIMARY KEY (ReportId, RoleId)
+        );
+        IF OBJECT_ID('meta.PersonalDashboardShare') IS NULL
+        CREATE TABLE meta.PersonalDashboardShare (
+            DashboardId int NOT NULL REFERENCES meta.PersonalDashboard(Id) ON DELETE CASCADE,
+            RoleId int NOT NULL REFERENCES meta.Role(Id),
+            PRIMARY KEY (DashboardId, RoleId)
+        );
+
         IF OBJECT_ID('meta.Sequence') IS NULL
         CREATE TABLE meta.Sequence (
             EntityName nvarchar(50) NOT NULL,

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { Compass, Copy, FileSpreadsheet, FileText, Filter, Plus, Save, Trash2 } from 'lucide-react';
+import { Compass, Copy, FileSpreadsheet, FileText, Filter, Plus, Save, Share2, Trash2 } from 'lucide-react';
 import { ApiError } from '../api/client';
 import { myReportsApi, reportsApi } from '../api/endpoints';
 import type { ChartKind, ChartOptions, PersonalReportDef, ReportResult, ReportSourceField, ViewFilter } from '../api/types';
@@ -9,6 +9,7 @@ import { ConfirmDialog, Dialog } from '../components/Dialog';
 import { FilterChips, FilterDialog } from '../components/FilterBuilder';
 import { ReportChart } from '../components/ReportChart';
 import { ReportTable } from '../components/ReportTable';
+import { ShareDialog } from '../components/ShareDialog';
 import { useToast } from '../components/Toast';
 import { Alert, Badge, Button, Checkbox, EmptyState, Input, LoadingBlock, PageHeader, Select, Spinner, Switch } from '../components/ui';
 import { useAsync, useDebounced } from '../lib/hooks';
@@ -49,16 +50,30 @@ export function ReportExplorerPage() {
   const [busy, setBusy] = useState(false);
   const [saveError, setSaveError] = useState<ApiError | null>(null);
   const saveButton = useRef<HTMLButtonElement>(null);
+  // Spec 042: con qué roles está compartido (solo el dueño) y, si me lo compartieron, quién.
+  const [sharing, setSharing] = useState<{ roles: string[]; shareable: string[] } | null>(null);
+  const [sharedBy, setSharedBy] = useState<string | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
+  const shareButton = useRef<HTMLButtonElement>(null);
 
   // Abrir uno guardado o la definición de un reporte del modelo.
   useEffect(() => {
     const ctrl = new AbortController();
     setLoadError(null);
+    setSharing(null);
+    setSharedBy(null);
     if (id) {
       myReportsApi.get(id, ctrl.signal).then((r) => {
         setDef(r.definition);
         setLabel(r.label);
-        setSaved({ id: r.id, version: r.version, snapshot: JSON.stringify([r.label, r.definition]) });
+        // Spec 042 (H2 CA2): uno compartido conmigo se abre sin «Guardar» ni «Borrar» (no es mío): «Guardar como mío» lo copia.
+        if (r.owned) {
+          setSaved({ id: r.id, version: r.version, snapshot: JSON.stringify([r.label, r.definition]) });
+          setSharing({ roles: r.roles ?? [], shareable: r.shareableRoles ?? [] });
+        } else {
+          setSaved(null);
+          setSharedBy(r.owner ?? '');
+        }
         setNotice(r.available ? null : { problems: r.problems });
         setLoaded(true);
       }).catch((e) => { if (!ctrl.signal.aborted) { setLoadError(e); setLoaded(true); } });
@@ -166,13 +181,19 @@ export function ReportExplorerPage() {
     }
   }
 
-  const title = saved ? label : from ? `Explorar: ${label}` : 'Nuevo reporte';
+  const title = saved || sharedBy !== null ? label : from ? `Explorar: ${label}` : 'Nuevo reporte';
   const runMessages = runError instanceof ApiError ? Object.values(runError.fieldErrors).flat() : [];
+  const subtitle = sharedBy !== null
+    ? `Compartido por ${sharedBy}: corre con los registros y campos que tú puedes ver. Puedes explorarlo y guardar tu copia.`
+    : saved
+      ? sharing?.roles.length
+        ? `Reporte personal compartido con ${sharing.roles.join(', ')}: cada quien lo ve con sus propios registros y campos.`
+        : 'Reporte personal: solo tú lo ves, siempre con los registros y campos que puedes ver.'
+      : 'Cambia la agrupación, las medidas o la gráfica: el resultado se calcula sin guardar nada.';
   return (
     <div className="page">
-      <PageHeader icon={Compass} title={title}
-        subtitle={saved ? 'Reporte personal: solo tú lo ves, siempre con los registros y campos que puedes ver.' : 'Cambia la agrupación, las medidas o la gráfica: el resultado se calcula sin guardar nada.'}
-        actions={def && (
+      <PageHeader icon={Compass} title={title} subtitle={subtitle}
+        actions={(def || saved) && (
           <div className="report-actions">
             {dirty && saved && <Badge tone="warning">Cambios sin guardar</Badge>}
             {saved
@@ -181,6 +202,11 @@ export function ReportExplorerPage() {
             {saved && <Button icon={Copy} disabled={!!missing} onClick={() => { setSaveError(null); setNaming('copy'); }}>Guardar como</Button>}
             <Button icon={FileText} disabled={!!missing} onClick={() => download('csv')}>CSV</Button>
             <Button icon={FileSpreadsheet} disabled={!!missing} onClick={() => download('xlsx')}>Excel</Button>
+            {saved && sharing && (
+              <Button ref={shareButton} icon={Share2} onClick={() => setShareOpen(true)} aria-haspopup="dialog">
+                Compartir{sharing.roles.length ? ` (${sharing.roles.length})` : ''}
+              </Button>
+            )}
             {saved && <Button variant="ghost" iconOnly icon={Trash2} aria-label="Borrar el reporte" onClick={() => setDeleting(true)} />}
           </div>
         )} />
@@ -193,7 +219,10 @@ export function ReportExplorerPage() {
       {notice?.fixedFilter && (
         <Alert tone="info" title="El filtro fijo del reporte original no se aplica al explorar">Usa «Filtros» para acotar los registros; el reporte del modelo no cambia.</Alert>
       )}
-      {notice?.problems && (
+      {notice?.problems && sharedBy !== null && (
+        <Alert tone="warning" title="Este reporte no está disponible para ti">Usa catálogos o campos que tu rol no puede ver; pídele a {sharedBy} que lo ajuste.</Alert>
+      )}
+      {notice?.problems && sharedBy === null && (
         <Alert tone="warning" title="Este reporte usa algo que ya no puedes ver">{notice.problems.join(' ')} Cámbialo para que vuelva a correr.</Alert>
       )}
       <div className="explorer-layout">
@@ -244,6 +273,19 @@ export function ReportExplorerPage() {
         error={saveError} onClose={() => setNaming(null)} onSave={(n) => save(naming === 'copy', n)} />
       <ConfirmDialog open={deleting} danger title="Borrar el reporte" message={`¿Borrar «${label}»? No se puede deshacer.`} confirmLabel="Borrar"
         loading={busy} onCancel={() => setDeleting(false)} onConfirm={remove} />
+      {saved && sharing && (
+        <ShareDialog open={shareOpen} what="el reporte" shareable={sharing.shareable} current={sharing.roles}
+          onClose={() => { setShareOpen(false); window.setTimeout(() => shareButton.current?.focus(), 0); }}
+          onSave={async (roles) => {
+            const r = await myReportsApi.share(saved.id, roles, saved.version);
+            setSaved({ ...saved, version: r.version });
+            setSharing({ ...sharing, roles: r.roles });
+            setShareOpen(false);
+            window.setTimeout(() => shareButton.current?.focus(), 0);
+            toast.success(r.roles.length ? 'Reporte compartido' : 'Reporte sin compartir', r.roles.join(', ') || label);
+            return r;
+          }} />
+      )}
       {!saved && <p className="subtle explorer-foot"><Link to="/reports">Volver a Reportes</Link></p>}
     </div>
   );

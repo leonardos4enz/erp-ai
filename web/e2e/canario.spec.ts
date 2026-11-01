@@ -388,6 +388,55 @@ test('H5 (041): explorar, exportar y guardar a dos saltos: el administrador ve e
   expect((await l.delete(`/api/my-reports/${id}`, { params: { version: '1' } })).status()).toBe(204);
 });
 
+// Spec 042: un reporte y un tablero personales del administrador, compartidos con el rol del lector, que llegan al canario
+// (dos saltos, campo oculto, la etiqueta de un filtro). El administrador sí lo ve por esos caminos (control positivo); el
+// lector, con la misma definición, no: no recibe la definición que no puede correr y cada tarjeta corre con él.
+test('H4 (042): lo compartido corre con quien lo ve: el dueño ve el canario y el lector no', async () => {
+  const a = await admin();
+  const l = await lector();
+  const { canary } = state;
+  const suffix = Date.now().toString(36);
+  const create = async (label: string, definition: object) => {
+    const res = await a.post('/api/my-reports', { data: { label: `${label} ${suffix}`, definition } });
+    expect(res.status(), await res.text()).toBe(201);
+    return (await res.json()) as { id: number; version: number };
+  };
+  const share = async (kind: string, item: { id: number; version: number }) =>
+    expect((await a.put(`/api/${kind}/${item.id}/share`, { data: { roles: [ROLE], version: item.version } })).status()).toBe(200);
+  const twoHops = await create('Canario 042 dos saltos', { entity: 'CnDoc', groupBy: [{ field: 'Puente.Secreto.Dato' }], measures: [{ fn: 'count' }] });
+  const hidden = await create('Canario 042 oculto', { entity: 'CnDoc', groupBy: [{ field: 'Oculto' }], measures: [{ fn: 'count' }] });
+  const label = await create('Canario 042 etiqueta', { entity: 'CnDoc', groupBy: [{ field: 'Nombre' }], measures: [{ fn: 'count' }],
+    filters: [{ field: 'Nombre', op: 'ne', value: 'nadie', label: canary }] });
+  for (const r of [twoHops, hidden, label]) await share('my-reports', r);
+  const board = await a.post('/api/my-dashboards', { data: { label: `Canario 042 ${suffix}`, widgets: [
+    { type: 'table', personalReport: twoHops.id }, { type: 'table', personalReport: hidden.id },
+    ...REPORTS.filter((r) => r !== 'Conteo').map((report) => ({ type: 'table', entity: 'CnDoc', report })),
+  ] } });
+  expect(board.status(), await board.text()).toBe(201);
+  await share('my-dashboards', await board.json());
+  const boardId = (await board.json()).id as number;
+
+  // Control: el dueño ve el canario en su tablero y en las definiciones.
+  expect(await (await a.get(`/api/my-dashboards/${boardId}`)).text()).toContain(canary);
+  expect(await (await a.get(`/api/my-reports/${label.id}`)).text()).toContain(canary);
+  // El lector: listas, apertura, la definición que recibe (corrida por explore) y el tablero.
+  const reads = [await l.get('/api/my-reports/shared'), await l.get('/api/my-dashboards'), await l.get(`/api/my-dashboards/${boardId}`)];
+  for (const r of [twoHops, hidden, label]) {
+    const opened = await l.get(`/api/my-reports/${r.id}`);
+    expect(opened.status()).toBe(200);
+    reads.push(opened);
+    const definition = (await opened.json()).definition;
+    if (definition) reads.push(await l.post('/api/my-reports/explore', { data: { definition } }));
+  }
+  for (const res of reads) expect(await res.text(), res.url()).not.toContain(canary);
+  // Sin el oculto (no corre para él) y con «(sin acceso)» a dos saltos.
+  const seen = await (await l.get(`/api/my-dashboards/${boardId}`)).json();
+  expect(seen.cards.length).toBeGreaterThan(0);
+  expect(JSON.stringify(seen)).toContain('(sin acceso)');
+  expect((await (await l.get(`/api/my-reports/${hidden.id}`)).json()).definition).toBeNull();
+  for (const r of [twoHops, hidden, label]) await a.delete(`/api/my-reports/${r.id}`, { params: { version: String(r.version + 1) } });
+});
+
 test('H2 CA2 (031): ordenar por una fórmula o un campo que no ve se ignora (el orden no es un oráculo)', async () => {
   const l = await lector();
   const order = async (params: Record<string, string>) =>

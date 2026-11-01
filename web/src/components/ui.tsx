@@ -180,6 +180,8 @@ export interface ToggleProps {
   disabled?: boolean;
   id?: string;
   'aria-label'?: string;
+  /** Spec 042: dentro de un diálogo, recibe el foco al abrirlo (`data-autofocus`). */
+  autoFocusInDialog?: boolean;
 }
 
 export function Switch({ checked, onChange, label, disabled, id, ...aria }: ToggleProps) {
@@ -201,12 +203,13 @@ export function Switch({ checked, onChange, label, disabled, id, ...aria }: Togg
   );
 }
 
-export function Checkbox({ checked, onChange, label, disabled, id, ...aria }: ToggleProps) {
+export function Checkbox({ checked, onChange, label, disabled, id, autoFocusInDialog, ...aria }: ToggleProps) {
   return (
     <label className="checkbox">
       <input
         id={id}
         type="checkbox"
+        data-autofocus={autoFocusInDialog || undefined}
         checked={checked}
         disabled={disabled}
         aria-label={aria['aria-label']}

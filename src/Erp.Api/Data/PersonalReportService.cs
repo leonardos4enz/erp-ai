@@ -10,11 +10,20 @@ using Microsoft.Data.SqlClient;
 namespace Erp.Api.Data;
 
 /// <param name="Available">¿Corre hoy para su dueño? (un campo que dejó de ver, un catálogo archivado: no).</param>
+/// <param name="Shared">Spec 042: lo compartió con algún rol.</param>
 public sealed record PersonalReportSummary(int Id, string Label, string Entity, string EntityLabel, string? Chart, int Version,
+    bool Available, DateTime UpdatedAt, bool Shared);
+/// <summary>Spec 042: un reporte compartido con quien pide. Catálogo y gráfica solo si corre para él.</summary>
+public sealed record SharedReportSummary(int Id, string Label, string Owner, string? Entity, string? EntityLabel, string? Chart,
     bool Available, DateTime UpdatedAt);
+/// <param name="Definition">Spec 042: nula si es compartido y usa algo que quien lo abre no puede ver.</param>
 /// <param name="Problems">Por qué no corre hoy (vacío si corre).</param>
-public sealed record PersonalReport(int Id, string Label, int Version, PersonalReportDef Definition, bool Available,
-    IReadOnlyList<string> Problems);
+/// <param name="Owned">Spec 042: ¿es de quien lo abre? (si no, se lo compartieron y no lo puede cambiar).</param>
+/// <param name="Roles">Spec 042: solo al dueño, con qué roles lo compartió.</param>
+/// <param name="ShareableRoles">Spec 042: solo al dueño, con qué roles puede compartirlo.</param>
+public sealed record PersonalReport(int Id, string Label, int Version, PersonalReportDef? Definition, bool Available,
+    IReadOnlyList<string> Problems, bool Owned = true, string? Owner = null, IReadOnlyList<string>? Roles = null,
+    IReadOnlyList<string>? ShareableRoles = null);
 public sealed record SavePersonalReportRequest(string? Label, PersonalReportDef? Definition, int? Version);
 
 /// <summary>
@@ -25,23 +34,63 @@ public sealed record SavePersonalReportRequest(string? Label, PersonalReportDef?
 public sealed class PersonalReportService(Db db, MetadataStore store)
 {
     public const int MaxPerUser = 50;
+    public const string ShareTable = "meta.PersonalReportShare";
+    public const string ShareKey = "ReportId";
+    /// <summary>Spec 042 (H4 CA2): lo que ve quien abre un reporte compartido que no corre para él (sin nombrar lo que falta).</summary>
+    public const string NotForYou = "No disponible para ti: usa algo que no puedes ver.";
 
     private sealed record Row(int Id, string EntityName, string Label, string DefinitionJson, int Version, DateTime CreatedAt, DateTime? UpdatedAt);
+    private sealed record ListRow(int Id, string EntityName, string Label, string DefinitionJson, int Version, DateTime CreatedAt, DateTime? UpdatedAt,
+        bool Shared)
+    {
+        public Row ToRow() => new(Id, EntityName, Label, DefinitionJson, Version, CreatedAt, UpdatedAt);
+    }
+    private sealed record SharedRow(int Id, string EntityName, string Label, string DefinitionJson, int Version, DateTime CreatedAt,
+        DateTime? UpdatedAt, string Owner, int UserId)
+    {
+        public Row ToRow() => new(Id, EntityName, Label, DefinitionJson, Version, CreatedAt, UpdatedAt);
+    }
 
     public async Task<IReadOnlyList<PersonalReportSummary>> ListAsync(UserContext user, CancellationToken ct)
     {
         var model = await store.GetAsync(ct);
         await using var cn = await db.OpenAsync(ct);
-        var rows = await cn.QueryAsync<Row>(
-            "SELECT Id, EntityName, Label, DefinitionJson, Version, CreatedAt, UpdatedAt FROM meta.PersonalReport WHERE UserId = @uid ORDER BY Label",
-            new { uid = user.Id });
+        var rows = await cn.QueryAsync<ListRow>($"""
+            SELECT Id, EntityName, Label, DefinitionJson, Version, CreatedAt, UpdatedAt,
+                   CAST(CASE WHEN EXISTS (SELECT 1 FROM {ShareTable} s WHERE s.{ShareKey} = p.Id) THEN 1 ELSE 0 END AS bit) AS Shared
+              FROM meta.PersonalReport p WHERE UserId = @uid ORDER BY Label
+            """, new { uid = user.Id });
         return rows.Select(r =>
         {
-            var d = Parse(r);
+            var d = Parse(r.ToRow());
             var available = Problems(d, r.Label, user, model).Count == 0;
             // Un catálogo que ya no lee (o archivado) no da ni su etiqueta: solo el identificador que el dueño eligió.
             var label = available && model.TryGetValue(r.EntityName, out var e) ? e.LabelPlural : r.EntityName;
-            return new PersonalReportSummary(r.Id, r.Label, r.EntityName, label, d.Chart, r.Version, available, r.UpdatedAt ?? r.CreatedAt);
+            return new PersonalReportSummary(r.Id, r.Label, r.EntityName, label, d.Chart, r.Version, available, r.UpdatedAt ?? r.CreatedAt, r.Shared);
+        }).ToList();
+    }
+
+    /// <summary>
+    /// Spec 042 (H2 CA2): los reportes que otros compartieron con alguno de los roles de quien pide (revalidado: el dueño activo
+    /// y con el rol). El catálogo solo se nombra si el reporte corre para quien pide.
+    /// </summary>
+    public async Task<IReadOnlyList<SharedReportSummary>> SharedAsync(UserContext user, CancellationToken ct)
+    {
+        var model = await store.GetAsync(ct);
+        await using var cn = await db.OpenAsync(ct);
+        var candidates = (await cn.QueryAsync<SharedRow>($"""
+            SELECT p.Id, p.EntityName, p.Label, p.DefinitionJson, p.Version, p.CreatedAt, p.UpdatedAt, u.DisplayName AS Owner, p.UserId
+              FROM meta.PersonalReport p JOIN meta.[User] u ON u.Id = p.UserId
+             WHERE p.UserId <> @uid AND {PersonalSharing.Visible(ShareTable, ShareKey, "p")}
+             ORDER BY p.Label, u.DisplayName
+            """, new { uid = user.Id, viewerRoles = user.Roles })).ToList();
+        var valid = await PersonalSharing.RevalidateAsync(ShareTable, ShareKey, candidates.Select(r => (r.Id, r.UserId)).ToList(), user.Roles, cn);
+        return candidates.Where(r => valid.Contains(r.Id)).Select(r =>
+        {
+            var d = Parse(r.ToRow());
+            return Problems(d, r.Label, user, model).Count == 0
+                ? new SharedReportSummary(r.Id, r.Label, r.Owner, r.EntityName, model[r.EntityName].LabelPlural, d.Chart, true, r.UpdatedAt ?? r.CreatedAt)
+                : new SharedReportSummary(r.Id, r.Label, r.Owner, null, null, null, false, r.UpdatedAt ?? r.CreatedAt);
         }).ToList();
     }
 
@@ -49,13 +98,51 @@ public sealed class PersonalReportService(Db db, MetadataStore store)
     {
         var model = await store.GetAsync(ct);
         await using var cn = await db.OpenAsync(ct);
-        var r = await cn.QuerySingleOrDefaultAsync<Row>(
-            "SELECT Id, EntityName, Label, DefinitionJson, Version, CreatedAt, UpdatedAt FROM meta.PersonalReport WHERE Id = @id AND UserId = @uid",
-            new { id, uid = user.Id }) ?? throw NotFound();
-        var d = Parse(r);
+        // Spec 042: el suyo o uno compartido con alguno de sus roles (revalidado); cualquier otro, 404 igual que inexistente.
+        var r = await cn.QuerySingleOrDefaultAsync<SharedRow>($"""
+            SELECT p.Id, p.EntityName, p.Label, p.DefinitionJson, p.Version, p.CreatedAt, p.UpdatedAt, u.DisplayName AS Owner, p.UserId
+              FROM meta.PersonalReport p JOIN meta.[User] u ON u.Id = p.UserId
+             WHERE p.Id = @id AND (p.UserId = @uid OR {PersonalSharing.Visible(ShareTable, ShareKey, "p")})
+            """, new { id, uid = user.Id, viewerRoles = user.Roles }) ?? throw NotFound();
+        if (r.UserId != user.Id && !(await PersonalSharing.RevalidateAsync(ShareTable, ShareKey, [(r.Id, r.UserId)], user.Roles, cn)).Contains(r.Id))
+            throw NotFound();
+        var d = Parse(r.ToRow());
         var problems = Problems(d, r.Label, user, model);
-        return new PersonalReport(r.Id, r.Label, r.Version, d, problems.Count == 0, problems);
+        if (r.UserId == user.Id)
+            return new PersonalReport(r.Id, r.Label, r.Version, d, problems.Count == 0, problems, true, r.Owner,
+                await PersonalSharing.RolesOfAsync(ShareTable, ShareKey, r.Id, cn), await PersonalSharing.ShareableAsync(user, cn));
+        // Spec 042 (H4 CA2): a quien se lo compartieron no se le entrega una definición que nombra lo que no ve, ni la etiqueta
+        // de los valores de los filtros (el nombre de un registro que quizá está fuera de su alcance).
+        return problems.Count > 0
+            ? new PersonalReport(r.Id, r.Label, r.Version, null, false, [NotForYou], false, r.Owner)
+            : new PersonalReport(r.Id, r.Label, r.Version, WithoutFilterLabels(d), true, [], false, r.Owner);
     }
+
+    /// <summary>Spec 042 (H2 CA1): comparte con los roles pedidos (solo roles que tiene) con la versión que se abrió.</summary>
+    public async Task<ShareResult> ShareAsync(int id, ShareRequest req, HttpContext http, CancellationToken ct)
+    {
+        var user = http.CurrentUser();
+        var model = await store.GetAsync(ct);
+        await using var cn = await db.OpenAsync(ct);
+        await using var tx = await cn.BeginTransactionAsync(ct);
+        var prev = await cn.QuerySingleOrDefaultAsync<Row>(
+            "SELECT Id, EntityName, Label, DefinitionJson, Version, CreatedAt, UpdatedAt FROM meta.PersonalReport WITH (UPDLOCK) WHERE Id = @id AND UserId = @uid",
+            new { id, uid = user.Id }, tx) ?? throw NotFound();
+        if (req.Version is null || prev.Version != req.Version) throw Stale();
+        var roles = await PersonalSharing.ResolveAsync(req.Roles, user, cn, tx);
+        var before = await PersonalSharing.RolesOfAsync(ShareTable, ShareKey, id, cn, tx);
+        await PersonalSharing.ReplaceAsync(ShareTable, ShareKey, id, roles, cn, tx);
+        await cn.ExecuteAsync("UPDATE meta.PersonalReport SET Version = Version + 1, UpdatedAt = SYSUTCDATETIME() WHERE Id = @id", new { id }, tx);
+        var after = roles.Select(x => x.Name).Order(StringComparer.CurrentCulture).ToList();
+        await Audit.WriteAsync(cn, tx, http, AuditActions.PersonalReportChange, AuditEntity(prev.EntityName, model), id.ToString(),
+            Trail(prev.Label, prev.DefinitionJson, before), Trail(prev.Label, prev.DefinitionJson, after));
+        await tx.CommitAsync(ct);
+        return new ShareResult(id, prev.Version + 1, after);
+    }
+
+    /// <summary>Spec 042: la definición sin la etiqueta de presentación de los valores de los filtros.</summary>
+    public static PersonalReportDef WithoutFilterLabels(PersonalReportDef d) =>
+        d.Filters is null ? d : d with { Filters = d.Filters.Select(f => f with { Label = null }).ToList() };
 
     public async Task<PersonalReport> SaveAsync(int? id, SavePersonalReportRequest req, HttpContext http, CancellationToken ct)
     {
@@ -141,10 +228,13 @@ public sealed class PersonalReportService(Db db, MetadataStore store)
     /// auditor quizá no ve y los valores de los filtros), solo el nombre y la huella SHA-256 de la definición: dice que
     /// cambió y cuándo, sin mostrar el reporte personal de otro.
     /// </summary>
-    private static object Trail(string label, string definition) => new
-    {
-        label, definitionSha256 = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(definition))).ToLowerInvariant(),
-    };
+    private static object Trail(string label, string definition) => new { label, definitionSha256 = Sha256(definition) };
+
+    /// <summary>Spec 042: con los roles con los que está compartido.</summary>
+    private static object Trail(string label, string definition, IReadOnlyList<string> roles) =>
+        new { label, definitionSha256 = Sha256(definition), roles };
+
+    public static string Sha256(string text) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text))).ToLowerInvariant();
 
     /// <summary>Regresión (revisión adversarial 041, F-D): el de una partida va bajo su documento (la bitácora filtra por catálogo raíz).</summary>
     private static string AuditEntity(string entity, IReadOnlyDictionary<string, EntityDef> model) =>

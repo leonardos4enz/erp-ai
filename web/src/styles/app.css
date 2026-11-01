@@ -534,6 +534,11 @@ code, pre, .mono { font-family: var(--font-mono); font-size: 0.8125rem; }
 .explorer-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) auto; gap: var(--space-2); align-items: start; }
 .explorer-row-extra { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 .explorer-row-wide { grid-template-columns: minmax(0, 1fr) auto; }
+/* Spec 042: editor de tarjetas del tablero personal. */
+.card-editor { border: 1px solid var(--border); margin: 0; min-width: 0; }
+.card-editor > legend { padding: 0 var(--space-1); }
+.card-editor-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: var(--space-3); align-items: end; }
+@media (max-width: 600px) { .card-editor-row { grid-template-columns: minmax(0, 1fr); } }
 .stack-sm { display: grid; gap: var(--space-2); justify-items: start; }
 .plain-list { margin: var(--space-1) 0 0; padding-left: var(--space-4); }
 .explorer-foot { margin-top: var(--space-4); }

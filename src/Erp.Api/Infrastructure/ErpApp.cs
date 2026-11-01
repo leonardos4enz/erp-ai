@@ -53,6 +53,8 @@ public static class ErpApp
         services.AddScoped<ReportService>();
         services.AddScoped<ViewService>();
         services.AddScoped<PersonalReportService>();
+        services.AddScoped<PersonalDashboardService>(); // spec 042
+        services.AddSingleton<CostlyGate>(); // spec 042
         // Spec 008: integraciones. Las llaves de Data Protection (cifran destino y secreto de webhooks) viven fuera del repositorio.
         var dp = services.AddDataProtection().SetApplicationName("ErpAi");
         if (config["DataProtection:KeysPath"] is { Length: > 0 } keysPath) dp.PersistKeysToFileSystem(new DirectoryInfo(keysPath));

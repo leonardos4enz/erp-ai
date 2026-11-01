@@ -1,15 +1,15 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { ArrowRight, Code2, Inbox, LayoutDashboard, Plus } from 'lucide-react';
+import { ArrowRight, Code2, Inbox, LayoutDashboard, Plus, Users } from 'lucide-react';
 import { ApiError } from '../api/client';
-import { dashboardsApi } from '../api/endpoints';
-import type { ChangePlan, DashboardDef, DashboardResult, DashboardSummary } from '../api/types';
+import { dashboardsApi, myDashboardsApi } from '../api/endpoints';
+import type { ChangePlan, DashboardDef, DashboardResult, DashboardSummary, PersonalDashboardList, ReportResult } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { Dialog } from '../components/Dialog';
 import { DynamicIcon } from '../components/DynamicIcon';
 import { formatReportValue, ReportChart } from '../components/ReportChart';
 import { ReportTable } from '../components/ReportTable';
-import { Alert, Button, EmptyState, LoadingBlock, PageHeader, Textarea } from '../components/ui';
+import { Alert, Badge, Button, EmptyState, LoadingBlock, PageHeader, Textarea } from '../components/ui';
 import { useAsync } from '../lib/hooks';
 import { useApps } from '../lib/apps';
 import { PlanReviewDialog } from './modeler/PlanReviewDialog';
@@ -33,18 +33,56 @@ export function DashboardsPage() {
   const list = (data ?? []).filter((d) => !only || d.apps?.some((a) => a.toLowerCase() === only.name.toLowerCase()));
   const [editing, setEditing] = useState(false);
   const navigate = useNavigate();
+  // Spec 042: mis tableros y los compartidos conmigo (sin `?app=`, como «Mis reportes»).
+  const personal = useAsync<PersonalDashboardList>((s) => myDashboardsApi.list(s), []);
 
   return (
     <div className="page">
       <PageHeader icon={LayoutDashboard} title={only ? `Tableros de ${only.label}` : 'Tableros'} subtitle="Indicadores y gráficas con los registros que puedes ver."
         actions={<>
           {only && <Link className="btn btn-secondary" to="/dashboards">Ver todos los tableros</Link>}
-          {canModel && <Button icon={Plus} onClick={() => setEditing(true)}>Nuevo tablero</Button>}
+          {canModel && <Button icon={Code2} onClick={() => setEditing(true)}>Nuevo tablero del modelo</Button>}
+          <Link className="btn btn-primary" to="/my-dashboards"><Plus size={16} aria-hidden /> Nuevo tablero</Link>
         </>} />
+      {!only && !!personal.data?.mine.length && (
+        <section className="stack" style={{ marginBottom: 'var(--space-6)' }} aria-labelledby="db-mine">
+          <h2 id="db-mine" className="section-title">Mis tableros</h2>
+          <div className="grid-cards">
+            {personal.data.mine.map((d) => (
+              <Link key={d.id} to={`/my-dashboards/${d.id}`} className="card entity-card">
+                <div className="entity-card-icon"><LayoutDashboard size={18} aria-hidden /></div>
+                <div>
+                  <div className="entity-card-title">{d.label}</div>
+                  {d.description && <div className="entity-card-desc">{d.description}</div>}
+                </div>
+                <div className="entity-card-foot">{d.shared && <Badge icon={Users}>Compartido</Badge>}<span className="spacer" /><ArrowRight size={15} aria-hidden /></div>
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
+      {!only && !!personal.data?.shared.length && (
+        <section className="stack" style={{ marginBottom: 'var(--space-6)' }} aria-labelledby="db-shared">
+          <h2 id="db-shared" className="section-title">Compartidos conmigo</h2>
+          <div className="grid-cards">
+            {personal.data.shared.map((d) => (
+              <Link key={d.id} to={`/my-dashboards/${d.id}`} className="card entity-card">
+                <div className="entity-card-icon"><Users size={18} aria-hidden /></div>
+                <div>
+                  <div className="entity-card-title">{d.label}</div>
+                  <div className="entity-card-desc">De {d.owner}{d.description ? ` · ${d.description}` : ''}</div>
+                </div>
+                <div className="entity-card-foot"><span className="spacer" /><ArrowRight size={15} aria-hidden /></div>
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
+      {!only && !!(personal.data?.mine.length || personal.data?.shared.length) && <h2 className="section-title">Del modelo</h2>}
       {loading && !data ? <LoadingBlock />
         : error ? <Alert tone="danger" title={error instanceof ApiError ? error.title : 'No se pudieron cargar los tableros'} />
         : !list.length ? (
-          <div className="card"><EmptyState icon={Inbox} title="No hay tableros" description="Cuando haya tableros con indicadores que puedas ver, aparecerán aquí." /></div>
+          <div className="card"><EmptyState icon={Inbox} title="No hay tableros del modelo" description="Cuando un modelador defina tableros que puedas ver, aparecerán aquí. Mientras, arma el tuyo con «Nuevo tablero»." /></div>
         ) : (
           <div className="grid-cards">
             {list.map((d) => (
@@ -82,25 +120,13 @@ export function DashboardPage() {
         actions={canModel && data.definition && <Button icon={Code2} onClick={() => setEditing(true)}>Editar (JSON)</Button>} />
       <div className="dashboard-grid">
         {data.widgets.map((w, i) => {
-          const measures = w.result.columns.filter((c) => c.kind === 'measure');
-          const m = measures[w.measure ?? 0] ?? measures[0];
           const titleId = `w-${i}`;
           return (
             <section key={i} className={`card widget${w.wide ? ' wide' : ''}`} aria-labelledby={titleId}>
               <h2 id={titleId} className="widget-title">
                 <Link to={`/reports/${encodeURIComponent(w.entity)}/${encodeURIComponent(w.report)}`}>{w.label}</Link>
               </h2>
-              {w.type === 'kpi' ? (
-                w.result.comparison
-                  ? <ReportChart result={w.result} kind="kpi" measure={w.measure ?? 0} /> // spec 039 (H4): último periodo contra el anterior
-                  : <div className="kpi-value">{m ? formatReportValue(m, w.result.totals[m.key]) : '—'}</div>
-              ) : w.result.rows.length === 0 ? (
-                <p className="subtle">Sin datos todavía.</p>
-              ) : w.type === 'chart' ? (
-                <ReportChart result={w.result} kind={w.result.chart ?? 'bar'} measure={w.measure ?? undefined} />
-              ) : (
-                <ReportTable result={w.result} caption={w.label} />
-              )}
+              <WidgetBody type={w.type} label={w.label} result={w.result} measure={w.measure} />
             </section>
           );
         })}
@@ -109,6 +135,23 @@ export function DashboardPage() {
         <DashboardEditor open={editing} initial={data.definition} onClose={() => setEditing(false)} onApplied={() => { setEditing(false); setTick((t) => t + 1); }} />
       )}
     </div>
+  );
+}
+
+/** El cuerpo de una tarjeta (spec 007; spec 042 la comparte con el tablero personal). */
+export function WidgetBody({ type, label, result, measure }: { type: 'kpi' | 'chart' | 'table'; label: string; result: ReportResult; measure?: number | null }) {
+  const measures = result.columns.filter((c) => c.kind === 'measure');
+  const m = measures[measure ?? 0] ?? measures[0];
+  return type === 'kpi' ? (
+    result.comparison
+      ? <ReportChart result={result} kind="kpi" measure={measure ?? 0} /> // spec 039 (H4): último periodo contra el anterior
+      : <div className="kpi-value">{m ? formatReportValue(m, result.totals[m.key]) : '—'}</div>
+  ) : result.rows.length === 0 ? (
+    <p className="subtle">Sin datos todavía.</p>
+  ) : type === 'chart' ? (
+    <ReportChart result={result} kind={result.chart ?? 'bar'} measure={measure ?? undefined} />
+  ) : (
+    <ReportTable result={result} caption={label} />
   );
 }
 

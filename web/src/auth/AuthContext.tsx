@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { ApiError, newSessionGeneration, setUnauthorizedHandler } from '../api/client';
+import { ApiError, newSessionGeneration, sessionGeneration, setUnauthorizedHandler } from '../api/client';
 import { authApi, modelApi } from '../api/endpoints';
 import type { EntityDef, EntityPerms, Me } from '../api/types';
 
@@ -59,9 +59,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    // Revisión 042 (F-06): si la persona inicia sesión antes de que llegue esta consulta (lenta), su 401 de «sin sesión» ya
+    // no vale: borraba la sesión recién abierta y la regresaba a un formulario vacío.
+    const sentIn = sessionGeneration();
     authApi.me()
-      .then(setMe)
-      .catch(() => setMe(null))
+      .then((m) => { if (sessionGeneration() === sentIn) setMe(m); })
+      .catch(() => { if (sessionGeneration() === sentIn) setMe(null); })
       .finally(() => setLoading(false));
   }, []);
 

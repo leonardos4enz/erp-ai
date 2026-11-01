@@ -3,6 +3,7 @@ import type {
   AppSummary, SearchHit, AuditEntry, AutomationRun, AutomationRunDetail, ScheduleSummary, ChangePlan, Company, EntityOrigin, ExprFunction, FieldDef, ExchangeRate, ChangeSetSummary, DashboardResult, DashboardSummary, EntityDef, HistoryEntry, LayoutState, LookupItem, Me, PrintChoice, PrintTemplate, StoredImage,
   ApiKey, AssistantStatus, McpAuthorizeInfo, McpConnections, StudioScope, StudioSession, StudioStatusInfo, StudioSummary, OAuthClient, OAuthScope, BusinessUnit, PendingChange, SecurityChange, Team, Conversation, ConversationSummary, Proposal, EnvironmentInfo, ExportableCatalogs, ExportPreview, ExportRequest, ImportResult, ModuleInfo, PackageImport, ModulePreview, WebhookDelivery, WebhookSummary, Paged, PlanPreview, ReportResult, ReportSummary, Role, Row, RowList, SavedView, User, ViewFilter, ViewList,
   PersonalReport, PersonalReportDef, PersonalReportSummary, ReportSource, ReportSourceFields,
+  PersonalDashboardList, PersonalDashboardResult, PersonalWidget, SharedReportSummary, ShareResult,
 } from './types';
 
 const enc = encodeURIComponent;
@@ -174,11 +175,26 @@ export const myReportsApi = {
   update: (id: number, label: string, definition: PersonalReportDef, version: number) =>
     api<PersonalReport>(`/my-reports/${id}`, { method: 'PUT', body: { label, definition, version } }),
   remove: (id: number, version: number) => api<void>(`/my-reports/${id}`, { method: 'DELETE', query: { version } }),
+  /** Spec 042: los que otros compartieron con alguno de mis roles. */
+  shared: (signal?: AbortSignal) => api<SharedReportSummary[]>('/my-reports/shared', { signal }),
+  share: (id: number, roles: string[], version: number) => api<ShareResult>(`/my-reports/${id}/share`, { method: 'PUT', body: { roles, version } }),
 };
 
 export const dashboardsApi = {
   list: (signal?: AbortSignal) => api<DashboardSummary[]>('/dashboards', { signal }),
   get: (name: string, signal?: AbortSignal) => api<DashboardResult>(`/dashboards/${enc(name)}`, { signal }),
+};
+
+/** Spec 042: tableros personales (los míos y los compartidos conmigo). */
+export const myDashboardsApi = {
+  list: (signal?: AbortSignal) => api<PersonalDashboardList>('/my-dashboards', { signal }),
+  get: (id: number, signal?: AbortSignal) => api<PersonalDashboardResult>(`/my-dashboards/${id}`, { signal }),
+  create: (label: string, description: string | undefined, widgets: PersonalWidget[]) =>
+    api<PersonalDashboardResult>('/my-dashboards', { method: 'POST', body: { label, description, widgets } }),
+  update: (id: number, label: string, description: string | undefined, widgets: PersonalWidget[], version: number) =>
+    api<PersonalDashboardResult>(`/my-dashboards/${id}`, { method: 'PUT', body: { label, description, widgets, version } }),
+  remove: (id: number, version: number) => api<void>(`/my-dashboards/${id}`, { method: 'DELETE', query: { version } }),
+  share: (id: number, roles: string[], version: number) => api<ShareResult>(`/my-dashboards/${id}/share`, { method: 'PUT', body: { roles, version } }),
 };
 
 export const usersApi = {

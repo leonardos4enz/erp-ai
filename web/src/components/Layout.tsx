@@ -74,6 +74,10 @@ function useBreadcrumb(): { label: string; to?: string }[] {
     // Spec 041 (revisión exploratoria F-04): el explorador cuelga de Reportes (antes, la miga decía solo «Inicio»).
     crumbs.push({ label: 'Reportes', to: '/reports' });
     crumbs.push({ label: parts[1] ? 'Mi reporte' : 'Explorar' });
+  } else if (parts[0] === 'my-dashboards') {
+    // Spec 042 (revisión exploratoria F-04): el tablero personal cuelga de Tableros (la miga decía solo «Inicio»).
+    crumbs.push({ label: 'Tableros', to: '/dashboards' });
+    crumbs.push({ label: parts[1] ? 'Tablero personal' : 'Nuevo tablero' });
   } else if (parts[0] === 'conexiones') {
     crumbs.push({ label: 'Conexiones de Claude' }); // spec 038 (revisión exploratoria F-02)
   } else if (parts[0] === 'admin') {

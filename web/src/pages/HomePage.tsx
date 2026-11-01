@@ -23,6 +23,8 @@ export function HomePage() {
   // H4 CA2: la vista general de análisis solo se ofrece si hay algo que ver (o si quien entra puede crear tableros).
   const { data: boards } = useAsync((s) => dashboardsApi.list(s), [me?.id, entities]);
   const { data: reports } = useAsync((s) => reportsApi.list(s), [me?.id, entities]);
+  // Spec 042: quien lee algún catálogo puede armar sus propios reportes (041) y tableros: se ofrecen aunque no haya del modelo.
+  const canBuild = entities.length > 0;
 
   return (
     <div className="page">
@@ -69,20 +71,20 @@ export function HomePage() {
           </ul>
         </section>
       )}
-      {(!!boards?.length || !!reports?.length) && (
+      {(canBuild || !!boards?.length || !!reports?.length) && (
         <section className="stack" style={{ marginTop: 'var(--space-8)' }} aria-labelledby="general-analysis">
           <h2 id="general-analysis" className="section-title">Análisis general</h2>
           <div className="grid-cards">
-            {!!boards?.length && (
+            {(canBuild || !!boards?.length) && (
               <Link to="/dashboards" className="card entity-card">
                 <div className="entity-card-icon"><Gauge size={18} aria-hidden /></div>
                 <div>
                   <div className="entity-card-title">Tableros</div>
-                  <div className="entity-card-desc">Indicadores y gráficas de todos tus módulos.</div>
+                  <div className="entity-card-desc">Indicadores y gráficas de todos tus módulos, y los tuyos.</div>
                 </div>
               </Link>
             )}
-            {!!reports?.length && (
+            {(canBuild || !!reports?.length) && (
               <Link to="/reports" className="card entity-card">
                 <div className="entity-card-icon"><BarChart3 size={18} aria-hidden /></div>
                 <div>

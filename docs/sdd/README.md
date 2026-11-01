@@ -105,6 +105,7 @@ y cada sesión queda como registro de una sola entrega. Al cerrar la spec:
 | 038 | [Servidor MCP por persona](specs/038-servidor-mcp/spec.md) | Implementado |
 | 039 | [Reportes 2: gráficas personalizables y medidas calculadas](specs/039-reportes-graficas/spec.md) | Implementado |
 | 040 | [Endurecimiento 6: el registro del MCP no se agota, la cola de Studio no se atora y los reportes cuadran en todos los caminos](specs/040-endurecimiento-6/spec.md) | Implementado |
-| 041 | Reportes y tableros personales | Planeado |
-| 042 | Módulo de Ventas | Planeado |
-| 043 | MCP 2: copia aislada y propuestas por MCP | Planeado |
+| 041 | [Reportes personales y exploración al vuelo](specs/041-reportes-personales/spec.md) | Implementado |
+| 042 | [Tableros personales y compartir](specs/042-tableros-personales/spec.md) | Implementado |
+| 043 | Módulo de Ventas | Planeado |
+| 044 | MCP 2: copia aislada y propuestas por MCP | Planeado |

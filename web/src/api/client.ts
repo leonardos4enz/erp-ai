@@ -48,6 +48,11 @@ export function setUnauthorizedHandler(handler: UnauthorizedHandler | null) {
  * existe: no avisa al manejador, que si no echaría a quien acaba de entrar o cambiaría «Cerraste sesión» por «expiró».
  */
 let generation = 0;
+/** Spec 042 (F-06): la generación de sesión actual, para descartar respuestas que salieron antes de iniciar o cerrar sesión. */
+export function sessionGeneration() {
+  return generation;
+}
+
 export function newSessionGeneration() {
   generation++;
 }

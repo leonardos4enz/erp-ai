@@ -65,12 +65,19 @@ public static class AnalyticsEndpoints
             PersonalReports.Sources(http.CurrentUser(), await store.GetAsync(ct))).Requires(Capability.Records);
         mine.MapGet("/sources/{entity}", async (string entity, HttpContext http, MetadataStore store, CancellationToken ct) =>
             PersonalReports.Fields(entity, http.CurrentUser(), await store.GetAsync(ct))).Requires(Capability.Records);
-        mine.MapPost("/explore", async (ExploreRequest req, HttpContext http, MetadataStore store, ReportService svc, CancellationToken ct) =>
-            await ExploreAsync(req, http, store, svc, ct))
+        mine.MapPost("/explore", async (ExploreRequest req, HttpContext http, MetadataStore store, ReportService svc, CostlyGate gate, CancellationToken ct) =>
+        {
+            using var _ = gate.Enter(http.CurrentUser()); // spec 042 (H5): una corrida costosa de la persona mientras dura
+            return await ExploreAsync(req, http, store, svc, ct);
+        })
             .Requires(Capability.Records).Writes(Effect.None).Costly("agrega el catálogo completo").RequireRateLimiting(RatePolicies.Aggregate);
-        mine.MapPost("/explore/export", async (ExploreRequest req, HttpContext http, MetadataStore store, ReportService svc, CancellationToken ct) =>
+        mine.MapPost("/explore/export", async (ExploreRequest req, HttpContext http, MetadataStore store, ReportService svc, CostlyGate gate,
+            CancellationToken ct) =>
         {
             if (req.Format?.ToLowerInvariant() is not ("csv" or "xlsx" or null)) throw new AppException(400, "Formato no válido (csv o xlsx).");
+            // Regresión (revisión adversarial 042, F-D): la compuerta sigue tomada mientras se arma el archivo (antes se soltaba
+            // al terminar la consulta y armar hasta 1 000 grupos en Excel quedaba fuera del tope).
+            using var _ = gate.Enter(http.CurrentUser());
             var r = await ExploreAsync(req, http, store, svc, ct);
             // El nombre del archivo sale del identificador del catálogo (metadatos), nunca de la petición.
             var file = $"{r.Entity}-{PersonalReports.ReportName}-{DateTime.Now:yyyyMMdd}";
@@ -80,8 +87,13 @@ public static class AnalyticsEndpoints
         }).Requires(Capability.Records).Writes(Effect.None).Costly("hasta 1000 grupos en un archivo").RequireRateLimiting(RatePolicies.Bulk);
         mine.MapGet("/", (HttpContext http, PersonalReportService svc, CancellationToken ct) => svc.ListAsync(http.CurrentUser(), ct))
             .Requires(Capability.Records);
+        // Spec 042: los compartidos con quien pide; abrir uno compartido (sin definición si no corre para él) y compartir el suyo.
+        mine.MapGet("/shared", (HttpContext http, PersonalReportService svc, CancellationToken ct) => svc.SharedAsync(http.CurrentUser(), ct))
+            .Requires(Capability.Records);
         mine.MapGet("/{id:int}", (int id, HttpContext http, PersonalReportService svc, CancellationToken ct) => svc.GetAsync(id, http.CurrentUser(), ct))
             .Requires(Capability.Records);
+        mine.MapPut("/{id:int}/share", (int id, ShareRequest req, HttpContext http, PersonalReportService svc, CancellationToken ct) =>
+            svc.ShareAsync(id, req, http, ct)).Requires(Capability.Records).Writes(Effect.Session);
         mine.MapPost("/", async (SavePersonalReportRequest req, HttpContext http, PersonalReportService svc, CancellationToken ct) =>
         {
             var saved = await svc.SaveAsync(null, req, http, ct);
@@ -121,6 +133,32 @@ public static class AnalyticsEndpoints
             }
             return new DashboardResult(d.Name, d.Label, d.Icon ?? "layout-dashboard", d.Description, widgets, u.CanManageModel ? d : null);
         }).Requires(Capability.Records).Costly("corre un reporte por tarjeta").RequireRateLimiting(RatePolicies.Aggregate); // spec 031
+
+        // Spec 042: tableros personales. Solo con sesión (fuera de ApiKeys.AllowedPaths y de OAuthScopes). Cada tarjeta corre
+        // con quien lo ve; nadie más que su dueño lo cambia, borra o comparte.
+        var myBoards = app.MapGroup("/api/my-dashboards").RequireAuthorization();
+        myBoards.MapGet("/", (HttpContext http, PersonalDashboardService svc, CancellationToken ct) => svc.ListAsync(http.CurrentUser(), ct))
+            .Requires(Capability.Records);
+        myBoards.MapGet("/{id:int}", async (int id, HttpContext http, PersonalDashboardService svc, CostlyGate gate, CancellationToken ct) =>
+        {
+            var u = http.CurrentUser();
+            using var _ = gate.Enter(u);
+            return await svc.GetAsync(id, u, ct);
+        }).Requires(Capability.Records).Costly("corre un reporte por tarjeta").RequireRateLimiting(RatePolicies.Aggregate);
+        myBoards.MapPost("/", async (SavePersonalDashboardRequest req, HttpContext http, PersonalDashboardService svc, CancellationToken ct) =>
+        {
+            var saved = await svc.SaveAsync(null, req, http, ct);
+            return Results.Created($"/api/my-dashboards/{saved.Id}", saved);
+        }).Requires(Capability.Records).Writes(Effect.Session);
+        myBoards.MapPut("/{id:int}", (int id, SavePersonalDashboardRequest req, HttpContext http, PersonalDashboardService svc, CancellationToken ct) =>
+            svc.SaveAsync(id, req, http, ct)).Requires(Capability.Records).Writes(Effect.Session);
+        myBoards.MapDelete("/{id:int}", async (int id, int? version, HttpContext http, PersonalDashboardService svc, CancellationToken ct) =>
+        {
+            await svc.DeleteAsync(id, version, http, ct);
+            return Results.NoContent();
+        }).Requires(Capability.Records).Writes(Effect.Session);
+        myBoards.MapPut("/{id:int}/share", (int id, ShareRequest req, HttpContext http, PersonalDashboardService svc, CancellationToken ct) =>
+            svc.ShareAsync(id, req, http, ct)).Requires(Capability.Records).Writes(Effect.Session);
     }
 
     /// <summary>Spec 041: corre una definición sin guardarla, validada contra quien la pide.</summary>

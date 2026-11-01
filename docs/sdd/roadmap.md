@@ -47,7 +47,7 @@ en orden, no en paralelo: casi todas tocan el núcleo del motor (`PlanCompiler`,
 | 039 Reportes 2: gráficas personalizables y medidas calculadas | Implementado ([spec](specs/039-reportes-graficas/spec.md)) |
 | 040 Endurecimiento 6 (auditoría 7) | Implementado ([spec](specs/040-endurecimiento-6/spec.md)) |
 | 041 Reportes personales y exploración al vuelo | Implementado ([spec](specs/041-reportes-personales/spec.md)) |
-| 042 Tableros personales y compartir | Planeado |
+| 042 Tableros personales y compartir | Implementado ([spec](specs/042-tableros-personales/spec.md)) |
 | 043 Módulo de Ventas | Planeado |
 | 044 MCP 2: copia aislada y propuestas por MCP | Planeado |
 
@@ -628,9 +628,14 @@ En este orden, por decisión del dueño (2026-10-25):
    modelador), explora al vuelo un reporte del modelo o el suyo (agrupación, medidas, gráfica, filtros) y guarda los suyos
    con versión; corre siempre con el alcance, la empresa y los campos de **quien lo pide**, revalidado en cada corrida. Se
    dividió en CLARIFY (seguridad con UI nueva y dos pantallas principales): los tableros personales van en la 042.
-   **042 — Tableros personales y compartir** (la mitad que la 041 dejó fuera, CLARIFY 1): tableros propios junto a los del
-   modelo, con tarjetas de reportes del modelo o personales, y compartir reportes y tableros personales por rol (sin roles que
-   quien comparte no tiene: 021-1); un reporte compartido corre con los permisos de quien lo ve, nunca con los de su dueño.
+   ~~**042 — Tableros personales y compartir**~~ Implementado ([spec](specs/042-tableros-personales/spec.md),
+   [verify](specs/042-tableros-personales/verify.md); la mitad que la 041 dejó fuera, CLARIFY 1; no se dividió: un solo
+   criterio): tableros propios junto a los del modelo, con tarjetas de reportes del modelo o personales del dueño; compartir
+   reportes y tableros personales por rol, solo con roles que se tienen y revalidado al leer (dueño activo y con el rol: 021-1);
+   lo compartido corre con el alcance, la empresa y los campos de quien lo ve, que no recibe la definición que no puede correr.
+   Tope de 4 corridas costosas a la vez por persona en explorar, exportar y el tablero personal (R-041-1, en parte).
+   Pendiente, si se pide: copiar un tablero compartido, compartir con personas o equipos, el mismo tope en los reportes y
+   tableros del modelo. **Auditoría 8** pendiente (la 042 agrega puntos de entrada y delegación por reparto).
 13. **043 — Módulo de Ventas** (antes 042): clientes, cotización, pedido, salida de almacén con costo de ventas (póliza de salidas),
    factura y cobranza. Usa `merge` para extender Producto e Inventario, avisos (límite de crédito) y rutas de tres niveles;
    declara su módulo con `setApp` (orden 15, entre Compras e Inventario). Sus reportes usan los de la 039.
