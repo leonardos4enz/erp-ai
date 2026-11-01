@@ -5,7 +5,7 @@
 - cierre: 2026-11-01 15:34
 - unitarias: 1106 (+29: 755 de Erp.Tests, +3; 278 de integración, +26; Vitest 73, +0)
 - e2e: 467 (+5: `mcp2.spec.ts`)
-- corridas completas: 2 (dotnet test 1 min 58 s; E2E 467 en verde, 11 min 27 s); la siguiente es CI
+- corridas completas: 2 (dotnet test 1 min 58 s; E2E 467 en verde, 11 min 27 s); la segunda completa fue CI en `main` (`d20ef83`), en verde
 - corridas parciales: 9 (integración de `Mcp2Tests` 5, de `McpTests`/`StudioTests`/`Hardening040` 1; E2E de `mcp.spec.ts` + `mcp2.spec.ts` 3); `--veces=3` 1
 - contra el código anterior: 3 (integración: las 5 regresiones de la revisión adversarial con cada corrección desactivada; E2E: F-01 y F-02 con su corrección desactivada, una a la vez)
 - hallazgos: 0/3/6 (adversarial A-01…A-05 corregidos, A-06 y A-07 a riesgos; exploratoria F-01, F-02)
@@ -39,6 +39,7 @@
 | 1 | `mcp.spec.ts` + `mcp2.spec.ts` (iteración) | 2 fallas: captura de Conectar (casillas nuevas, esperado) y la URL de la propuesta (`/studio` en lugar de `/admin/studio`, corregida) | 27 s |
 | 2 | Completa | 467 en verde | 11 min 27 s |
 | 3 | `--veces=3` sobre `mcp.spec.ts`, `mcp2.spec.ts` (lento) | 3 vueltas en verde (17 cada una) | 1 min 32 s |
+| 4 | CI en `main` (`d20ef83`: unitarias, build, Vitest, `npm audit`, integración y E2E completa en `windows-2025`) | **success** | — |
 
 Archivos: `web/e2e/mcp2.spec.ts` (nuevo: Conectar con las casillas nuevas, Conexiones con la copia y descartarla, la propuesta
 MCP revisada y aplicada en Studio, con a11y) y `mcp.spec.ts` (el alcance desconocido de prueba y su mensaje). Capturas: las
