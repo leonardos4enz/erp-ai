@@ -41,6 +41,9 @@ de `53b355d` (solo roadmap) estaba en curso.
 | 3 | La misma, corregida | 3 × 95 en verde | 6 min 51 s |
 | 4 | Completa final | 463 en verde | 12 min 47 s |
 
+**CI** (segunda corrida completa): `a3be229` en `main`, integración y E2E completa en `windows-2025`: **success**
+(2026-11-01, 18:47–19:08 UTC, 21 min).
+
 Archivo nuevo: `ventas.spec.ts` (9 pruebas: una por criterio con UI, más preparar; corre después de `valuacion-contable`).
 Modificados: `h5-h6-seguridad.spec.ts` (`Cliente` → `UiCliente`), `seguridad.spec.ts` (`Cotizacion` → `SegCotizacion`) e
 `interfaz.spec.ts` (`Pedido` → `IfzPedido`): sus catálogos de prueba ocupaban los nombres de Ventas en la base compartida; se
