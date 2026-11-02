@@ -5,7 +5,7 @@
 - cierre: 2026-11-01 21:20
 - unitarias: 1125 (+19: 757 de Erp.Tests, +2; 295 de integración, +17; Vitest 73, +0)
 - e2e: 468 (+1: `canario.spec.ts › H1 (045)`)
-- corridas completas: 2 (dotnet test 2 min 14 s; E2E 468 en verde, 13 min 54 s), más la de CI en `main`
+- corridas completas: 2 (dotnet test 2 min 14 s; E2E 468 en verde, 13 min 54 s); la segunda completa fue CI en `main` (`2a307c0`), en verde
 - corridas parciales: 9 (integración de `Hardening045Tests` 2, `SalesTests` 1, `Mcp2Tests` H045 2, clases afectadas tras la revisión adversarial 1, `Hardening034Tests`+`McpTests.F04` 1; E2E de compras→ventas + canario 2); `--veces=3` 1
 - contra el código anterior: 5 (integración: las 17 nuevas contra `63bd34a` en tres pasadas; E2E: `canario.spec.ts` contra `63bd34a`; renovación con el bucle anterior puesto a mano)
 - hallazgos: 0/1/8 (revisión adversarial F-01…F-09: F-01, F-02, F-03, F-05 y F-07 corregidos; F-04, F-06, F-08 y F-09 a riesgos); exploratoria sin hallazgos
