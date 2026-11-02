@@ -8,7 +8,7 @@ import { Dialog } from './Dialog';
 import { ReferenceSelect } from './ReferenceSelect';
 import { Button, Input, Select } from './ui';
 
-export type Kind = 'text' | 'longtext' | 'number' | 'date' | 'boolean' | 'id' | 'choice';
+export type Kind = 'text' | 'longtext' | 'number' | 'date' | 'boolean' | 'id' | 'choice' | 'multi';
 
 /** Igual que el servidor (FilterSql): qué operadores admite cada clase de campo. */
 export function kindOf(f: FieldDef): Kind {
@@ -19,6 +19,7 @@ export function kindOf(f: FieldDef): Kind {
   if (t === 'date' || t === 'datetime') return 'date';
   if (t === 'boolean') return 'boolean';
   if (t === 'reference' || t === 'user' || t === 'parent') return 'id';
+  if (t === 'multireference' || t === 'multiuser') return 'multi';
   return 'text';
 }
 
@@ -30,6 +31,8 @@ export const OPS: Record<Kind, FilterOp[]> = {
   date: ['eq', 'gte', 'lte', 'gt', 'lt', 'blank', 'notBlank'],
   boolean: ['eq'],
   id: ['eq', 'ne', 'blank', 'notBlank'],
+  // Spec 050: «contiene» un registro (o persona), sin valores o con valores.
+  multi: ['contains', 'blank', 'notBlank'],
 };
 
 export const OP_LABELS: Record<FilterOp, string> = {
@@ -188,7 +191,7 @@ function ValueInput({ def, field: f, filter, n, onChange }: {
       </Select>
     );
   }
-  if (kind === 'id') {
+  if (kind === 'id' || kind === 'multi') {
     const id = `flt-${filter.key}`;
     return (
       <div className="field">
@@ -196,7 +199,7 @@ function ValueInput({ def, field: f, filter, n, onChange }: {
         <ReferenceSelect
           id={id}
           entity={f.referenceEntity ?? ''}
-          lookup={f.type === 'user' ? lookupUsers : undefined}
+          lookup={f.type === 'user' || f.type === 'multiuser' ? lookupUsers : undefined}
           value={typeof filter.value === 'number' ? filter.value : null}
           label={filter.label ?? null}
           onChange={(v, l) => onChange(v, l)}

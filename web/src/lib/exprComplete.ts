@@ -1,5 +1,5 @@
 import type { EntityDef, ExprFunction, FieldDef } from '../api/types';
-import { FIELD_TYPE_LABELS } from './entity';
+import { FIELD_TYPE_LABELS, isMultiField } from './entity';
 
 /**
  * Spec 026 (H3): autocompletado del editor de expresiones. Puro (sin React) para probarlo y razonarlo: dado el texto y el
@@ -123,11 +123,11 @@ export function complete(text: string, caret: number, scope: CompletionScope, fo
     const prefix = segs.join('.') + '.';
     const items = at.user
       ? USER_FIELDS.filter((n) => matches(last, n)).map((n): Suggestion => ({ kind: 'field', insert: prefix + n, label: n, detail: 'Dato del usuario' }))
-      : at.fields.filter((f) => !f.isArchived && f.type !== 'lines' && matches(last, f.name, f.label)).map((f) => fieldItem(f, prefix));
+      : at.fields.filter((f) => !f.isArchived && f.type !== 'lines' && !isMultiField(f) && matches(last, f.name, f.label)).map((f) => fieldItem(f, prefix));
     return items.length ? { from, to, items: items.slice(0, MAX_ITEMS), closeQuote: false } : null;
   }
 
-  const fields = scope.fields.filter((f) => !f.isArchived && matches(word, f.name, f.label)).map((f) => fieldItem(f, ''));
+  const fields = scope.fields.filter((f) => !f.isArchived && !isMultiField(f) && matches(word, f.name, f.label)).map((f) => fieldItem(f, ''));
   const upper = word.toUpperCase();
   const fns = scope.functions.filter((f) => f.name.startsWith(upper))
     .map((f): Suggestion => ({ kind: 'function', insert: `${f.name}(${f.max === 0 ? ')' : ''}`, label: f.name, detail: FUNCTION_HINTS[f.name] ?? `${f.name}()` }));

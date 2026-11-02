@@ -46,6 +46,24 @@ public static class DdlGenerator
         return sb.ToString();
     }
 
+    /// <summary>
+    /// Spec 050: tabla de unión de un campo de varios valores: <c>OwnerId</c> (el registro dueño) y <c>ValueId</c> (un registro
+    /// del catálogo destino o una persona), llave primaria compuesta y un índice por valor (para «pertenece a», spec 051).
+    /// </summary>
+    public static IReadOnlyList<string> CreateJoinTable(string entity, FieldDef f)
+    {
+        var table = JoinTable(entity, f.Name);
+        var value = f.Type == FieldTypes.MultiUser
+            ? $"[ValueId] int NOT NULL CONSTRAINT {Constraint("FK", entity, f.Name)} REFERENCES [meta].[User] ([Id])"
+            : $"[ValueId] bigint NOT NULL CONSTRAINT {Constraint("FK", entity, f.Name)} REFERENCES {AppTable(f.ReferenceEntity!)} ([Id])";
+        return
+        [
+            $"CREATE TABLE {table} (\n    [OwnerId] bigint NOT NULL CONSTRAINT {Constraint("FKO", entity, f.Name)} REFERENCES {AppTable(entity)} ([Id]),\n" +
+            $"    {value},\n    CONSTRAINT {Constraint("PKM", entity, f.Name)} PRIMARY KEY ([OwnerId], [ValueId])\n);",
+            $"CREATE INDEX {Constraint("IXM", entity, f.Name)} ON {table} ([ValueId], [OwnerId]);",
+        ];
+    }
+
     /// <summary>Columna de estado del proceso; los registros existentes quedan en el estado inicial.</summary>
     public static IReadOnlyList<string> AddStateColumn(string entity, string initialState)
     {
@@ -89,11 +107,13 @@ public static class DdlGenerator
         };
         if (perCompany) statements.Add(CompanyIndex(entity));
         foreach (var f in list) statements.AddRange(Indexes(entity, f, perCompany));
+        foreach (var f in list.Where(f => FieldTypes.IsMulti(f.Type))) statements.AddRange(CreateJoinTable(entity, f));
         return statements;
     }
 
     public static IReadOnlyList<string> AddColumn(string entity, FieldDef f, bool perCompany = false)
     {
+        if (FieldTypes.IsMulti(f.Type)) return CreateJoinTable(entity, f);
         if (FieldTypes.IsVirtual(f.Type)) return [];
         var statements = new List<string> { $"ALTER TABLE {AppTable(entity)} ADD {ColumnDefinition(entity, f)};" };
         statements.AddRange(Indexes(entity, f, perCompany));

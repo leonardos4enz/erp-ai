@@ -6,6 +6,8 @@
 // inventario y lo que se le dice al lector en la importación es lo mismo que en /compute (el bit, no solo la cadena).
 // Spec 041: también lo que el lector explora, exporta y guarda como reporte personal (H5 (041)).
 // Spec 045 (auditoría 8, D-01): y una partida detrás de un campo de partidas oculto (exploración, reporte del modelo y saltos).
+// Spec 050 (H6 CA1): y campos de varios valores: uno visible a un registro fuera de alcance, uno a un catálogo cuyo campo para
+// mostrar es una fórmula oculta y uno oculto por campo (registro, lista, exportación, OData con $expand y PDF).
 // Autocontenido: crea sus catálogos (grupo «Pruebas 029»), su empresa y su usuario, y los archiva al terminar.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -26,7 +28,7 @@ const ROLE = 'CN Lector';
 const COMPANY = { code: 'CN029', name: 'Empresa canario 029', baseCurrency: 'MXN' };
 const AVISO = 'Aviso del canario: el dato secreto está vacío.';
 const AVISO_OCULTO = 'Aviso del canario: el campo oculto tiene valor.';
-const ENTITIES = ['CnDoc', 'CnPuente2', 'CnPuente', 'CnSecreto', 'CnEmpresa'] as const;
+const ENTITIES = ['CnDoc', 'CnPuente2', 'CnPuente', 'CnSecreto', 'CnEmpresa', 'CnNombre'] as const;
 const REPORTS = ['PorDato', 'PorCopia', 'PorPuente', 'Conteo', 'PorSecreto2', 'PorSecretoRef2', 'PorPuenteDoble'] as const;
 /**
  * Spec 041: definiciones que el lector explora (y exporta, y guarda) por los mismos caminos que los reportes del modelo:
@@ -69,6 +71,9 @@ const MODEL = (canary: string) => ({
       { name: 'Folio', label: 'Folio', type: 'autonumber', prefix: 'CNS-', padding: 4 },
       { name: 'Nombre', label: 'Nombre', type: 'text', maxLength: 80, required: true },
       { name: 'Dato', label: 'Dato', type: 'text', maxLength: 120 } ] },
+    // Spec 050: su campo para mostrar es el canario (la etiqueta de un campo de varios valores).
+    { op: 'createEntity', group: GROUP, name: 'CnNombre', label: 'Nombre secreto 050', labelPlural: 'Nombres secretos 050', displayField: 'Nombre', fields: [
+      { name: 'Nombre', label: 'Nombre', type: 'text', maxLength: 120, required: true } ] },
     { op: 'createEntity', group: GROUP, name: 'CnEmpresa', label: 'Dato por empresa 029', labelPlural: 'Datos por empresa 029', displayField: 'Nombre', perCompany: true, fields: [
       { name: 'Nombre', label: 'Nombre', type: 'text', maxLength: 80, required: true },
       { name: 'Dato', label: 'Dato', type: 'text', maxLength: 120 } ] },
@@ -93,7 +98,11 @@ const MODEL = (canary: string) => ({
       // De un catálogo compartido a un registro de otra empresa.
       { name: 'OtraEmpresa', label: 'De otra empresa', type: 'formula', resultType: 'text', formula: 'Puente.Empresa.Dato' },
       // Una fórmula visible que lee un campo oculto (auditoría 4 D-05).
-      { name: 'Copia', label: 'Copia', type: 'formula', resultType: 'text', formula: "Oculto & ''" } ] },
+      { name: 'Copia', label: 'Copia', type: 'formula', resultType: 'text', formula: "Oculto & ''" },
+      // Spec 050: varios registros fuera de alcance, con campo para mostrar oculto y en un campo oculto.
+      { name: 'Nombres', label: 'Nombres', type: 'multireference', referenceEntity: 'CnNombre' },
+      { name: 'Puentes', label: 'Puentes', type: 'multireference', referenceEntity: 'CnPuente' },
+      { name: 'NombresOcultos', label: 'Nombres ocultos', type: 'multireference', referenceEntity: 'CnNombre' } ] },
     // Spec 045 (auditoría 8, D-01): partidas que solo ve el administrador (su campo de partidas está oculto para el lector).
     { op: 'createEntity', name: 'CnDocPartida', label: 'Partida 029', labelPlural: 'Partidas 029', fields: [
       { name: 'Doc', label: 'Documento', type: 'parent', referenceEntity: 'CnDoc' },
@@ -102,7 +111,9 @@ const MODEL = (canary: string) => ({
     { op: 'addField', entity: 'CnDoc', field: { name: 'Partidas', label: 'Partidas', type: 'lines', childEntity: 'CnDocPartida' } },
     { op: 'setReports', entity: 'CnDocPartida', reports: [{ name: 'PorPartida', label: 'Por dato de la partida', groupBy: [{ field: 'Dato' }], measures: [{ fn: 'count' }] }] },
     { op: 'setSecurity', entity: 'CnSecreto', security: { records: [{ roles: [ROLE], scope: 'own' }] } },
-    { op: 'setSecurity', entity: 'CnDoc', security: { fields: [{ field: 'Oculto', read: ['Administrador'] }, { field: 'Partidas', read: ['Administrador'] }] } },
+    { op: 'setSecurity', entity: 'CnNombre', security: { records: [{ roles: [ROLE], scope: 'own' }] } },
+    { op: 'setSecurity', entity: 'CnDoc', security: { fields: [{ field: 'Oculto', read: ['Administrador'] }, { field: 'Partidas', read: ['Administrador'] },
+      { field: 'NombresOcultos', read: ['Administrador'] }] } },
     { op: 'setLayout', entity: 'CnDoc', layout: { sections: [
       { name: 'General', label: 'General', fields: ['Nombre', 'Puente', 'Puente2', 'Oculto', 'Dos', 'Tres', 'OtraEmpresa'] },
       // Se ve solo si el dato secreto está vacío: con el canario legible, desaparecería (un bit de fuga por layout).
@@ -129,7 +140,8 @@ const MODEL = (canary: string) => ({
     { op: 'setPrintTemplates', entity: 'CnDoc', templates: [{ name: 'Canario', label: 'Canario', default: true, blocks: [
       { type: 'text', text: 'Documento {{ Folio }}' },
       { type: 'text', text: 'Dos: {{ Puente.Secreto.Dato }} · Tres: {{ Puente2.Puente.Secreto.Dato }} · Empresa: {{ Puente.Empresa.Dato }}' },
-      { type: 'text', text: 'Oculto: {{ Oculto }} · Fórmulas: {{ Dos }} {{ Tres }} {{ OtraEmpresa }} {{ Copia }}' } ] }] },
+      { type: 'text', text: 'Oculto: {{ Oculto }} · Fórmulas: {{ Dos }} {{ Tres }} {{ OtraEmpresa }} {{ Copia }}' },
+      { type: 'text', text: 'Varios: {{ Nombres }} / {{ Puentes }} / {{ NombresOcultos }}' } ] }] },
   ],
 }) as const;
 
@@ -171,7 +183,7 @@ test('preparar: canario en un campo oculto, fuera de alcance, detrás de uno vis
   if (!(await a.get('/api/model/entities/CnDoc')).ok()) await applyPlan(a, MODEL(canary));
   const perms = [
     { entity: 'CnDoc', canRead: true, canCreate: true, canUpdate: true, canDelete: false },
-    ...['CnPuente', 'CnPuente2', 'CnSecreto', 'CnEmpresa'].map((entity) => ({ entity, canRead: true, canCreate: false, canUpdate: false, canDelete: false })),
+    ...['CnPuente', 'CnPuente2', 'CnSecreto', 'CnEmpresa', 'CnNombre'].map((entity) => ({ entity, canRead: true, canCreate: false, canUpdate: false, canDelete: false })),
   ];
   const roleBody = { name: ROLE, description: 'E2E spec 029', canManageModel: false, canManageUsers: false, canViewAudit: true, permissions: perms };
   const r = await a.put(`/api/admin/roles/${role}`, { data: roleBody });
@@ -206,8 +218,9 @@ test('preparar: canario en un campo oculto, fuera de alcance, detrás de uno vis
   ids.puente = await post('CnPuente', { Nombre: 'Puente visible', Secreto: ids.secreto });
   ids.puente2 = await post('CnPuente2', { Nombre: 'Puente doble visible', Puente: ids.puente });
   // Un secreto propio del lector, con un dato que sí puede ver (para comprobar que el alcance no apaga todo).
+  ids.nombre = await post('CnNombre', { Nombre: canary });
   ids.doc = await post('CnDoc', { Nombre: 'Documento visible', Puente: ids.puente, Puente2: ids.puente2, Oculto: canary,
-    Partidas: [{ Concepto: 'Partida oculta', Dato: canary }] });
+    Partidas: [{ Concepto: 'Partida oculta', Dato: canary }], Nombres: [ids.nombre], Puentes: [ids.puente], NombresOcultos: [ids.nombre] });
   ids.docEmpresa = await post('CnDoc', { Nombre: 'Documento con otra empresa', Puente: ids.puenteEmpresa });
   state = { canary, ids };
   save();
@@ -261,7 +274,7 @@ function expand(template: string, ids: Record<string, number>): string[] {
   if (template.includes('{**')) return [];
   const byEntity: Record<string, number[]> = {
     CnDoc: [ids.doc, ids.docEmpresa], CnPuente: [ids.puente, ids.puenteEmpresa], CnPuente2: [ids.puente2],
-    CnSecreto: [ids.secreto], CnEmpresa: [ids.empresa],
+    CnSecreto: [ids.secreto], CnEmpresa: [ids.empresa], CnNombre: [ids.nombre],
   };
   let urls = [template];
   const fill = (param: string, values: string[]) => {
@@ -669,6 +682,35 @@ test('H3 CA3: el PDF conserva «(sin acceso)» por salto y no imprime las fórmu
   expect(text).not.toContain(state.canary);
   const own = pdfText(await (await (await admin()).get(`/api/data/CnDoc/${state.ids.doc}/pdf`)).body());
   expect(own).toContain(state.canary);
+});
+
+// Spec 050 (H6 CA1): los campos de varios valores por todos los caminos que leen un registro. El administrador ve el canario
+// (control positivo); el lector recibe los ids con «(sin acceso)» y nunca el campo oculto.
+test('H6 CA1 (050): varios valores fuera de alcance, con etiqueta oculta o en un campo oculto: el administrador ve el canario y el lector no', async () => {
+  const a = await admin();
+  const l = await lector();
+  const { canary, ids } = state;
+  const paths = [`/api/data/CnDoc/${ids.doc}`, '/odata/CnDoc?$expand=Nombres,Puentes'];
+  for (const p of paths) expect(await (await a.get(p)).text(), p).toContain(canary);
+  expect(await (await a.get('/api/data/CnDoc/export', { params: { format: 'csv', columns: 'Nombre,Nombres,NombresOcultos' } })).text()).toContain(canary);
+
+  const row = await (await l.get(`/api/data/CnDoc/${ids.doc}`)).json();
+  expect(row.Nombres).toEqual([ids.nombre]);
+  expect(row.Nombres__label).toEqual(['(sin acceso)']);
+  expect(row.Puentes__label).toEqual(['(sin acceso)']); // el campo para mostrar de CnPuente lee el secreto
+  expect(row).not.toHaveProperty('NombresOcultos');
+  for (const res of [await l.get(`/api/data/CnDoc/${ids.doc}`), await l.get('/api/data/CnDoc', { params: { pageSize: 50 } }),
+    await l.get('/api/data/CnDoc/export', { params: { format: 'csv', columns: 'Nombre,Nombres,Puentes,NombresOcultos' } }),
+    await l.get('/odata/CnDoc', { params: { $expand: 'Nombres,Puentes' } }), await l.get(`/odata/CnDoc(${ids.doc})`, { params: { $expand: 'Nombres' } })]) {
+    expect(res.status(), res.url()).toBe(200);
+    expect(await res.text(), res.url()).not.toContain(canary);
+  }
+  // Por OData, lo que no ve no aparece; el campo oculto no es navegación.
+  const od = await (await l.get(`/odata/CnDoc(${ids.doc})`, { params: { $expand: 'Nombres' } })).json();
+  expect(od.Nombres).toEqual([]);
+  expect((await l.get('/odata/CnDoc', { params: { $expand: 'NombresOcultos' } })).status()).toBe(400);
+  // Filtrar por el campo oculto: 400 (no es un oráculo).
+  expect((await l.get('/api/data/CnDoc', { params: { filters: JSON.stringify([{ field: 'NombresOcultos', op: 'contains', value: ids.nombre }]) } })).status()).toBe(400);
 });
 
 // ---------------- H4 CA3: el bloqueo por avisos no lista los que leen ocultos (D-08) ----------------

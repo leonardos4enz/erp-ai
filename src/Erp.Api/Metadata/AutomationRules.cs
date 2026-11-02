@@ -272,6 +272,9 @@ public static class AutomationRules
         foreach (var s in set ?? [])
             if (target.FindField(s.Field) is not { IsArchived: false } f || f.ReadOnly || f.Type == FieldTypes.Lines)
                 yield return $"no se puede asignar '{s.Field}' en {target.Name}.";
+            // Spec 050: una expresión da un valor simple; un campo de varios valores no se asigna así.
+            else if (FieldTypes.IsMulti(f.Type))
+                yield return $"'{s.Field}' tiene varios valores y no se asigna con una expresión.";
     }
 
     private static IEnumerable<string> MissingRequired(EntityDef target, IEnumerable<string> provided)

@@ -246,7 +246,7 @@ function Card({ c, onOpen }: { c: EntityCard; onOpen: (v: ExplorerView, e?: stri
 
       <Section title="Lo referencian" count={c.referencedBy.length}>
         {c.referencedBy.length ? (
-          <ul className="ex-list">{c.referencedBy.map((r) => <li key={`${r.from}.${r.field}`}><span className="mono">{r.from}.{r.field}</span> <span className="subtle">({r.kind === 'lines' ? 'partidas' : r.kind === 'parent' ? 'documento' : 'referencia'})</span></li>)}</ul>
+          <ul className="ex-list">{c.referencedBy.map((r) => <li key={`${r.from}.${r.field}`}><span className="mono">{r.from}.{r.field}</span> <span className="subtle">({r.kind === 'lines' ? 'partidas' : r.kind === 'parent' ? 'documento' : r.kind === 'multireference' ? 'varios registros' : 'referencia'})</span></li>)}</ul>
         ) : <None>Nadie lo referencia.</None>}
       </Section>
     </div>

@@ -56,7 +56,8 @@ en orden, no en paralelo: casi todas tocan el núcleo del motor (`PlanCompiler`,
 | 048 Acompañante 2: permiso en la conversación y de dónde sale cada campo | Implementado ([spec](specs/048-acompanante-permiso/spec.md)) |
 | Auditoría 9 (045–048) | Hecha ([resultado](#auditorías)) |
 | 049 Endurecimiento 8 (auditoría 9) | Implementado ([spec](specs/049-endurecimiento-8/spec.md)) |
-| 050 Campos de varios valores, «pertenece a» y filtros compuestos | **Siguiente** ([propuesta](#specs-planeadas-después-de-la-049-piezas-para-procesos-complejos)) |
+| 050 Campos de varios valores | Implementado ([spec](specs/050-campos-varios-valores/spec.md)) |
+| 051 «Pertenece a» en expresiones y filtros de búsqueda compuestos | **Siguiente** ([propuesta](#051--pertenece-a-en-expresiones-y-filtros-de-búsqueda-compuestos-propuesta)) |
 
 ## Diagnóstico
 | Brecha señalada | Situación actual | Spec |
@@ -68,7 +69,7 @@ en orden, no en paralelo: casi todas tocan el núcleo del motor (`PlanCompiler`,
 | Entornos (sandbox → producción) | ~~No se exporta lo hecho en el modelador~~ Resuelto en la 009: paquetes exportados con el formato de los módulos, firmados, con diff contra el destino (plan mínimo por el Plan de Cambios), aplicación versionada y aprobación de otro administrador en producción | **009** |
 | Multi-empresa y multi-moneda real | ~~Una sola empresa; el tipo de cambio se captura a mano~~ Resuelto en la 010: empresas con moneda base, catálogos compartidos o por empresa (filtro en el servidor junto con la 006, también para el superusuario), tipos de cambio por fecha y `RATE`/`CONVERT`/`BASECURRENCY()` en fórmulas | **010** |
 | Extensión con código | Prohibida por la constitución (I.1), a propósito | Decisión abajo |
-| Procesos complejos (revisión del dueño, 2026-11-02) | El motor cubre bien lo documental, pero no la pertenencia de un usuario a varios registros, los campos de varios valores, los filtros de búsqueda compuestos, la autorización configurable por datos (niveles, perfiles, montos), los adjuntos con reglas ni elegir qué partidas pasan al siguiente documento | **050–055** ([detalle](#specs-planeadas-después-de-la-049-piezas-para-procesos-complejos)) |
+| Procesos complejos (revisión del dueño, 2026-11-02) | El motor cubre bien lo documental, pero no la pertenencia de un usuario a varios registros, los campos de varios valores, los filtros de búsqueda compuestos, la autorización configurable por datos (niveles, perfiles, montos), los adjuntos con reglas ni elegir qué partidas pasan al siguiente documento | **050–056** ([detalle](#specs-planeadas-después-de-la-049-piezas-para-procesos-complejos)) |
 
 ## Orden y razón
 ```
@@ -844,20 +845,30 @@ conteo), pero no lo que hace configurable a un proceso así:
 
 | Lo que no cabe hoy | Por qué | Pieza |
 |---|---|---|
-| Cada persona usa solo sus 4 centros de 50 | Las reglas de acceso solo comparan un campo con `CURRENTUSER()`; no preguntan «¿está en la lista?» | 050 |
+| Cada persona usa solo sus 4 centros de 50 | Las reglas de acceso solo comparan un campo con `CURRENTUSER()`; no preguntan «¿está en la lista?» | 051 |
 | Un proveedor con varias categorías | No hay campos de varios valores | 050 |
-| «Solo proveedores que no son prospecto y son de esta categoría» | `lookupFilter` admite una sola condición y no admite constantes | 050 |
-| Quién autoriza lo configura el administrador (perfiles, personas, niveles, montos) | Quién ejecuta una transición son roles fijos del proceso | 051 |
-| Niveles en orden; un nivel vacío se salta | El proceso tiene estados fijos | 051 |
-| Solo ves el documento cuando te toca autorizarlo | Necesita la pertenencia de la 050 y la matriz de la 051 | 051 |
-| Adjuntar los documentos de los proveedores (mínimo los que pida el subgrupo); no editar si ya tiene | No hay adjuntos en los registros (solo imágenes del sistema) | 052 |
-| Elegir qué partidas de la requisición pasan a la cotización | `createLines.from` copia todas las que cumplan su `when`; no hay pantalla de selección | 052 |
+| «Solo proveedores que no son prospecto y son de esta categoría» | `lookupFilter` admite una sola condición y no admite constantes | 051 |
+| Quién autoriza lo configura el administrador (perfiles, personas, niveles, montos) | Quién ejecuta una transición son roles fijos del proceso | 052 |
+| Niveles en orden; un nivel vacío se salta | El proceso tiene estados fijos | 052 |
+| Solo ves el documento cuando te toca autorizarlo | Necesita la pertenencia de la 051 y la matriz de la 052 | 052 |
+| Adjuntar los documentos de los proveedores (mínimo los que pida el subgrupo); no editar si ya tiene | No hay adjuntos en los registros (solo imágenes del sistema) | 053 |
+| Elegir qué partidas de la requisición pasan a la cotización | `createLines.from` copia todas las que cumplan su `when`; no hay pantalla de selección | 053 |
 
-### 050 — Campos de varios valores, «pertenece a» y filtros compuestos (propuesta)
-- **Campo de varios valores** (`multireference`): un registro apunta a varios de otro catálogo (una persona → varios centros;
-  un proveedor → varias categorías). Tabla de unión generada por el DDL, con `rowversion` del registro dueño, bitácora
-  antes/después, importación y exportación, OData (`$expand`), reportes (filtrar «contiene»), formularios (selector múltiple
-  accesible) y el canario de la 029.
+**División (CLARIFY de la 050, dueño, 2026-11-02):** la 050 pasaba de ~2 500 líneas y juntaba seguridad con UI nueva: la
+**050** es el campo de varios valores y la **051** «pertenece a» y los filtros compuestos. Lo que seguía se recorre un número
+(matriz 052, 054 y 055; adjuntos 053; banco de pruebas 056).
+
+### ~~050 — Campos de varios valores~~ Implementado ([spec](specs/050-campos-varios-valores/spec.md), [verify](specs/050-campos-varios-valores/verify.md))
+`multireference` (varios registros de un catálogo) y `multiuser` (varias personas) en una tabla de unión `app.[Catalogo__Campo]`
+que genera el DDL; la `rowversion` del dueño es la versión de los valores. API (lista de ids y etiquetas), formulario con
+selector múltiple accesible, lista, `/compute`, bitácora, importación y exportación («; »), filtros «contiene / alguno / vacío»
+en listas, vistas y reportes, OData (`$expand`), PDF, Acompañante y canario. Compras 1.11.0 lo ejerce (categorías que surte el
+proveedor, responsables del departamento). **Fuera** (pendientes): agrupar reportes por el campo, `multiuser` por OData, campos
+de varios valores en partidas y la vista inversa.
+
+### 051 — «Pertenece a» en expresiones y filtros de búsqueda compuestos (propuesta)
+Se apoya en la tabla de unión de la 050 (índice por `ValueId`). Hoy una fórmula, regla, condición o automatización que lea un
+campo de varios valores se rechaza con un mensaje que nombra esta spec.
 - **«Pertenece a» en expresiones:** `X IN Campo` / `CONTAINS(Campo, X)` y `CURRENTUSER() IN …` (p. ej. «el centro de la
   requisición es uno de los centros de la persona»). En reglas, condiciones de transición, filtros de búsqueda y **seguridad
   por registro** (traducible a SQL con `EXISTS`, parametrizado; constitución II.1).
@@ -866,9 +877,9 @@ conteo), pero no lo que hace configurable a un proceso así:
   la lista), en la importación y en el Acompañante.
 - **Dónde está el riesgo:** seguridad por registro y lectura de datos en todos los caminos (lista, registro, búsqueda,
   reportes, exportación, OData, MCP, Acompañante, impresión). STRIDE con pruebas de integración y canario.
-- **Dividir** si en CLARIFY pasa de ~2 500 líneas: el campo de varios valores primero, «pertenece a» y filtros después.
+- **Asignar el campo** desde una transición o una automatización (agregar o quitar un valor), hoy rechazado al validar el plan.
 
-### 051 — Matriz de autorización: núcleo (propuesta)
+### 052 — Matriz de autorización: núcleo (propuesta)
 Capacidad genérica del motor (en SAP, *estrategia de liberación*): **quién autoriza deja de estar escrito en el proceso y pasa a
 ser una tabla que llena un administrador**; el motor la consulta en cada documento.
 - **Declaración en el catálogo (metadatos):** el proceso usa la matriz desde un estado (p. ej. «Pendiente»), pasa a otro al
@@ -895,7 +906,7 @@ ser una tabla que llena un administrador**; el motor la consulta en cada documen
   vez → una sola decisión cuenta.
 - **Es delegación de privilegios** → dispara la **auditoría 10** al cerrar.
 
-### 052 — Adjuntos en registros y selección de partidas (propuesta)
+### 053 — Adjuntos en registros y selección de partidas (propuesta)
 - **Adjuntos:** archivos en un registro (tipos y tamaño permitidos, antivirus o validación de tipo como `ImageValidator`,
   almacenamiento fuera de la fila), con permisos del registro, bitácora y el canario; **reglas sobre ellos**: «mínimo N
   adjuntos» (N puede venir de otro registro, p. ej. del subgrupo), «no se edita si tiene adjuntos», «se exige para ejecutar la
@@ -904,8 +915,8 @@ ser una tabla que llena un administrador**; el motor la consulta en cada documen
   con `createLines` que respete la selección; las ya usadas quedan marcadas (cantidades pendientes como en la 005).
 - **Riesgo:** un punto de entrada nuevo (subida de archivos): límites de tamaño y tasa, tipos, ruta de descarga con permiso.
 
-### 053 — Matriz de autorización: fase 2 (propuesta)
-- **Dentro de un nivel:** «uno de varios» (la 051), **todos**, **N de M** («2 de los 3 directores») y **en paralelo**
+### 054 — Matriz de autorización: fase 2 (propuesta)
+- **Dentro de un nivel:** «uno de varios» (la 052), **todos**, **N de M** («2 de los 3 directores») y **en paralelo**
   (finanzas y legal en el mismo nivel, cada uno por su lado).
 - **Autorizador por relación:** sale de los datos («el jefe de quien creó», «el responsable del centro», «el dueño del
   proyecto»), no solo de un perfil.
@@ -915,7 +926,7 @@ ser una tabla que llena un administrador**; el motor la consulta en cada documen
 - **Regresar para corrección** (no solo rechazar): vuelve a quien lo creó y, según la regla, retoma desde el nivel 1 o desde
   donde se quedó.
 
-### 054 — Matriz de autorización: fase 3 y avisos (propuesta)
+### 055 — Matriz de autorización: fase 3 y avisos (propuesta)
 - **Avisos dentro del ERP** (campanita con bandeja por persona): no requiere correo; sirve también al Acompañante y a las
   automatizaciones. El correo llega después por **SMTP genérico** (cualquier proveedor); para desarrollo y pruebas, un SMTP
   falso local (smtp4dev o Papercut) que atrapa los correos sin enviarlos.
@@ -927,7 +938,7 @@ ser una tabla que llena un administrador**; el motor la consulta en cada documen
 - **Simulador** para el administrador: «¿quién autorizaría una cotización de cómputo por 80 000 en el centro X?», sin crear
   documentos (también como herramienta del Acompañante).
 
-### 055 — Banco de pruebas de complejidad (propuesta)
+### 056 — Banco de pruebas de complejidad (propuesta)
 - Un paquete de ejemplo **inventado** («Compras 2»: requisición con centros por persona, grupo → subgrupo → producto o
   servicio, autorización por niveles, cotización con varios proveedores y adjuntos, autorización por montos, orden de compra)
   instalado por `modules/` sin código propio, con su E2E.
@@ -938,16 +949,16 @@ ser una tabla que llena un administrador**; el motor la consulta en cada documen
   (reservas), **cálculo recursivo** (lista de materiales multinivel, MRP), **tablas de búsqueda en fórmulas** (listas de precios
   por escala), **validación síncrona contra un sistema externo** antes de guardar, **temporizadores por registro**.
 
-**Auditoría 10:** tras la 053 (cuenta 049–053), o antes si la 051 lo pide por delegación de privilegios: el dueño decide al
-cerrar la 051.
+**Auditoría 10:** tras la 053 (cuenta 049–053), o antes si la matriz (052) lo pide por delegación de privilegios: el dueño
+decide al cerrar la 052.
 
 ### Ideas sin orden (revisión del dueño, 2026-11-02)
 - **Portal externo** para clientes y proveedores: usuarios externos amarrados a un cliente o proveedor **de cada empresa**, que
   solo ven lo suyo (pedidos, facturas, estado de cuenta; órdenes y carga de facturas). Reutiliza la seguridad por registro
-  (006) y la 050; es un punto de entrada nuevo (auditoría).
+  (006) y la 050–051; es un punto de entrada nuevo (auditoría).
 - **PWA móvil:** la misma SPA instalable en el celular (icono, pantalla completa, cámara para códigos de barras), con
   pantallas pensadas para el dedo (recibir mercancía, buscar un producto, autorizar).
-- **Correo y actividades** sobre registros (mandar el PDF de una cotización, tareas y recordatorios), con el SMTP de la 054.
+- **Correo y actividades** sobre registros (mandar el PDF de una cotización, tareas y recordatorios), con el SMTP de la 055.
 - **Acompañante proactivo:** «¿qué pasa si…?», avisos programados en la campanita (una revisión al día, no en cada cambio, por
   costo) y anomalías (duplicados, precios fuera de rango, existencias negativas); siempre propone, nunca ejecuta solo.
 - **Bloqueadas por falta de datos o accesos** (el dueño no tiene PAC, respaldos de otros sistemas ni documentos reales):

@@ -144,7 +144,7 @@ public sealed partial class RecordService(Db db, MetadataStore store)
             ? model.TryGetValue(o.ParentEntity!, out var p) && (user.Access(p.Name).Create || user.Access(p.Name).Update)
             : user.Access(o.Name).Create || user.Access(o.Name).Update;
         var allowed = user.Access(e.Name).Read || model.Values.Any(o => !o.IsArchived &&
-            o.ActiveFields.Any(f => f.Type == FieldTypes.Reference && string.Equals(f.ReferenceEntity, e.Name, StringComparison.OrdinalIgnoreCase)) &&
+            o.ActiveFields.Any(f => f.Type is FieldTypes.Reference or FieldTypes.MultiReference && string.Equals(f.ReferenceEntity, e.Name, StringComparison.OrdinalIgnoreCase)) &&
             CanWrite(o));
         Require(allowed);
 
@@ -510,6 +510,17 @@ public sealed partial class RecordService(Db db, MetadataStore store)
                 throw new Conflict($"No se puede eliminar: está en uso en {where} ({f.Label}).");
             }
         }
+        // Spec 050 (revisión adversarial F-01): ni el que es uno de los valores de un campo de varios valores de un registro vigente.
+        foreach (var other in model.Values)
+        foreach (var f in other.Fields.Where(f => f.Type == FieldTypes.MultiReference && string.Equals(f.ReferenceEntity, e.Name, StringComparison.OrdinalIgnoreCase)))
+        {
+            await using var check = new SqlCommand(
+                $"SELECT TOP 1 1 FROM {JoinTable(other.Name, f.Name)} j JOIN {AppTable(other.Name)} o ON o.[Id] = j.[OwnerId] " +
+                "WHERE j.[ValueId] = @id AND o.[IsDeleted] = 0", cn, tx);
+            check.Parameters.Add(new SqlParameter("@id", id));
+            if (await check.ExecuteScalarAsync(ct) is not null)
+                throw new Conflict($"No se puede eliminar: está en uso en {other.LabelPlural} ({f.Label}).");
+        }
 
         // Spec 020: no se elimina lo contabilizado en un periodo cerrado (lo aplicado, además, no es editable).
         await CheckLedgerAsync(cn, tx, e, model, null, draft.CompanyId, LedgerSnapshot(e, Snapshot(draft)), id, ct);
@@ -741,6 +752,13 @@ public sealed partial class RecordService(Db db, MetadataStore store)
                 continue;
             }
 
+            if (FieldTypes.IsMulti(f.Type))
+            {
+                try { d.Header[f.Name] = ParseMulti(f, prop.Value, d.Header.GetValueOrDefault(f.Name), loader, writer.User); }
+                catch (FieldError ex) { if (!lenient) errors[f.Name] = [ex.Message]; }
+                continue;
+            }
+
             try
             {
                 var value = await ParseValueAsync(f, prop.Value, loader, ct);
@@ -750,6 +768,43 @@ public sealed partial class RecordService(Db db, MetadataStore store)
             catch (FieldError ex) { if (!lenient) errors[f.Name] = [ex.Message]; }
         }
         if (errors.Count > 0) throw new ValidationFailed(errors);
+    }
+
+    /// <summary>
+    /// Spec 050: la lista de ids de un campo de varios valores, sin repetidos y en orden. Cada id nuevo debe existir y verse
+    /// (spec 006, como una referencia: enlazar no da lectura); los que el registro ya tenía se conservan aunque ya no los vea.
+    /// </summary>
+    private static List<long> ParseMulti(FieldDef f, JsonElement v, object? current, RelatedLoader loader, UserContext user)
+    {
+        if (v.ValueKind == JsonValueKind.Null) return [];
+        if (v.ValueKind != JsonValueKind.Array) throw new FieldError($"{f.Label} espera una lista.");
+        if (v.GetArrayLength() > FieldTypes.MaxMultiValues) throw new FieldError($"{f.Label} admite máximo {FieldTypes.MaxMultiValues} valores.");
+        var had = current as IReadOnlyCollection<long> ?? [];
+        var ids = new SortedSet<long>();
+        foreach (var item in v.EnumerateArray())
+        {
+            long id;
+            try
+            {
+                id = item.ValueKind == JsonValueKind.String
+                    ? long.Parse(item.GetString()!, NumberStyles.Integer, CultureInfo.InvariantCulture)
+                    : item.GetInt64();
+            }
+            catch (Exception ex) when (ex is FormatException or InvalidOperationException or OverflowException)
+            {
+                throw new FieldError($"Valor inválido para {f.Label}.");
+            }
+            if (!ids.Add(id) || had.Contains(id)) continue;
+            if (f.Type == FieldTypes.MultiUser)
+            {
+                // Personas, no equipos (un equipo es dueño de registros, spec 015).
+                if (id is < 1 or > int.MaxValue || loader.Principal((int)id) is not { IsTeam: false })
+                    throw new FieldError("El usuario seleccionado no existe.");
+            }
+            else if (loader.Row(f.ReferenceEntity!, id) is null || !loader.Visible(f.ReferenceEntity!, id, user))
+                throw new FieldError("El registro seleccionado no existe.");
+        }
+        return [.. ids];
     }
 
     /// <summary>
@@ -883,7 +938,7 @@ public sealed partial class RecordService(Db db, MetadataStore store)
     /// </summary>
     internal static decimal WithScale(decimal d, int scale) =>
         d.Scale >= scale ? d : d + new decimal(0, 0, 0, false, (byte)Math.Clamp(scale, 0, 28));
-    private static bool IsBlank(object? v) => v is null || v is string s && string.IsNullOrWhiteSpace(s);
+    private static bool IsBlank(object? v) => v is null || v is string s && string.IsNullOrWhiteSpace(s) || v is System.Collections.ICollection { Count: 0 };
 
     private static byte[] ReadRowVersion(string? value)
     {
@@ -951,7 +1006,32 @@ public sealed partial class RecordService(Db db, MetadataStore store)
         pars.Add("@uid");
         cmd.Parameters.Add(new SqlParameter("@uid", userId));
         cmd.CommandText = $"INSERT INTO {AppTable(e.Name)} ({string.Join(", ", cols)}) OUTPUT inserted.[Id] VALUES ({string.Join(", ", pars)})";
-        return (long)(await ExecuteMappingUniqueAsync(e, () => cmd.ExecuteScalarAsync(ct)))!;
+        var id = (long)(await ExecuteMappingUniqueAsync(e, () => cmd.ExecuteScalarAsync(ct)))!;
+        await SaveMultiAsync(cn, tx, e, id, values, ct);
+        return id;
+    }
+
+    /// <summary>
+    /// Spec 050: deja la tabla de unión de cada campo de varios valores igual a la lista del borrador. Solo se llama junto con
+    /// el alta o el <c>UPDATE</c> de la fila dueña, en su transacción: su <c>rowversion</c> es también la versión de los valores
+    /// (dos ediciones con la misma versión: la segunda no llega aquí). Un campo que el borrador no trae no se toca.
+    /// </summary>
+    private static async Task SaveMultiAsync(SqlConnection cn, SqlTransaction tx, EntityDef e, long id, Values values, CancellationToken ct)
+    {
+        foreach (var f in e.MultiFields)
+        {
+            if (values.GetValueOrDefault(f.Name) is not IReadOnlyCollection<long> ids) continue;
+            var table = JoinTable(e.Name, f.Name);
+            await using var cmd = new SqlCommand($"""
+                DELETE FROM {table} WHERE [OwnerId] = @id AND [ValueId] NOT IN (SELECT CAST([value] AS bigint) FROM OPENJSON(@ids));
+                INSERT INTO {table} ([OwnerId], [ValueId])
+                SELECT @id, CAST(v.[value] AS bigint) FROM OPENJSON(@ids) v
+                 WHERE NOT EXISTS (SELECT 1 FROM {table} x WHERE x.[OwnerId] = @id AND x.[ValueId] = CAST(v.[value] AS bigint));
+                """, cn, tx);
+            cmd.Parameters.Add(new SqlParameter("@id", id));
+            cmd.Parameters.Add(new SqlParameter("@ids", JsonSerializer.Serialize(ids)));
+            await cmd.ExecuteNonQueryAsync(ct);
+        }
     }
 
     private static async Task UpdateHeaderAsync(SqlConnection cn, SqlTransaction tx, EntityDef e, long id, Values values,
@@ -975,6 +1055,7 @@ public sealed partial class RecordService(Db db, MetadataStore store)
             """;
         var affected = (int)(await ExecuteMappingUniqueAsync(e, async () => (object?)await cmd.ExecuteNonQueryAsync(ct)))!;
         if (affected == 0) throw new Conflict("Otro usuario modificó este registro. Recarga para ver los cambios.");
+        await SaveMultiAsync(cn, tx, e, id, values, ct);
     }
 
     private static async Task SaveLinesAsync(SqlConnection cn, SqlTransaction tx, EntityDef e, IReadOnlyDictionary<string, EntityDef> model,
@@ -1064,6 +1145,16 @@ public sealed partial class RecordService(Db db, MetadataStore store)
         // Spec 010: la empresa no es un campo; va aparte para no llegar a fórmulas, auditoría ni respuestas.
         int? company = header.Remove(DdlGenerator.CompanyColumn, out var co) ? co as int? : null;
         var draft = new DocDraft { Id = id, CreatorId = header["CreatedBy"] as int?, CompanyId = company, Header = header };
+        // Spec 050: los campos de varios valores, como lista de ids en orden (bitácora, cálculo y nueva escritura).
+        foreach (var mf in e.MultiFields)
+        {
+            await using var cmd = new SqlCommand($"SELECT [ValueId] FROM {JoinTable(e.Name, mf.Name)} WHERE [OwnerId] = @id ORDER BY [ValueId]", cn, tx);
+            cmd.Parameters.Add(new SqlParameter("@id", id));
+            var ids = new List<long>();
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            while (await r.ReadAsync(ct)) ids.Add(Convert.ToInt64(r.GetValue(0), CultureInfo.InvariantCulture));
+            header[mf.Name] = ids;
+        }
 
         foreach (var lf in e.ActiveFields.Where(f => f.Type == FieldTypes.Lines))
         {
@@ -1199,7 +1290,24 @@ public sealed partial class RecordService(Db db, MetadataStore store)
             if (f.Type == FieldTypes.User)
                 row[f.Name + "__label"] = loader.User(Convert.ToInt32(v))?.GetValueOrDefault("Nombre");
         }
+        // Spec 050: ids y etiquetas (el mismo criterio que SelectClause), ordenados por etiqueta.
+        foreach (var f in e.MultiFields)
+        {
+            var ids = values.GetValueOrDefault(f.Name) as IReadOnlyCollection<long> ?? [];
+            var items = ids.Select(id => (Id: id, Label: MultiLabel(f, id, model, loader, user)))
+                .OrderBy(x => x.Label, StringComparer.CurrentCulture).ThenBy(x => x.Id).ToList();
+            row[f.Name] = items.Select(x => x.Id).ToList();
+            row[f.Name + "__label"] = items.Select(x => x.Label).ToList();
+        }
         return row;
+    }
+
+    private static string? MultiLabel(FieldDef f, long id, IReadOnlyDictionary<string, EntityDef> model, RelatedLoader loader, UserContext user)
+    {
+        if (f.Type == FieldTypes.MultiUser) return Convert.ToString(loader.User((int)id)?.GetValueOrDefault("Nombre"), CultureInfo.InvariantCulture);
+        if (!model.TryGetValue(f.ReferenceEntity!, out var target)) return null;
+        if (!loader.Visible(target.Name, id, user) || FieldAccess.DisplayHidden(target, user)) return ReportService.NoAccess;
+        return target.EffectiveDisplayField is { } d ? Convert.ToString(loader.Row(target.Name, id)?.GetValueOrDefault(d), CultureInfo.InvariantCulture) : $"#{id}";
     }
 
     private static object? FormatField(FieldDef? f, object? value) =>
@@ -1247,6 +1355,34 @@ public sealed partial class RecordService(Db db, MetadataStore store)
                 from.Append($" LEFT JOIN meta.[User] {alias} ON {alias}.[Id] = t.{Quote(f.Name)}");
             }
         }
+        // Spec 050: cada campo de varios valores, como JSON [{ i, l }] ordenado por etiqueta; la etiqueta, con el criterio de una
+        // referencia (alcance del destino y su campo para mostrar visible).
+        foreach (var f in e.MultiFields)
+        {
+            var alias = $"m{j++}";
+            string label;
+            string join;
+            if (f.Type == FieldTypes.MultiUser)
+            {
+                label = $"{alias}.[DisplayName]";
+                join = $"LEFT JOIN meta.[User] {alias} ON {alias}.[Id] = j.[ValueId]";
+            }
+            else if (model.TryGetValue(f.ReferenceEntity!, out var target))
+            {
+                label = FieldAccess.DisplayHidden(target, user) ? $"N'{ReportService.NoAccess}'"
+                    : target.EffectiveDisplayField is { } d ? $"CAST({alias}.{Quote(d)} AS nvarchar(400))" : $"CAST(j.[ValueId] AS nvarchar(20))";
+                if (RecordFilter.ForRecordOrParent(target, model, user) is { } scope)
+                {
+                    var p = scope.Prefixed($"mlbl{j}_");
+                    pars.AddRange(p.Parameters);
+                    label = $"CASE WHEN EXISTS (SELECT 1 FROM {AppTable(target.Name)} t WHERE t.[Id] = j.[ValueId] AND {p.Sql}) THEN {label} ELSE N'{ReportService.NoAccess}' END";
+                }
+                join = $"LEFT JOIN {AppTable(target.Name)} {alias} ON {alias}.[Id] = j.[ValueId]";
+            }
+            else continue;
+            cols.Add($"(SELECT j.[ValueId] AS [i], {label} AS [l] FROM {JoinTable(e.Name, f.Name)} j {join} WHERE j.[OwnerId] = t.[Id] " +
+                     $"ORDER BY [l], j.[ValueId] FOR JSON PATH) AS [{Quote(f.Name)[1..^1]}{MultiSuffix}]");
+        }
         cols.AddRange(["t.[CreatedAt]", "cu.[DisplayName] AS [CreatedByName]", "t.[UpdatedAt]", "uu.[DisplayName] AS [UpdatedByName]", "t.[RowVer]"]);
         from.Append(" LEFT JOIN meta.[User] cu ON cu.[Id] = t.[CreatedBy] LEFT JOIN meta.[User] uu ON uu.[Id] = t.[UpdatedBy]");
         return (string.Join(", ", cols), from.ToString(), pars);
@@ -1284,6 +1420,13 @@ public sealed partial class RecordService(Db db, MetadataStore store)
                 case "UpdatedAt": row["updatedAt"] = AsUtc(value); break;
                 case "CreatedByName": row["createdBy"] = value; break;
                 case "UpdatedByName": row["updatedBy"] = value; break;
+                case var m when m.EndsWith(MultiSuffix, StringComparison.Ordinal):
+                {
+                    var (ids, labels) = ReadMulti(value as string);
+                    row[m[..^MultiSuffix.Length]] = ids;
+                    row[m[..^MultiSuffix.Length] + "__label"] = labels;
+                    break;
+                }
                 default:
                     var f = e.FindField(name);
                     if (f?.Type == FieldTypes.Parent) break;
@@ -1292,6 +1435,23 @@ public sealed partial class RecordService(Db db, MetadataStore store)
             }
         }
         return row;
+    }
+
+    /// <summary>Spec 050: sufijo de la columna JSON de un campo de varios valores en <see cref="SelectClause"/>.</summary>
+    private const string MultiSuffix = "__multi";
+
+    private static (List<long> Ids, List<string?> Labels) ReadMulti(string? json)
+    {
+        var ids = new List<long>();
+        var labels = new List<string?>();
+        if (string.IsNullOrEmpty(json)) return (ids, labels);
+        using var doc = JsonDocument.Parse(json);
+        foreach (var item in doc.RootElement.EnumerateArray())
+        {
+            ids.Add(item.GetProperty("i").GetInt64());
+            labels.Add(item.TryGetProperty("l", out var l) ? l.GetString() : null);
+        }
+        return (ids, labels);
     }
 
     private static object? AsUtc(object? v) => v is DateTime d ? DateTime.SpecifyKind(d, DateTimeKind.Utc) : v;

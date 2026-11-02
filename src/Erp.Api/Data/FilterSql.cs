@@ -27,6 +27,8 @@ public static class FilterSql
         [ValueKind.Date] = ["eq", "ne", "gt", "gte", "lt", "lte", "blank", "notBlank"],
         [ValueKind.Boolean] = ["eq", "ne", "blank", "notBlank"],
         [ValueKind.Id] = ["eq", "ne", "in", "blank", "notBlank"],
+        // Spec 050: «contiene» (un valor), «contiene alguno de» (in), sin valores y con valores.
+        [ValueKind.Multi] = ["contains", "in", "blank", "notBlank"],
     };
 
     /// <summary>Lee el parámetro <c>filters</c> (lista JSON). Inválido → 400.</summary>
@@ -46,7 +48,8 @@ public static class FilterSql
     public static string? Validate(EntityDef e, ViewFilter filter)
     {
         var f = e.FindField(filter.Field ?? "");
-        if (f is null || f.IsArchived || FieldTypes.IsVirtual(f.Type)) return $"el filtro usa '{filter.Field}', que no es un campo de {e.Name}.";
+        if (f is null || f.IsArchived || (FieldTypes.IsVirtual(f.Type) && !FieldTypes.IsMulti(f.Type)))
+            return $"el filtro usa '{filter.Field}', que no es un campo de {e.Name}.";
         if (filter.Label?.Length > 200) return $"la etiqueta del filtro de '{f.Name}' es demasiado larga.";
         var kind = InterfaceRules.KindOf(f);
         if (!OpsByKind[kind].Contains(filter.Op ?? "")) return $"el operador '{filter.Op}' no aplica al campo '{f.Name}'.";
@@ -75,8 +78,22 @@ public static class FilterSql
             if (Validate(e, filter) is { } err) throw new AppException(400, $"Filtro inválido: {err}");
             var f = e.FindField(filter.Field)!;
             if (!FieldAccess.CanSee(e, f, user)) throw new AppException(400, "Filtro inválido: no se puede filtrar por un campo que no ves.");
-            var col = $"t.{Quote(f.Name)}";
             var values = Values(e, f, filter, user.Id);
+            if (FieldTypes.IsMulti(f.Type))
+            {
+                // Spec 050: filas de la tabla de unión del registro (alias t), ids como parámetros.
+                var rows = $"SELECT 1 FROM {JoinTable(e.Name, f.Name)} j WHERE j.[OwnerId] = t.[Id]";
+                parts.Add(filter.Op switch
+                {
+                    "contains" => $"EXISTS ({rows} AND j.[ValueId] = {Add(values[0])})",
+                    "in" => $"EXISTS ({rows} AND j.[ValueId] IN ({string.Join(", ", values.Select(Add))}))",
+                    "blank" => $"NOT EXISTS ({rows})",
+                    "notBlank" => $"EXISTS ({rows})",
+                    _ => throw new AppException(400, "Filtro inválido."),
+                });
+                continue;
+            }
+            var col = $"t.{Quote(f.Name)}";
             var textual = InterfaceRules.KindOf(f) is ValueKind.Text or ValueKind.LongText;
             var blank = textual ? $"({col} IS NULL OR LTRIM(RTRIM({col})) = N'')" : $"{col} IS NULL";
             parts.Add(filter.Op switch
@@ -136,8 +153,9 @@ public static class FilterSql
                         ? DateTime.Parse(s, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal)
                         : DateOnly.ParseExact(s, "yyyy-MM-dd", CultureInfo.InvariantCulture).ToDateTime(TimeOnly.MinValue);
                 case ValueKind.Id:
+                case ValueKind.Multi:
                     if (s == Me)
-                        return f.Type == FieldTypes.User ? userId : throw new FilterValueError("$me solo aplica a campos de tipo usuario.");
+                        return f.Type is FieldTypes.User or FieldTypes.MultiUser ? userId : throw new FilterValueError("$me solo aplica a campos de personas.");
                     return s is not null ? long.Parse(s, NumberStyles.Integer, CultureInfo.InvariantCulture) : v.GetInt64();
                 default:
                     if (s is null) throw new FilterValueError("debe ser texto.");

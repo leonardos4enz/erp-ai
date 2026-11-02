@@ -130,7 +130,9 @@ public static class AssistantPrompt
         Tipos: text (maxLength ≤ 4000, 200 por defecto), longtext, integer, decimal (precision/scale, p. ej. 18/2),
         boolean, date, datetime, choice (options: string[]), reference (referenceEntity), autonumber (prefix, padding;
         folio automático), formula (formula + resultType: decimal|integer|text|boolean|date; solo lectura), user (un
-        usuario del ERP), lines (partidas: childEntity) y parent (en la partida, referenceEntity = documento).
+        usuario del ERP), multireference (varios registros de referenceEntity; no en partidas), multiuser (varias
+        personas), lines (partidas: childEntity) y parent (en la partida, referenceEntity = documento). Los de varios
+        valores no se usan en fórmulas, reglas ni condiciones.
         unique se permite en text, integer, date y choice. editable: false = lo asigna el sistema (valor por defecto o
         transiciones). Documento con partidas: primero createEntity de la partida con un campo parent que apunta al
         documento (el documento debe existir antes), luego addField del documento con type lines y childEntity.

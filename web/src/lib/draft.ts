@@ -1,5 +1,5 @@
 import type { EntityDef, FieldDef, Row } from '../api/types';
-import { activeFields, isComputedField, isEditableField } from './entity';
+import { activeFields, isComputedField, isEditableField, isMultiField } from './entity';
 import { toDateInput, toDateTimeInput } from './format';
 
 /** Valores del formulario: tal como los manejan los inputs (strings para números y fechas). */
@@ -25,6 +25,7 @@ export const newLineKey = () => `l${++seq}`;
 
 export function isEmptyValue(f: FieldDef, v: unknown): boolean {
   if (f.type === 'boolean') return false;
+  if (isMultiField(f)) return !Array.isArray(v) || v.length === 0;
   return v === null || v === undefined || (typeof v === 'string' && v.trim() === '');
 }
 
@@ -39,6 +40,8 @@ export function toDraftValue(f: FieldDef, raw: unknown, hasRow: boolean): unknow
     case 'reference':
     case 'user':
     case 'parent': return raw == null || raw === '' ? null : Number(raw);
+    case 'multireference':
+    case 'multiuser': return Array.isArray(raw) ? raw.map(Number) : [];
     case 'formula':
     case 'autonumber':
     case 'state': return raw ?? null;
@@ -47,7 +50,7 @@ export function toDraftValue(f: FieldDef, raw: unknown, hasRow: boolean): unknow
 }
 
 function hasLabel(f: FieldDef) {
-  return f.type === 'reference' || f.type === 'user' || f.type === 'parent';
+  return f.type === 'reference' || f.type === 'user' || f.type === 'parent' || isMultiField(f);
 }
 
 export function rowToValues(fields: FieldDef[], row?: Record<string, unknown>): Values {
@@ -92,6 +95,8 @@ function toApiValue(f: FieldDef, v: unknown): unknown {
     case 'datetime': return v ? new Date(String(v)).toISOString() : null;
     case 'reference':
     case 'user': return v ?? null;
+    case 'multireference':
+    case 'multiuser': return Array.isArray(v) ? v : [];
     default: return v === '' ? null : v;
   }
 }

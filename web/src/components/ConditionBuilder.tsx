@@ -4,10 +4,12 @@ import {
   defaultValue, fieldAt, kindOfField, OP_TEXT, OPS_FOR, type Cond, type CondGroup, type CondOp, type CondValue, type FieldKind,
 } from '../lib/conditionBuilder';
 import { fieldsAtPath, MAX_HOPS, type CompletionScope } from '../lib/exprComplete';
+import { isMultiField } from '../lib/entity';
 import { Button, Input, Select } from './ui';
 
 const hop = (f: FieldDef) => f.type === 'reference' || f.type === 'parent';
-const usable = (fs: FieldDef[]) => fs.filter((f) => !f.isArchived && f.type !== 'lines');
+// Spec 050: los campos de varios valores todavía no van en expresiones («pertenece a» llega en la 051).
+const usable = (fs: FieldDef[]) => fs.filter((f) => !f.isArchived && f.type !== 'lines' && !isMultiField(f));
 
 /** Campo por pasos: el propio o, si es una referencia, uno de su catálogo (hasta tres saltos, spec 023). */
 function PathPicker({ path, onChange, scope, label }: { path: string; onChange: (p: string) => void; scope: CompletionScope; label: string }) {

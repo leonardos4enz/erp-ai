@@ -199,9 +199,14 @@ public static partial class PlanCompiler
 
         foreach (var f in e.ActiveFields)
         {
-            if (f.Type == FieldTypes.Reference && !string.Equals(f.ReferenceEntity, e.Name, StringComparison.OrdinalIgnoreCase) &&
+            if (f.Type is FieldTypes.Reference or FieldTypes.MultiReference && !string.Equals(f.ReferenceEntity, e.Name, StringComparison.OrdinalIgnoreCase) &&
                 model.TryGetValue(f.ReferenceEntity ?? "", out var referenced) && referenced.IsArchived)
                 msgs.Add($"{e.Name}.{f.Name} apunta a '{referenced.Name}', que está archivado: reactívalo también o archiva el campo.");
+            // Spec 050: una partida ya es «varios»; y un registro de varios valores apunta a registros que se consultan solos.
+            if (FieldTypes.IsMulti(f.Type) && e.IsChild)
+                msgs.Add($"{e.Name}.{f.Name}: {e.Name} es una partida; los campos de varios valores van en el documento o en un catálogo.");
+            if (f.Type == FieldTypes.MultiReference && model.TryGetValue(f.ReferenceEntity ?? "", out var multiTarget) && multiTarget.IsChild)
+                msgs.Add($"{e.Name}.{f.Name}: '{multiTarget.Name}' es una partida; un campo de varios valores apunta a un catálogo.");
             Check(f.DefaultValue, $"valor por defecto de {f.Name}");
             Check(f.Formula, $"fórmula de {f.Name}");
             if (shared && f.Formula is not null && Expressions.ExprAnalyzer.UsedFunctions(f.Formula).FirstOrDefault(Expressions.ExprAnalyzer.CompanyFunctions.Contains) is { } fn)
@@ -389,7 +394,9 @@ public static partial class PlanCompiler
             else ValidateOptions(ctx, op.Options);
         }
         if (op.RequiredForRoles is not null) ValidateRoles(ctx, op.RequiredForRoles);
-        if (op.DefaultValue is not null && (f.ReadOnly || f.Type == FieldTypes.Lines))
+        if (op.DefaultValue is not null && FieldTypes.IsMulti(f.Type))
+            ctx.Error($"'{f.Name}' tiene varios valores y no admite valor por defecto.");
+        else if (op.DefaultValue is not null && (f.ReadOnly || f.Type == FieldTypes.Lines))
             ctx.Error($"'{f.Name}' es calculado por el motor y no admite valor por defecto.");
         if (op.Formula is not null && f.Type != FieldTypes.Formula)
             ctx.Error($"'{f.Name}' no es un campo de fórmula.");
@@ -507,9 +514,15 @@ public static partial class PlanCompiler
             foreach (var rf in t.RequiredFields ?? [])
                 if (e.FindField(rf) is not { IsArchived: false } fd || fd.ClientLocked || fd.Type == FieldTypes.Lines)
                     ctx.Error($"{where}: '{rf}' no es un campo capturable de {e.Name}.");
+                // Spec 050 (revisión adversarial F-03): la acción captura valores simples; los varios valores, en el formulario.
+                else if (FieldTypes.IsMulti(fd.Type))
+                    ctx.Error($"{where}: '{rf}' tiene varios valores y no se captura en una acción (se captura en el formulario).");
             foreach (var s in t.Set ?? [])
                 if (e.FindField(s.Field) is not { IsArchived: false } fd || fd.ReadOnly || fd.Type == FieldTypes.Lines)
                     ctx.Error($"{where}: no se puede asignar '{s.Field}'.");
+                // Spec 050: una expresión da un valor simple; un campo de varios valores no se asigna así.
+                else if (FieldTypes.IsMulti(fd.Type))
+                    ctx.Error($"{where}: '{s.Field}' tiene varios valores y no se asigna con una expresión.");
         }
         if (ctx.ErrorCount > start) return null;
 
@@ -782,7 +795,7 @@ public static partial class PlanCompiler
             Precision = isDecimal ? f.Precision ?? 18 : null,
             Scale = isDecimal ? f.Scale ?? 2 : null,
             Options = type == FieldTypes.Choice ? f.Options?.Select(o => o.Trim()).ToList() : null,
-            ReferenceEntity = type is FieldTypes.Reference or FieldTypes.Parent ? f.ReferenceEntity : null,
+            ReferenceEntity = type is FieldTypes.Reference or FieldTypes.Parent or FieldTypes.MultiReference ? f.ReferenceEntity : null,
             DisplayOrder = f.DisplayOrder != 0 ? f.DisplayOrder : order,
             IsArchived = false,
             // Solo salida (spec 006): la seguridad por campo se declara con setSecurity.
@@ -819,7 +832,7 @@ public static partial class PlanCompiler
             if (f.Options is null || f.Options.Count == 0) ctx.Error($"El campo de lista '{f.Name}' necesita opciones.");
             else ValidateOptions(ctx, f.Options);
         }
-        if (f.Type is FieldTypes.Reference or FieldTypes.Parent)
+        if (f.Type is FieldTypes.Reference or FieldTypes.Parent or FieldTypes.MultiReference)
         {
             var target = f.ReferenceEntity;
             var isSelf = string.Equals(target, selfEntity, StringComparison.OrdinalIgnoreCase);
@@ -843,6 +856,8 @@ public static partial class PlanCompiler
         }
         if (f.Type == FieldTypes.Lines && string.IsNullOrWhiteSpace(f.ChildEntity))
             ctx.Error($"El campo de partidas '{f.Name}' debe indicar su catálogo de partidas.");
+        if (FieldTypes.IsMulti(f.Type) && f.DefaultValue is not null)
+            ctx.Error($"'{f.Name}' tiene varios valores y no admite valor por defecto.");
         if (f.Unique && !FieldTypes.Uniqueable.Contains(f.Type))
             ctx.Error($"El tipo '{f.Type}' no admite valores únicos ('{f.Name}').");
         if (f.RequiredForRoles is not null) ValidateRoles(ctx, f.RequiredForRoles);

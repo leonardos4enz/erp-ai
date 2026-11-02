@@ -333,6 +333,8 @@ internal sealed class PrintContext(IPrintData data, UserContext user, IReadOnlyD
         var node = Parse(v.Value);
         if (node is null) return "";
         if (RecordService.ReadsHidden(node, scope.Entity, model, user)) return NoAccess;
+        if (node is PathRef { IsOwn: true } own && scope.Entity.FindField(own.Head) is { } multi && FieldTypes.IsMulti(multi.Type))
+            return MultiText(multi, scope.Field(multi.Name));
         var (field, owner) = FinalField(node, scope.Entity);
         try
         {
@@ -356,6 +358,23 @@ internal sealed class PrintContext(IPrintData data, UserContext user, IReadOnlyD
         }
         catch (PrintNoAccess) { return NoAccess; }
         catch (ExprException ex) { Warnings.Add($"No se pudo calcular «{v.Value}»: {ex.Message}"); return ""; }
+    }
+
+    /// <summary>
+    /// Spec 050: un campo de varios valores se imprime con sus etiquetas separadas por coma; cada valor fuera del alcance de quien
+    /// imprime (o con su campo para mostrar oculto) es «(sin acceso)», como una referencia.
+    /// </summary>
+    private string MultiText(FieldDef f, object? value)
+    {
+        var labels = new List<string>();
+        foreach (var id in value as IReadOnlyCollection<long> ?? [])
+        {
+            if (f.Type == FieldTypes.MultiUser) { labels.Add(Convert.ToString(data.User((int)id)?.GetValueOrDefault("Nombre"), PrintFormat.Culture) ?? ""); continue; }
+            if (!model.TryGetValue(f.ReferenceEntity ?? "", out var target)) continue;
+            if (!Visible(target.Name, id) || FieldAccess.DisplayHidden(target, user)) { labels.Add(NoAccess); continue; }
+            labels.Add(target.EffectiveDisplayField is { } d ? Convert.ToString(data.Row(target.Name, id)?.GetValueOrDefault(d), PrintFormat.Culture) ?? "" : $"#{id}");
+        }
+        return string.Join(", ", labels.Order(StringComparer.CurrentCulture));
     }
 
     /// <summary>Campo de la etiqueta de una referencia (el campo para mostrar del destino) o de un usuario (su nombre).</summary>

@@ -23,7 +23,7 @@ public static class Csdl
         // Tipos: los conjuntos y las partidas que se pueden expandir desde ellos.
         var types = new List<EntityDef>(sets);
         foreach (var e in sets)
-            foreach (var n in ODataModel.Navigations(e, model, user).Where(n => n.Collection))
+            foreach (var n in ODataModel.Navigations(e, model, user).Where(n => n.Contained))
                 if (!types.Contains(n.Target)) types.Add(n.Target);
 
         var sb = new StringBuilder();
@@ -73,7 +73,7 @@ public static class Csdl
                     w.WriteStartElement("NavigationProperty", EdmNs);
                     w.WriteAttributeString("Name", n.Name);
                     w.WriteAttributeString("Type", n.Collection ? $"Collection({ODataModel.Namespace}.{n.Target.Name})" : $"{ODataModel.Namespace}.{n.Target.Name}");
-                    if (n.Collection) w.WriteAttributeString("ContainsTarget", "true");
+                    if (n.Contained) w.WriteAttributeString("ContainsTarget", "true");
                     Description(w, n.Field.Label);
                     w.WriteEndElement();
                 }
@@ -88,7 +88,7 @@ public static class Csdl
                 w.WriteStartElement("EntitySet", EdmNs);
                 w.WriteAttributeString("Name", e.Name);
                 w.WriteAttributeString("EntityType", $"{ODataModel.Namespace}.{e.Name}");
-                foreach (var n in ODataModel.Navigations(e, model, user).Where(n => !n.Collection))
+                foreach (var n in ODataModel.Navigations(e, model, user).Where(n => !n.Contained))
                 {
                     w.WriteStartElement("NavigationPropertyBinding", EdmNs);
                     w.WriteAttributeString("Path", n.Name);

@@ -7,7 +7,7 @@ import type { EntityDef, FieldDef, LayoutState, RecordAccess, RecordTransition, 
 import { useAuth } from '../auth/AuthContext';
 import { ConfirmDialog } from '../components/Dialog';
 import { resolveIcon } from '../components/DynamicIcon';
-import { FieldInput } from '../components/FieldInput';
+import { FieldInput, type RefLabel } from '../components/FieldInput';
 import { LinesEditor } from '../components/LinesEditor';
 import { PrintMenu } from '../components/PrintMenu';
 import { useToast } from '../components/Toast';
@@ -211,7 +211,7 @@ export function EntityFormPage() {
     if (clientErrors[key]) setClientErrors((e) => { const n = { ...e }; delete n[key]; return n; });
   }
 
-  function setField(name: string, v: unknown, label?: string | null) {
+  function setField(name: string, v: unknown, label?: RefLabel) {
     setDraft((d) => ({
       ...d,
       values: { ...d.values, [name]: v, ...(label !== undefined ? { [`${name}__label`]: label } : {}) },
@@ -327,7 +327,7 @@ export function EntityFormPage() {
         def={def}
         id={fid}
         value={draft.values[f.name]}
-        refLabel={draft.values[`${f.name}__label`] as string | null}
+        refLabel={draft.values[`${f.name}__label`] as RefLabel}
         onChange={(v, label) => setField(f.name, v, label)}
         disabled={readOnly || saving || !isEditableField(f)}
         required={required && isEditableField(f)}

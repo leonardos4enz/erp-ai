@@ -21,11 +21,14 @@ public static class FieldTypes
     public const string Parent = "parent";
     public const string State = "state";
     public const string User = "user";
+    // Spec 050: varios registros de un catálogo o varias personas, en una tabla de unión (sin columna en el catálogo).
+    public const string MultiReference = "multireference";
+    public const string MultiUser = "multiuser";
 
     public static readonly IReadOnlySet<string> All = new HashSet<string>
     {
         Text, LongText, Integer, Decimal, Boolean, Date, DateTime, Choice, Reference,
-        Autonumber, Formula, Lines, Parent, User,
+        Autonumber, Formula, Lines, Parent, User, MultiReference, MultiUser,
         // State no está aquí: solo lo crea setWorkflow.
     };
 
@@ -38,8 +41,17 @@ public static class FieldTypes
     /// <summary>Tipos válidos como resultado de una fórmula.</summary>
     public static readonly IReadOnlySet<string> FormulaResults = new HashSet<string> { Decimal, Integer, Text, Boolean, Date };
 
-    /// <summary>Tipos que no tienen columna en la tabla.</summary>
-    public static bool IsVirtual(string type) => type == Lines;
+    /// <summary>
+    /// Tipos que no tienen columna en la tabla. Spec 050: tampoco los de varios valores; así todo camino que no los conoce (orden,
+    /// búsqueda, fórmulas, rutas, mapeos) los ignora por omisión.
+    /// </summary>
+    public static bool IsVirtual(string type) => type == Lines || IsMulti(type);
+
+    /// <summary>Spec 050: campo de varios valores (tabla de unión <c>app.[Catalogo__Campo]</c>).</summary>
+    public static bool IsMulti(string? type) => type is MultiReference or MultiUser;
+
+    /// <summary>Spec 050: tope de valores de un campo de varios valores en un registro.</summary>
+    public const int MaxMultiValues = 100;
 
     public const int DefaultTextLength = 200;
     public const int MaxTextLength = 4000;
@@ -683,6 +695,12 @@ public sealed record EntityDef
 
     /// <summary>Campos con columna física (excluye partidas, que viven en la entidad hija).</summary>
     public IEnumerable<FieldDef> StoredFields => ActiveFields.Where(f => !FieldTypes.IsVirtual(f.Type));
+
+    /// <summary>Spec 050: campos activos de varios valores (cada uno con su tabla de unión).</summary>
+    public IEnumerable<FieldDef> MultiFields => ActiveFields.Where(f => FieldTypes.IsMulti(f.Type));
+
+    /// <summary>Spec 050: lo que se captura y se exporta: los campos con columna y los de varios valores (no las partidas).</summary>
+    public IEnumerable<FieldDef> ValueFields => ActiveFields.Where(f => f.Type != FieldTypes.Lines);
 
     public FieldDef? FindField(string name) =>
         Fields.FirstOrDefault(f => string.Equals(f.Name, name, StringComparison.OrdinalIgnoreCase));

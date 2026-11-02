@@ -69,9 +69,11 @@ public static class PhysicalModel
         foreach (var t in catalog)
         {
             var e = linked && model.TryGetValue(t.Name, out var def) ? def : null;
-            var appName = e is null ? null : AppOf(e, model);
+            // Spec 050: la tabla de unión de un campo de varios valores pertenece a su catálogo (no es huérfana).
+            var join = linked && e is null ? JoinOwner(t.Name, model) : null;
+            var appName = (e ?? join) is { } owner ? AppOf(owner, model) : null;
             var tableDrift = new List<DbDrift>();
-            if (linked && e is null)
+            if (linked && e is null && join is null)
                 tableDrift.Add(new(DriftKinds.OrphanTable, t.Name, null, $"La tabla app.{t.Name} no corresponde a ningún catálogo."));
             else if (e?.IsArchived == true)
                 tableDrift.Add(new(DriftKinds.ArchivedTable, t.Name, null, $"El catálogo {e.Name} está archivado; su tabla y sus registros se conservan."));
@@ -115,6 +117,12 @@ public static class PhysicalModel
             .OrderBy(x => x.Schema).ThenBy(x => x.Name, Ci).ToList();
         return new(schema, tables, external, drift, appRefs);
     }
+
+    /// <summary>Spec 050: el catálogo dueño de una tabla <c>Catalogo__Campo</c> si ese campo es de varios valores.</summary>
+    /// <remarks>Revisión adversarial F-05: se compara contra las tablas que el modelo espera (un catálogo puede terminar en «_»).</remarks>
+    private static EntityDef? JoinOwner(string table, IReadOnlyDictionary<string, EntityDef> model) =>
+        model.Values.FirstOrDefault(e => e.Fields.Any(f => FieldTypes.IsMulti(f.Type) &&
+            string.Equals($"{e.Name}__{f.Name}", table, StringComparison.OrdinalIgnoreCase)));
 
     private static DbColumn Column(CatColumn c, EntityDef? e, string table, List<DbDrift> drift)
     {

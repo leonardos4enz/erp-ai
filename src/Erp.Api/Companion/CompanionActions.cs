@@ -216,6 +216,29 @@ public sealed class CompanionActions(Db db, RouteDispatcher routes, CompanionOpt
     {
         foreach (var (key, value) in values.ToList())
         {
+            // Spec 050: varios registros, cada uno con la misma regla (la persona lo ve; si no, no hay propuesta).
+            if (fields[key]["type"]?.GetValue<string>() == FieldTypes.MultiReference && value is not null)
+            {
+                var mtarget = fields[key]["referenceEntity"]?.GetValue<string>();
+                if (value is not JsonArray items || items.Count > FieldTypes.MaxMultiValues || mtarget is null)
+                    return ToolOutput.Fail($"«{key}» debe ser una lista de números de registros de {mtarget}.");
+                var mdef = await runner.ReadAsync(c, new RouteCall("GET", "/api/model/entities/{name}", CompanionTools.V(("name", mtarget))), ct);
+                if (!mdef.Ok) return ToolOutput.Fail($"La persona no tiene acceso a «{fields[key]["label"]}».", "denied");
+                var mdisplay = mdef.Body?["displayField"]?.GetValue<string>();
+                var shown = new List<string>();
+                foreach (var item in items)
+                {
+                    if (item is null || item.GetValueKind() != JsonValueKind.Number || !item.AsValue().TryGetValue<long>(out var id) || id <= 0)
+                        return ToolOutput.Fail($"«{key}» debe ser una lista de números de registros de {mtarget}.");
+                    var mrec = await runner.ReadAsync(c, new RouteCall("GET", "/api/data/{entity}/{id:long}", CompanionTools.V(("entity", mtarget), ("id", id.ToString()))), ct);
+                    if (!mrec.Ok) return ToolOutput.Fail($"La persona no tiene acceso al registro {id} de «{fields[key]["label"]}» (o no existe).", "denied");
+                    var mlabel = mdisplay is null ? null : mrec.Body?[mdisplay]?.ToString();
+                    shown.Add($"{(string.IsNullOrWhiteSpace(mlabel) ? "registro" : mlabel)} (n.º {id})");
+                }
+                fields[key] = (JsonObject)fields[key].DeepClone();
+                fields[key]["__shown"] = shown.Count == 0 ? "(ninguno)" : string.Join(", ", shown);
+                continue;
+            }
             if (fields[key]["type"]?.GetValue<string>() != FieldTypes.Reference || value is null) continue;
             var target = fields[key]["referenceEntity"]?.GetValue<string>();
             if (target is null || value.GetValueKind() != JsonValueKind.Number || !value.AsValue().TryGetValue<long>(out var rid) || rid <= 0)

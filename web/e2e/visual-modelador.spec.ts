@@ -102,7 +102,7 @@ test('H1 CA1 · CA2 · CA3 · CA4: catálogos agrupados por módulo, con filtro,
 
   // CA3: quién lo instaló y quién lo extiende.
   const almacenes = page.getByRole('row', { name: /^Almacenes Almacen / });
-  await expect(almacenes).toContainText(/Compras 1\.10\.0/);
+  await expect(almacenes).toContainText(/Compras 1\.11\.0/);
   await expect(almacenes).toContainText(/También: .*Costeo/);
   await expect(page.getByRole('row', { name: new RegExp(`Notas VM ${NOTA}`) })).toContainText('Local');
 
@@ -151,13 +151,13 @@ test('H2 CA5: el origen y la validación de expresiones son solo para quien admi
 test('H2 CA1 · CA2: cada campo y regla dice de qué paquete viene; lo cambiado aquí, «modificado localmente»', async ({ page }) => {
   const all = await provenance();
   const almacen = all.find((e) => e.entity === 'Almacen')!;
-  expect(almacen.installedBy).toMatchObject({ id: 'compras', version: '1.10.0' });
+  expect(almacen.installedBy).toMatchObject({ id: 'compras', version: '1.11.0' });
   expect(almacen.elements.find((x) => x.kind === 'field' && x.name === 'CuentaInventario')).toMatchObject({ package: 'costeo', modified: false });
   expect(almacen.elements.find((x) => x.kind === 'field' && x.name === 'Nombre')).toMatchObject({ package: 'compras', modified: false });
   expect(all.find((e) => e.entity === `${NOTA}`)).toMatchObject({ installedBy: null, packages: [] });
 
   await page.goto('/admin/model?edit=Almacen');
-  await expect(page.getByText(/Instalado por\s*Compras 1\.10\.0/)).toBeVisible();
+  await expect(page.getByText(/Instalado por\s*Compras 1\.11\.0/)).toBeVisible();
   await expect(page.getByText(/También lo extiende: .*Costeo/)).toBeVisible();
   const cuenta = page.locator('.field-row').filter({ has: page.locator('input[value="CuentaInventario"]') });
   await expect(cuenta.locator('.field-row-origin')).toContainText('Costeo');

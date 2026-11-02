@@ -5,7 +5,7 @@ using Erp.Api.Security;
 namespace Erp.Api.Metadata;
 
 /// <summary>Spec 007: clase de valor de un campo para filtros, agrupaciones y medidas.</summary>
-public enum ValueKind { Text, LongText, Number, Date, Boolean, Id }
+public enum ValueKind { Text, LongText, Number, Date, Boolean, Id, Multi }
 
 /// <summary>Spec 039: un salto de una ruta: la referencia (o el documento padre) <c>Via</c> de <c>From</c> que lleva a <c>To</c>.</summary>
 public sealed record FieldHop(FieldDef Via, EntityDef From, EntityDef To);
@@ -60,6 +60,7 @@ public static class InterfaceRules
         FieldTypes.Date or FieldTypes.DateTime => ValueKind.Date,
         FieldTypes.Boolean => ValueKind.Boolean,
         FieldTypes.Reference or FieldTypes.Parent or FieldTypes.User => ValueKind.Id,
+        FieldTypes.MultiReference or FieldTypes.MultiUser => ValueKind.Multi,
         _ => ValueKind.Text,
     };
 
@@ -77,6 +78,8 @@ public static class InterfaceRules
         for (var i = 0; ; i++)
         {
             var f = current.FindField(parts[i]);
+            if (f is { IsArchived: false } && FieldTypes.IsMulti(f.Type))
+                return (null, $"'{parts[i]}' tiene varios valores: todavía no se agrupa ni se mide por él (se filtra con «contiene»).");
             if (f is null || f.IsArchived || FieldTypes.IsVirtual(f.Type)) return (null, $"'{parts[i]}' no es un campo de {current.Name}.");
             if (i == parts.Length - 1) return (new FieldPath(f, current, hops), null);
             if (f.Type is not (FieldTypes.Reference or FieldTypes.Parent) || !model.TryGetValue(f.ReferenceEntity ?? "", out var next) || next.IsArchived)

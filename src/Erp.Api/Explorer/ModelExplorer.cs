@@ -52,7 +52,7 @@ public static class ModelExplorer
         var nodes = entities.Select(e => new RelNode(e.Name, e.Label, e.LabelPlural, e.Icon, PhysicalModel.AppOf(e, model), e.IsChild,
             e.Workflow is not null, e.PerCompany,
             e.ActiveFields.Select(f => new RelField(f.Name, f.Label, f.Type, f.ResultType,
-                f.Type is FieldTypes.Reference or FieldTypes.Parent ? f.ReferenceEntity : f.Type == FieldTypes.Lines ? f.ChildEntity : null,
+                f.Type is FieldTypes.Reference or FieldTypes.Parent or FieldTypes.MultiReference ? f.ReferenceEntity : f.Type == FieldTypes.Lines ? f.ChildEntity : null,
                 f.Required, f.Unique, f.Type == FieldTypes.Formula, f.Type == FieldTypes.Autonumber,
                 !string.IsNullOrWhiteSpace(f.DefaultValue), f.Type == FieldTypes.State)).ToList())).ToList();
         var edges = new List<RelEdge>();
@@ -65,6 +65,9 @@ public static class ModelExplorer
                     FieldTypes.Parent => (f.ReferenceEntity, "parent"),
                     FieldTypes.Lines => (f.ChildEntity, "lines"),
                     FieldTypes.User => (UserNode, "user"),
+                    // Spec 050: varios registros o varias personas (tabla de unión).
+                    FieldTypes.MultiReference => (f.ReferenceEntity, "multireference"),
+                    FieldTypes.MultiUser => (UserNode, "multiuser"),
                     _ => (null, null),
                 };
                 if (to is not null && kind is not null && (to == UserNode || model.ContainsKey(to)))

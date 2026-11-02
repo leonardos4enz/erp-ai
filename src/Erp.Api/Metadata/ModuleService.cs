@@ -150,7 +150,9 @@ public sealed partial class ModuleService(Db db, MetadataStore store, PlanServic
         foreach (var s in p.Seed)
         {
             if (!model.TryGetValue(s.Entity, out var e)) throw new AppException(400, $"Datos iniciales para '{s.Entity}', que no existe.");
-            var keyField = e.FindField(s.Key) ?? throw new AppException(400, $"'{s.Key}' no es un campo de {e.Name}.");
+            // Spec 050 (revisión adversarial F-04): la llave es una columna (no un campo de varios valores ni de partidas).
+            var keyField = e.StoredFields.FirstOrDefault(f => string.Equals(f.Name, s.Key, StringComparison.OrdinalIgnoreCase))
+                ?? throw new AppException(400, $"'{s.Key}' no es un campo de {e.Name}.");
             foreach (var rec in s.Records)
             {
                 var resolved = await ResolveRefsAsync(cn, tx, model, rec, user.Company?.Id);
@@ -300,21 +302,34 @@ public sealed partial class ModuleService(Db db, MetadataStore store, PlanServic
         var result = new JsonObject();
         foreach (var (name, node) in rec)
         {
-            if (node is JsonObject obj && obj["$ref"]?.GetValue<string>() is { } refEntity)
+            if (IsRef(node))
+                result[name] = await RefIdAsync((JsonObject)node!);
+            // Spec 050: un campo de varios valores, como lista de referencias.
+            else if (node is JsonArray list && list.Count > 0 && list.All(IsRef))
             {
-                if (!model.TryGetValue(refEntity, out var target)) throw new AppException(400, $"Referencia a '{refEntity}', que no existe.");
-                var (keyName, keyNode) = obj.First(kv => kv.Key != "$ref");
-                var keyField = target.FindField(keyName) ?? throw new AppException(400, $"'{keyName}' no es un campo de {target.Name}.");
-                await using var cmd = new SqlCommand(
-                    $"SELECT TOP 1 [Id] FROM {AppTable(target.Name)} WHERE {Quote(keyField.Name)} = @v AND [IsDeleted] = 0{CompanySql(target)}", cn, tx);
-                cmd.Parameters.Add(new SqlParameter("@v", keyNode!.ToString()));
-                if (target.PerCompany) cmd.Parameters.Add(new SqlParameter("@company", companyId ?? 0));
-                var refId = await cmd.ExecuteScalarAsync() ?? throw new AppException(400, $"No se encontró {target.Name} con {keyName} = {keyNode}.");
-                result[name] = (long)refId;
+                var ids = new JsonArray();
+                foreach (var item in list) ids.Add(await RefIdAsync((JsonObject)item!));
+                result[name] = ids;
             }
             else result[name] = node?.DeepClone();
         }
         return result;
+
+        static bool IsRef(JsonNode? n) => n is JsonObject o && o["$ref"] is not null;
+
+        async Task<long> RefIdAsync(JsonObject obj)
+        {
+            var refEntity = obj["$ref"]!.GetValue<string>();
+            if (!model.TryGetValue(refEntity, out var target)) throw new AppException(400, $"Referencia a '{refEntity}', que no existe.");
+            var (keyName, keyNode) = obj.First(kv => kv.Key != "$ref");
+            var keyField = target.StoredFields.FirstOrDefault(f => string.Equals(f.Name, keyName, StringComparison.OrdinalIgnoreCase))
+                ?? throw new AppException(400, $"'{keyName}' no es un campo de {target.Name}.");
+            await using var cmd = new SqlCommand(
+                $"SELECT TOP 1 [Id] FROM {AppTable(target.Name)} WHERE {Quote(keyField.Name)} = @v AND [IsDeleted] = 0{CompanySql(target)}", cn, tx);
+            cmd.Parameters.Add(new SqlParameter("@v", keyNode!.ToString()));
+            if (target.PerCompany) cmd.Parameters.Add(new SqlParameter("@company", companyId ?? 0));
+            return (long)(await cmd.ExecuteScalarAsync() ?? throw new AppException(400, $"No se encontró {target.Name} con {keyName} = {keyNode}."));
+        }
     }
 
     private static async Task<bool> ExistsAsync(SqlConnection cn, SqlTransaction tx, EntityDef e, FieldDef key, string value, int? companyId)

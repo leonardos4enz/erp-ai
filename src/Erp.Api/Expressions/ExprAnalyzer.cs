@@ -135,6 +135,7 @@ public static class ExprAnalyzer
         {
             var f = entity.FindField(p.Head);
             if (f is null || f.IsArchived) { errors.Add($"El campo '{p.Head}' no existe en {entity.Name}."); return; }
+            if (FieldTypes.IsMulti(f.Type)) { errors.Add(MultiValued(f.Name)); return; }
             if (p.IsOwn)
             {
                 if (f.Type == FieldTypes.Lines) errors.Add($"'{p.Head}' son partidas: usa SUM({p.Head}.Campo) o COUNT({p.Head}).");
@@ -170,12 +171,24 @@ public static class ExprAnalyzer
             var next = target.FindField(rest[i]);
             if (next is null || next.IsArchived || next.Type == FieldTypes.Lines)
                 return $"'{rest[i]}' no existe en {target.Name}{where}.";
+            if (FieldTypes.IsMulti(next.Type)) return MultiValued($"{target.Name}.{next.Name}");
             if (last) return null;
             if (next.Type is not (FieldTypes.Reference or FieldTypes.Parent or FieldTypes.User))
                 return $"'{rest[i]}' de {target.Name} no es una referencia; no se puede seguir la ruta '{path}'.";
             hop = next;
         }
         return null;
+    }
+
+    /// <summary>Spec 050: un campo de varios valores no es un valor simple; «pertenece a» llega en la 051.</summary>
+    public static string MultiValued(string field) =>
+        $"'{field}' tiene varios valores: todavía no se usa en expresiones (llega «pertenece a», spec 051).";
+
+    /// <summary>Spec 050: ¿la expresión es solo un campo propio de varios valores? (una plantilla lo imprime con sus etiquetas).</summary>
+    public static bool IsOwnMulti(string source, EntityDef entity)
+    {
+        try { return ExprParser.Parse(source) is PathRef { IsOwn: true } p && entity.FindField(p.Head) is { IsArchived: false } f && FieldTypes.IsMulti(f.Type); }
+        catch (ExprException) { return false; }
     }
 
     public static bool IsNumeric(FieldDef f) =>

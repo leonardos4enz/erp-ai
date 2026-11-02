@@ -994,3 +994,7 @@ code, pre, .mono { font-family: var(--font-mono); font-size: 0.8125rem; }
 .image-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: var(--space-3); }
 
 /* Spec 035: la pantalla de ERP AI Studio pasó a ser un chat en la 037 (styles/studio.css). */
+
+/* Spec 050: campo de varios valores (etiquetas elegidas sobre el buscador). */
+.multi-ref { position: relative; display: flex; flex-direction: column; gap: 6px; }
+.multi-ref-tags { display: flex; flex-wrap: wrap; gap: 6px; list-style: none; margin: 0; padding: 0; }

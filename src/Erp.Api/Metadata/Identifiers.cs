@@ -84,6 +84,13 @@ public static partial class Identifiers
 
     public static string AppTable(string entityName) => "[app]." + Quote(entityName);
 
+    /// <summary>
+    /// Spec 050: tabla de unión de un campo de varios valores. Cada parte se valida con la lista blanca; el <c>__</c> que las une
+    /// no lo puede tener ningún nombre del modelo, así que no choca con la tabla de un catálogo.
+    /// </summary>
+    public static string JoinTable(string entityName, string fieldName) =>
+        "[app].[" + Quote(entityName)[1..^1] + "__" + Quote(fieldName)[1..^1] + "]";
+
     /// <summary>Nombre de constraint/índice: prefijo fijo del motor + identificadores validados.</summary>
     public static string Constraint(string prefix, string entity, string? field = null)
     {

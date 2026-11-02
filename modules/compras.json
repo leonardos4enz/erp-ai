@@ -1,7 +1,7 @@
 {
   "id": "compras",
   "name": "Compras",
-  "version": "1.10.0",
+  "version": "1.11.0",
   "icon": "shopping-cart",
   "description": "Requisiciones, órdenes de compra con autorización por montos y recepción de mercancía con cantidades recibidas y pendientes. Incluye proveedores, productos y catálogos base.",
   "plan": {
@@ -617,6 +617,12 @@
                 { "type": "footer", "text": "Uso interno · {{ Folio }}", "pageNumbers": true }
               ] }
           ] }
+      ] } },
+    { "version": "1.11.0",
+      "description": "Campos de varios valores (spec 050): cada proveedor registra las categorías que surte y cada departamento sus responsables (varias personas).",
+      "plan": { "description": "Compras 1.11.0: categorías que surte el proveedor y responsables del departamento", "operations": [
+        { "op": "addField", "entity": "Proveedor", "field": { "name": "Categorias", "label": "Categorías que surte", "type": "multireference", "referenceEntity": "CategoriaProducto", "showInList": false } },
+        { "op": "addField", "entity": "Departamento", "field": { "name": "Responsables", "label": "Responsables", "type": "multiuser", "showInList": false } }
       ] } }
   ],
   "roles": [    { "name": "Solicitante", "description": "Crea y envía requisiciones de compra.", "canManageModel": false, "canManageUsers": false, "canViewAudit": false,
@@ -698,7 +704,8 @@
         { "RFC": "CNO850101AB1", "RazonSocial": "Cartones del Norte, S.A. de C.V.", "NombreComercial": "Cartones del Norte",
           "Contacto": "Laura Méndez", "Correo": "ventas@cartonesnorte.example", "Telefono": "8112345678",
           "CondicionPago": { "$ref": "CondicionPago", "Nombre": "Crédito 30 días" }, "Moneda": { "$ref": "Moneda", "Clave": "MXN" },
-          "LimiteCredito": 250000, "Categoria": { "$ref": "CategoriaProducto", "Nombre": "Empaque" } },
+          "LimiteCredito": 250000, "Categoria": { "$ref": "CategoriaProducto", "Nombre": "Empaque" },
+          "Categorias": [{ "$ref": "CategoriaProducto", "Nombre": "Empaque" }, { "$ref": "CategoriaProducto", "Nombre": "Oficina" }] },
         { "RFC": "PEM920315KJ2", "RazonSocial": "Plásticos y Envases de México, S.A. de C.V.", "NombreComercial": "PlastiEnvases",
           "Contacto": "Jorge Ruiz", "Correo": "contacto@plastienvases.example",
           "CondicionPago": { "$ref": "CondicionPago", "Nombre": "Crédito 15 días" }, "Moneda": { "$ref": "Moneda", "Clave": "MXN" },

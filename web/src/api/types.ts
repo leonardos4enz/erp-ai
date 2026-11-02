@@ -1,7 +1,9 @@
 export type FieldType =
   | 'text' | 'longtext' | 'integer' | 'decimal' | 'boolean'
   | 'date' | 'datetime' | 'choice' | 'reference'
-  | 'autonumber' | 'formula' | 'lines' | 'parent' | 'state' | 'user';
+  | 'autonumber' | 'formula' | 'lines' | 'parent' | 'state' | 'user'
+  // Spec 050: varios registros de un catálogo o varias personas.
+  | 'multireference' | 'multiuser';
 
 export type FormulaResultType = 'decimal' | 'integer' | 'text' | 'boolean' | 'date';
 

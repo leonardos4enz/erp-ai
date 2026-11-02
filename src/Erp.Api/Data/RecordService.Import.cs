@@ -299,6 +299,22 @@ public sealed partial class RecordService
     {
         switch (f.Type)
         {
+            case FieldTypes.MultiReference:
+            case FieldTypes.MultiUser:
+            {
+                // Spec 050: etiquetas (o #id) separadas por «;», cada una con la búsqueda y el alcance de una referencia.
+                var parts = raw.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                if (parts.Length > FieldTypes.MaxMultiValues) return (null, $"{f.Label} admite máximo {FieldTypes.MaxMultiValues} valores.");
+                var single = f with { Type = f.Type == FieldTypes.MultiUser ? FieldTypes.User : FieldTypes.Reference };
+                var ids = new JsonArray();
+                foreach (var part in parts)
+                {
+                    var (node, error) = await CellAsync(cn, tx, single, part, model, user, cache, ct);
+                    if (error is not null) return (null, error);
+                    ids.Add(node);
+                }
+                return (ids, null);
+            }
             case FieldTypes.Reference:
             {
                 var key = (f.ReferenceEntity!, raw.ToLowerInvariant());
@@ -436,7 +452,7 @@ public sealed partial class RecordService
         var user = http.CurrentUser();
         var (e, model) = await RootEntityAsync(entityName, ct);
         Require(user.Access(e.Name).Read);
-        var visible = e.StoredFields.Where(f => f.Type != FieldTypes.Parent && FieldAccess.CanSee(e, f, user)).ToList();
+        var visible = e.ValueFields.Where(f => f.Type != FieldTypes.Parent && FieldAccess.CanSee(e, f, user)).ToList();
         var chosen = columns is { Count: > 0 }
             ? columns.Select(c => visible.FirstOrDefault(f => string.Equals(f.Name, c, StringComparison.OrdinalIgnoreCase))).OfType<FieldDef>().DistinctBy(f => f.Name).ToList()
             : visible.Where(f => f.ShowInList).ToList();
@@ -461,6 +477,9 @@ public sealed partial class RecordService
         return type switch
         {
             FieldTypes.Reference or FieldTypes.User => item.GetValueOrDefault(f.Name + "__label") ?? v,
+            // Spec 050: las etiquetas separadas por «; » (la importación las vuelve a leer).
+            FieldTypes.MultiReference or FieldTypes.MultiUser => item.GetValueOrDefault(f.Name + "__label") is IEnumerable<string?> labels
+                ? string.Join("; ", labels) is { Length: > 0 } s ? s : null : null,
             FieldTypes.Boolean => v is true ? "Sí" : "No",
             FieldTypes.State => e.Workflow?.FindState(v as string)?.Label ?? v,
             FieldTypes.Integer or FieldTypes.Decimal => v is long or int or decimal ? v : Convert.ToDecimal(v, CultureInfo.InvariantCulture),

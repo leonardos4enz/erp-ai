@@ -3,15 +3,19 @@ import type { EntityDef, FieldDef } from '../api/types';
 import { formatFormula, isNumericField, StateBadge } from '../lib/entity';
 import { Field, Input, Select, Switch } from './ui';
 import { ReferenceSelect, type ReferenceSelectProps } from './ReferenceSelect';
+import { MultiReferenceSelect } from './MultiReferenceSelect';
+
+/** Etiqueta de una referencia o usuario; spec 050: la lista de etiquetas de un campo de varios valores. */
+export type RefLabel = string | null | (string | null)[];
 
 export interface FieldControlProps {
   field: FieldDef;
   /** Definición de la entidad dueña del campo (para etiquetas de estado). */
   def?: EntityDef;
   value: unknown;
-  /** Etiqueta mostrada para referencias / usuarios. */
-  refLabel?: string | null;
-  onChange: (value: unknown, label?: string | null) => void;
+  /** Etiqueta mostrada para referencias / usuarios (spec 050: la lista de etiquetas de un campo de varios valores). */
+  refLabel?: RefLabel;
+  onChange: (value: unknown, label?: RefLabel) => void;
   id: string;
   disabled?: boolean;
   invalid?: boolean;
@@ -98,13 +102,30 @@ export function FieldControl(p: FieldControlProps) {
           lookup={f.type === 'user' ? (f.acceptsTeams ? lookupPrincipals : lookupUsers) : undefined}
           filter={f.type === 'reference' ? p.filter : undefined}
           value={(v as number | null) ?? null}
-          label={p.refLabel ?? null}
+          label={typeof p.refLabel === 'string' ? p.refLabel : null}
           invalid={invalid}
           disabled={disabled}
           describedBy={describedBy}
           ariaLabel={ariaLabel}
           compact={compact}
           onChange={(nid, nlabel) => p.onChange(nid, nlabel)}
+        />
+      );
+    case 'multireference':
+    case 'multiuser':
+      return (
+        <MultiReferenceSelect
+          id={id}
+          entity={f.referenceEntity ?? ''}
+          lookup={f.type === 'multiuser' ? lookupUsers : undefined}
+          value={Array.isArray(v) ? (v as number[]) : []}
+          labels={Array.isArray(p.refLabel) ? p.refLabel : []}
+          fieldLabel={f.label}
+          invalid={invalid}
+          disabled={disabled}
+          describedBy={describedBy}
+          ariaLabel={ariaLabel}
+          onChange={(ids, labels) => p.onChange(ids, labels)}
         />
       );
     case 'parent':

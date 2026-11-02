@@ -85,7 +85,7 @@ public static class ModelDiff
         {
             pending.Remove(d.Name);
             var fields = d.ActiveFields.Where(f => f.Type != FieldTypes.State).ToList();
-            bool Later(FieldDef f) => f.Type == FieldTypes.Reference && pending.Contains(f.ReferenceEntity ?? "");
+            bool Later(FieldDef f) => f.Type is FieldTypes.Reference or FieldTypes.MultiReference && pending.Contains(f.ReferenceEntity ?? "");
             creates.Add(new CreateEntityOp
             {
                 Name = d.Name, Label = d.Label, LabelPlural = d.LabelPlural, Icon = d.Icon, Description = d.Description,
@@ -264,7 +264,7 @@ public static class ModelDiff
     {
         var remaining = gone.OrderBy(e => e.Name, Ci).ToList();
         bool Referenced(EntityDef e) => remaining.Any(o => !Ci.Equals(o.Name, e.Name) &&
-            o.ActiveFields.Any(f => f.Type is FieldTypes.Reference or FieldTypes.Parent && Ci.Equals(f.ReferenceEntity, e.Name)));
+            o.ActiveFields.Any(f => f.Type is FieldTypes.Reference or FieldTypes.Parent or FieldTypes.MultiReference && Ci.Equals(f.ReferenceEntity, e.Name)));
         while (remaining.Count > 0)
         {
             // En un ciclo (A ↔ B) no hay orden posible: el compilador lo reporta y la reversión queda bloqueada.
@@ -370,7 +370,7 @@ public static class ModelDiff
         while (remaining.Count > 0)
         {
             var next = remaining.FirstOrDefault(d => Ready(d.ParentEntity, d) &&
-                           d.ActiveFields.Where(f => f.Type == FieldTypes.Reference).All(f => Ready(f.ReferenceEntity, d)))
+                           d.ActiveFields.Where(f => f.Type is FieldTypes.Reference or FieldTypes.MultiReference).All(f => Ready(f.ReferenceEntity, d)))
                        ?? remaining.FirstOrDefault(d => Ready(d.ParentEntity, d))
                        ?? remaining[0];
             remaining.Remove(next);

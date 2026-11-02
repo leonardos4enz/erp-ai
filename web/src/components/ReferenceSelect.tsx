@@ -23,6 +23,10 @@ export interface ReferenceSelectProps {
   lookup?: (search: string, signal: AbortSignal) => Promise<LookupItem[]>;
   /** Spec 005: solo ofrece registros con `field` = `value` (p. ej. partidas de la orden elegida). */
   filter?: { field: string; value: unknown; sourceLabel: string };
+  /** Spec 050: ids que no se ofrecen (los ya elegidos en un campo de varios valores). */
+  exclude?: number[];
+  /** Texto de ayuda del buscador vacío (por defecto «Buscar…»). */
+  placeholder?: string;
 }
 
 const LIST_MAX_HEIGHT = 240;
@@ -48,7 +52,7 @@ function listPosition(anchor: HTMLElement): CSSProperties {
 }
 
 /** Accessible async combobox backed by GET /data/{entity}/lookup. */
-export function ReferenceSelect({ entity, value, label, onChange, id, invalid, disabled, describedBy, ariaLabel, compact, lookup, filter }: ReferenceSelectProps) {
+export function ReferenceSelect({ entity, value, label, onChange, id, invalid, disabled, describedBy, ariaLabel, compact, lookup, filter, exclude, placeholder }: ReferenceSelectProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [items, setItems] = useState<LookupItem[]>([]);
@@ -69,7 +73,7 @@ export function ReferenceSelect({ entity, value, label, onChange, id, invalid, d
     const ctrl = new AbortController();
     setLoading(true);
     (lookup ? lookup(debounced, ctrl.signal) : dataApi.lookup(entity, debounced, ctrl.signal, filter ? { field: filter.field, value: filterValue } : undefined))
-      .then((r) => { setItems(r); setActive(0); })
+      .then((r) => { setItems(exclude?.length ? r.filter((x) => !exclude.includes(x.id)) : r); setActive(0); })
       .catch(() => { if (!ctrl.signal.aborted) setItems([]); })
       .finally(() => { if (!ctrl.signal.aborted) setLoading(false); });
     return () => ctrl.abort();
@@ -121,7 +125,7 @@ export function ReferenceSelect({ entity, value, label, onChange, id, invalid, d
           aria-describedby={describedBy}
           aria-activedescendant={open && items[active] ? `${listId}-${items[active].id}` : undefined}
           // Al abrir para buscar, el valor actual queda visible como guía (antes parecía que se perdía).
-          placeholder={disabled ? '—' : open && current ? current : 'Buscar…'}
+          placeholder={disabled ? '—' : open && current ? current : placeholder ?? 'Buscar…'}
           title={current || undefined}
           value={display}
           disabled={disabled}

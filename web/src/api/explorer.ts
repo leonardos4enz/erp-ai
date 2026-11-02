@@ -27,7 +27,7 @@ export interface RelField {
   required: boolean; unique: boolean; formula: boolean; autonumber: boolean; hasDefault: boolean; state: boolean;
 }
 export interface RelNode { name: string; label: string; labelPlural: string; icon: string; app: string; isChild: boolean; hasWorkflow: boolean; perCompany: boolean; fields: RelField[] }
-export interface RelEdge { from: string; field: string; to: string; kind: 'reference' | 'lines' | 'parent' | 'user' }
+export interface RelEdge { from: string; field: string; to: string; kind: 'reference' | 'lines' | 'parent' | 'user' | 'multireference' | 'multiuser' }
 export interface RelGraph { apps: AppRef[]; nodes: RelNode[]; edges: RelEdge[] }
 
 export interface ScopeGrant { access: 'read' | 'write'; scope: string; where?: string | null }

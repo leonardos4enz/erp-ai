@@ -62,6 +62,24 @@ test('H1 CA3: identificadores inválidos o reservados se rechazan con mensaje cl
   await expect(dialog.getByRole('button', { name: 'Aplicar cambios' })).toBeDisabled();
 });
 
+// Regresión (VERIFY 050, F-10): si la vista previa en vivo responde 4xx (con --lento, una regla a medio armar del constructor de
+// condiciones), el pie del editor no decía nada y la guardia de alertas fallaba en visual-modelador › H3 CA5.
+test.describe('validación en vivo fallida', () => {
+  // El 400 se provoca a propósito y su aviso queda en el pie del editor (fuera de la vista); con --lento la guardia lo cuenta
+  // como pedido porque sale mientras otra petición sigue en curso.
+  test.use({ guardias: { desborde: true, alerta: false, foco: true } });
+  test('H2: si la validación en vivo falla, el editor lo dice', async ({ page }) => {
+    await page.route('**/api/model/plan/preview', (route) =>
+      route.fulfill({ status: 400, contentType: 'application/problem+json', body: JSON.stringify({ title: 'Solicitud inválida.', status: 400 }) }));
+    await page.goto('/admin/model');
+    await page.getByRole('row', { name: /Camiones/ }).getByRole('button', { name: 'Editar' }).click();
+    await page.getByRole('button', { name: 'Agregar campo' }).click();
+    await page.getByLabel('Etiqueta del campo').last().fill('Placas');
+    await expect(page.getByRole('alert').filter({ hasText: 'No se pudo validar con el compilador' })).toBeVisible();
+    await page.unroute('**/api/model/plan/preview');
+  });
+});
+
 test('H2: agregar un campo a un catálogo con datos conserva la información', async ({ page }) => {
   await page.goto('/admin/model');
   await page.getByRole('row', { name: /Camiones/ }).getByRole('button', { name: 'Editar' }).click();

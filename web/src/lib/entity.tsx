@@ -17,6 +17,8 @@ export const FIELD_TYPE_LABELS: Record<FieldType, string> = {
   choice: 'Lista de opciones',
   reference: 'Referencia',
   user: 'Usuario',
+  multireference: 'Varios registros',
+  multiuser: 'Varias personas',
   autonumber: 'Folio automático',
   formula: 'Fórmula',
   lines: 'Partidas (detalle)',
@@ -27,8 +29,13 @@ export const FIELD_TYPE_LABELS: Record<FieldType, string> = {
 /** Tipos que el modelador puede elegir ('state' lo crea el motor al definir un proceso). */
 export const MODELER_FIELD_TYPES: FieldType[] = [
   'text', 'longtext', 'integer', 'decimal', 'boolean', 'date', 'datetime', 'choice', 'reference',
-  'user', 'autonumber', 'formula', 'lines', 'parent',
+  'user', 'multireference', 'multiuser', 'autonumber', 'formula', 'lines', 'parent',
 ];
+
+/** Spec 050: campo de varios valores (lista de ids con sus etiquetas en `Campo__label`). */
+export function isMultiField(f: Pick<FieldDef, 'type'>): boolean {
+  return f.type === 'multireference' || f.type === 'multiuser';
+}
 
 /** Campos cuyo valor calcula o asigna el servidor, o que el usuario no puede capturar (spec 006); nunca se envían al guardar. */
 export function isComputedField(f: FieldDef): boolean {
@@ -72,7 +79,7 @@ export function isEditableField(f: FieldDef): boolean {
 
 /** Tipos que admiten valor por defecto en el modelador. */
 export function supportsDefault(type: FieldType): boolean {
-  return !['formula', 'autonumber', 'lines', 'parent', 'state'].includes(type);
+  return !['formula', 'autonumber', 'lines', 'parent', 'state', 'multireference', 'multiuser'].includes(type);
 }
 
 export function activeFields(def: EntityDef): FieldDef[] {
@@ -151,8 +158,14 @@ export function isNumericField(f: FieldDef): boolean {
 
 export function CellValue({ field, row, def }: { field: FieldDef; row: Row; def?: EntityDef }) {
   const v = row[field.name];
-  if (v === null || v === undefined || v === '') return <span className="subtle" aria-label="vacío">—</span>;
+  if (v === null || v === undefined || v === '' || (Array.isArray(v) && v.length === 0)) return <span className="subtle" aria-label="vacío">—</span>;
   switch (field.type) {
+    case 'multireference':
+    case 'multiuser': {
+      const labels = row[`${field.name}__label`];
+      const ids = Array.isArray(v) ? v : [];
+      return <>{ids.map((id, i) => (Array.isArray(labels) && labels[i] != null ? String(labels[i]) : `#${String(id)}`)).join(', ')}</>;
+    }
     case 'boolean':
       return v
         ? <Check size={16} color="var(--success)" aria-label="Sí" />

@@ -109,3 +109,9 @@ y cada sesión queda como registro de una sola entrega. Al cerrar la spec:
 | 042 | [Tableros personales y compartir](specs/042-tableros-personales/spec.md) | Implementado |
 | 043 | [Módulo de Ventas](specs/043-modulo-ventas/spec.md) | Implementado |
 | 044 | [MCP 2: copia aislada y propuestas por MCP](specs/044-mcp-2/spec.md) | Implementado |
+| 045 | [Endurecimiento 7: las partidas se ven solo con su campo, el crédito de Ventas tiene tope y las claves del MCP no se sueltan tras el efecto](specs/045-endurecimiento-7/spec.md) | Implementado |
+| 046 | [Acompañante (motor): un agente para cualquier persona, con su alcance y su confirmación](specs/046-acompanante/spec.md) | Implementado |
+| 047 | [Acompañante: panel lateral con avatar](specs/047-acompanante-panel/spec.md) | Implementado |
+| 048 | [Acompañante 2: permiso en la conversación y de dónde sale cada campo](specs/048-acompanante-permiso/spec.md) | Implementado |
+| 049 | [Endurecimiento 8: el interruptor del Acompañante apaga lo que está en marcha y una propuesta no sobrevive a su turno](specs/049-endurecimiento-8/spec.md) | Implementado |
+| 050 | [Campos de varios valores](specs/050-campos-varios-valores/spec.md) | Implementado |

@@ -115,7 +115,8 @@ public sealed partial class RecordService
 
         foreach (var n in expand)
         {
-            if (n.Collection) await ExpandLinesAsync(cn, n, model, rows, user, q.MaxExpandedLines, ct);
+            if (n.Multi) await ExpandMultiAsync(cn, e, n, model, rows, user, q.MaxExpandedLines, ct);
+            else if (n.Collection) await ExpandLinesAsync(cn, n, model, rows, user, q.MaxExpandedLines, ct);
             else await ExpandReferenceAsync(cn, n, model, rows, raws, user, ct);
         }
         if (q.Select is { } selected)
@@ -207,6 +208,51 @@ public sealed partial class RecordService
             }
         }
         foreach (var r in rows) r[n.Name] = byParent[Convert.ToInt64(r["Id"])];
+    }
+
+    /// <summary>
+    /// Spec 050: los registros de un campo de varios valores, con el alcance de lectura del destino (lo que no ve no aparece) y
+    /// sus campos visibles. El tope es el de las partidas: si la página pasa de él, 400.
+    /// </summary>
+    private static async Task ExpandMultiAsync(SqlConnection cn, EntityDef owner, ODataNavigation n, IReadOnlyDictionary<string, EntityDef> model,
+        List<Dictionary<string, object?>> rows, UserContext user, int maxLines, CancellationToken ct)
+    {
+        var target = n.Target;
+        var byOwner = rows.ToDictionary(r => Convert.ToInt64(r["Id"]), _ => new List<Dictionary<string, object?>>());
+        if (byOwner.Count > 0)
+        {
+            var props = ODataModel.Properties(target, user);
+            var (select, from, labelParams) = SelectClause(target, model, user);
+            await using var cmd = cn.CreateCommand();
+            foreach (var (name, value) in labelParams) cmd.Parameters.Add(new SqlParameter(name, value));
+            var ids = string.Join(", ", byOwner.Keys.Select((v, i) => Param(cmd, $"@ex{i}", v)));
+            var where = new StringBuilder("t.[IsDeleted] = 0");
+            if (RecordFilter.For(target, user, write: false) is { } scope)
+            {
+                scope.AddTo(cmd.Parameters);
+                where.Append(" AND ").Append(scope.Sql);
+            }
+            cmd.Parameters.Add(new SqlParameter("@maxLines", maxLines + 1));
+            cmd.CommandText = $"""
+                SELECT TOP (@maxLines) jx.[OwnerId] AS [__owner], {select}
+                  FROM {from} JOIN {JoinTable(owner.Name, n.Field.Name)} jx ON jx.[ValueId] = t.[Id]
+                 WHERE jx.[OwnerId] IN ({ids}) AND {where}
+                 ORDER BY jx.[OwnerId], t.[Id]
+                """;
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            var read = 0;
+            while (await reader.ReadAsync(ct))
+            {
+                if (++read > maxLines)
+                    throw new ODataException($"Los registros de esta página tienen más de {maxLines:N0} valores en «{n.Name}»: pide menos registros con $top.");
+                var raw = ReadRaw(reader);
+                raw.Remove("__owner", out var ownerId);
+                var row = Format(target, raw);
+                FieldAccess.Strip(target, row, user, model);
+                byOwner[Convert.ToInt64(ownerId)].Add(ToOData(props, row));
+            }
+        }
+        foreach (var r in rows) r[n.Name] = byOwner[Convert.ToInt64(r["Id"])];
     }
 
     private static string Param(SqlCommand cmd, string name, long value)

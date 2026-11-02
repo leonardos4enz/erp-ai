@@ -148,7 +148,7 @@ function cleanField(f: DraftField, order: number): FieldDef {
   if (f.type === 'text' && f.maxLength) out.maxLength = f.maxLength;
   if (f.type === 'decimal') { out.precision = f.precision ?? 18; out.scale = f.scale ?? 2; }
   if (f.type === 'choice') out.options = f.options ?? [];
-  if (f.type === 'reference' || f.type === 'parent') out.referenceEntity = f.referenceEntity;
+  if (f.type === 'reference' || f.type === 'parent' || f.type === 'multireference') out.referenceEntity = f.referenceEntity;
   if (f.type === 'autonumber') { out.prefix = f.prefix?.trim() ?? ''; out.padding = f.padding ?? 6; }
   if (f.type === 'formula') { out.formula = f.formula?.trim() ?? ''; out.resultType = f.resultType ?? 'decimal'; }
   if (f.type === 'lines') out.childEntity = f.childEntity;
@@ -298,7 +298,7 @@ function validate(d: Draft, isNew: boolean, existingNames: string[]): Record<str
     else if (seen.has(f.name.toLowerCase())) e[`${f._key}.name`] = 'Repetido';
     seen.add(f.name.toLowerCase());
     if (f.type === 'choice' && !(f.options?.length)) e[`${f._key}.options`] = 'Agrega al menos una opción';
-    if ((f.type === 'reference' || f.type === 'parent') && !f.referenceEntity) e[`${f._key}.referenceEntity`] = 'Selecciona el catálogo';
+    if ((f.type === 'reference' || f.type === 'parent' || f.type === 'multireference') && !f.referenceEntity) e[`${f._key}.referenceEntity`] = 'Selecciona el catálogo';
     if (f.type === 'formula' && !f.formula?.trim()) e[`${f._key}.formula`] = 'Escribe la fórmula';
     if (f.type === 'lines' && !f.childEntity) e[`${f._key}.childEntity`] = 'Selecciona el catálogo de partidas';
   });
@@ -429,7 +429,7 @@ function FieldRow({ f, index, count, errors, entities, allEntities, roleNames, o
           )}
           <Switch checked={!!f.showInList} onChange={(v) => onChange({ showInList: v })} label="Mostrar en listado" />
           {!computed && f.type !== 'parent' && (
-            <Switch checked={!!f.unique} disabled={locked || f.type === 'boolean' || f.type === 'longtext' || f.type === 'user'} onChange={(v) => onChange({ unique: v })} label="Valor único" />
+            <Switch checked={!!f.unique} disabled={locked || f.type === 'boolean' || f.type === 'longtext' || f.type === 'user' || f.type === 'multireference' || f.type === 'multiuser'} onChange={(v) => onChange({ unique: v })} label="Valor único" />
           )}
           {f.type === 'autonumber' && (
             <>
@@ -489,7 +489,7 @@ function FieldRow({ f, index, count, errors, entities, allEntities, roleNames, o
               <Input inputSize="sm" type="number" min={0} max={18} label="Decimales" disabled={locked} value={f.scale ?? 2} onChange={(e) => onChange({ scale: Number(e.target.value) })} />
             </>
           )}
-          {f.type === 'reference' && (
+          {(f.type === 'reference' || f.type === 'multireference') && (
             <Select selectSize="sm" label="Catálogo referenciado" disabled={locked} error={err('referenceEntity')} value={f.referenceEntity ?? ''} onChange={(e) => onChange({ referenceEntity: e.target.value || undefined })}>
               <option value="">Selecciona…</option>
               {entities.filter((x) => !x.isArchived).map((x) => <option key={x.name} value={x.name}>{x.labelPlural}</option>)}
@@ -657,7 +657,7 @@ export function EntityEditor({ original, entities, onCancel, onReview }: EntityE
   const baseVersions = original?.version ? { [original.name]: original.version } : undefined;
   const clientOk = Object.keys(errors).length === 0;
   const opsKey = JSON.stringify(ops);
-  const [live, setLive] = useState<{ state: 'idle' | 'checking' | 'done' | 'failed'; errors: PlanPreview['errors'] }>({ state: 'idle', errors: [] });
+  const [live, setLive] = useState<{ state: 'idle' | 'checking' | 'done' | 'failed'; errors: PlanPreview['errors']; message?: string }>({ state: 'idle', errors: [] });
   useEffect(() => {
     if (!ops.length || !clientOk) { setLive({ state: 'idle', errors: [] }); return; }
     const ctl = new AbortController();
@@ -665,7 +665,7 @@ export function EntityEditor({ original, entities, onCancel, onReview }: EntityE
       setLive((s) => ({ ...s, state: 'checking' }));
       modelApi.preview({ description: 'Vista previa en vivo del modelador', operations: ops, baseVersions }, ctl.signal)
         .then((p) => setLive({ state: 'done', errors: p.errors }))
-        .catch(() => { if (!ctl.signal.aborted) setLive({ state: 'failed', errors: [] }); });
+        .catch((e: unknown) => { if (!ctl.signal.aborted) setLive({ state: 'failed', errors: [], message: e instanceof Error ? e.message : undefined }); });
     }, 800);
     return () => { window.clearTimeout(t); ctl.abort(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1005,6 +1005,8 @@ export function EntityEditor({ original, entities, onCancel, onReview }: EntityE
             : live.state === 'checking' ? <span className="subtle"><Loader2 size={13} className="spin" aria-hidden /> Validando con el compilador…</span>
             : live.state === 'done' && live.errors.length ? <span className="field-error"><AlertCircle size={13} aria-hidden /> El compilador encontró {live.errors.length} {live.errors.length === 1 ? 'error' : 'errores'}: revisa las pestañas marcadas.</span>
             : live.state === 'done' ? <span className="subtle"><CheckCircle2 size={13} aria-hidden /> El compilador no encontró errores.</span>
+            // Revisión de la 050 (F-10): un 400 de la vista previa en vivo (p. ej. una regla a medio armar) no se decía.
+            : live.state === 'failed' ? <span className="field-error" role="alert"><AlertCircle size={13} aria-hidden /> No se pudo validar con el compilador{live.message ? `: ${live.message}` : ''}. Termina de capturar lo marcado y se vuelve a revisar.</span>
             : null}
         </span>
         <Button onClick={() => (dirty ? setConfirmDiscard(true) : onCancel())}>Cancelar</Button>

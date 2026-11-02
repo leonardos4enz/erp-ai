@@ -9,7 +9,7 @@ import { useAsync, useDebounced } from '../../lib/hooks';
 import { AppLegend, EntityLinks, FieldBadges, appColors, colorOf, typeLabel, type ExplorerView } from './common';
 
 const USER = '$user';
-const KIND_LABELS = { reference: 'referencia', lines: 'partidas', parent: 'documento', user: 'usuario' } as const;
+const KIND_LABELS = { reference: 'referencia', lines: 'partidas', parent: 'documento', user: 'usuario', multireference: 'varios registros', multiuser: 'varias personas' } as const;
 
 interface Props { entity?: string; onEntity: (e?: string) => void; onOpen: (v: ExplorerView, e?: string) => void }
 
@@ -31,7 +31,7 @@ export function RelationsView({ entity, onEntity, onOpen }: Props) {
     if (!data) return { nodes: [] as GraphNode[], edges: [] as GraphEdge[] };
     const known = new Set(data.nodes.map((n) => n.name));
     // La partida → documento duplica documento → partidas: se dibuja una sola vez.
-    let rel = data.edges.filter((e) => e.kind !== 'parent' && (e.kind !== 'user' || users) && (e.to === USER || known.has(e.to)));
+    let rel = data.edges.filter((e) => e.kind !== 'parent' && ((e.kind !== 'user' && e.kind !== 'multiuser') || users) && (e.to === USER || known.has(e.to)));
     let shown = data.nodes;
     if (focus && current) {
       const near = neighborhood(current.name, rel.map((e) => ({ from: e.from, to: e.to })), levels);
@@ -53,7 +53,7 @@ export function RelationsView({ entity, onEntity, onOpen }: Props) {
       nodes.push({ id: USER, title: 'Usuarios', subtitle: 'sistema', rows: [], tone: 'external', label: 'Usuarios del sistema' });
     const edges: GraphEdge[] = rel.map((e) => ({
       id: `${e.from}.${e.field}`, from: e.from, fromRow: e.field, to: e.to, start: 'none', end: 'arrow',
-      dashed: e.kind === 'lines', tone: e.kind === 'user' ? 'muted' : undefined,
+      dashed: e.kind === 'lines', tone: e.kind === 'user' || e.kind === 'multiuser' ? 'muted' : undefined,
     }));
     return { nodes, edges };
   }, [data, focus, current, levels, allFields, users, colors, byName]);

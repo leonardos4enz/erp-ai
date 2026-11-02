@@ -244,7 +244,7 @@ public sealed class EnvironmentService(Db db, MetadataStore store, PlanService p
         foreach (var e in model.Values.Where(e => entities.Contains(e.Name)))
             foreach (var v in e.Views ?? [])
                 foreach (var f in v.Filters ?? [])
-                    if (e.FindField(f.Field) is { Type: FieldTypes.Reference or FieldTypes.User } && f.Value is { ValueKind: not JsonValueKind.Null } val &&
+                    if (e.FindField(f.Field) is { Type: FieldTypes.Reference or FieldTypes.User or FieldTypes.MultiReference or FieldTypes.MultiUser } && f.Value is { ValueKind: not JsonValueKind.Null } val &&
                         !(val.ValueKind == JsonValueKind.String && val.GetString()!.StartsWith('$')))
                         yield return $"La vista «{v.Label}» de «{e.LabelPlural}» filtra por un registro concreto ({f.Label ?? val.ToString()}): en otro entorno puede ser otro registro.";
     }

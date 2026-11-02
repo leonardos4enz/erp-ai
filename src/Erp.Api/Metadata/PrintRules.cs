@@ -92,6 +92,7 @@ public static class PrintRules
         {
             if (string.IsNullOrWhiteSpace(expr)) return;
             if (expr.Length > MaxExpr) { msgs.Add($"{where}: la expresión excede {MaxExpr} caracteres."); return; }
+            if (ExprAnalyzer.IsOwnMulti(expr, scope)) return; // spec 050: se imprimen sus etiquetas
             foreach (var m in ExprAnalyzer.Analyze(expr, scope, model, roles).Errors) msgs.Add($"{where}: {m}");
         }
 

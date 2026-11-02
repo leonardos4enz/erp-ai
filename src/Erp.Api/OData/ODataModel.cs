@@ -17,8 +17,15 @@ public sealed record ODataProperty(string Name, string Column, EdmKind Kind, Fie
     public bool Sortable => Field?.Type != FieldTypes.LongText;
 }
 
-/// <summary>Navegación de un nivel: una referencia a un catálogo raíz que el rol lee, o las partidas del documento.</summary>
-public sealed record ODataNavigation(string Name, FieldDef Field, EntityDef Target, bool Collection);
+/// <summary>
+/// Navegación de un nivel: una referencia a un catálogo raíz que el rol lee, las partidas del documento o (spec 050) los
+/// registros de un campo de varios valores (<c>Multi</c>: colección de un conjunto de entidades, no contenida).
+/// </summary>
+public sealed record ODataNavigation(string Name, FieldDef Field, EntityDef Target, bool Collection, bool Multi = false)
+{
+    /// <summary>Partidas: tipo contenido en el documento (no tiene conjunto propio).</summary>
+    public bool Contained => Collection && !Multi;
+}
 
 /// <summary>
 /// Spec 018: cómo se ve el modelo por OData <b>para un usuario</b>: solo catálogos que puede leer y campos que ve (006), así
@@ -71,6 +78,8 @@ public static class ODataModel
             if (!FieldAccess.CanSee(e, f, u)) continue;
             if (f.Type == FieldTypes.Reference && model.TryGetValue(f.ReferenceEntity ?? "", out var target) && IsEntitySet(target, u))
                 list.Add(new(f.Name, f, target, Collection: false));
+            else if (f.Type == FieldTypes.MultiReference && model.TryGetValue(f.ReferenceEntity ?? "", out var multi) && IsEntitySet(multi, u))
+                list.Add(new(f.Name, f, multi, Collection: true, Multi: true));
             else if (f.Type == FieldTypes.Lines && model.TryGetValue(f.ChildEntity ?? "", out var child) && !child.IsArchived && child.ParentField is not null)
                 list.Add(new(f.Name, f, child, Collection: true));
         }

@@ -79,7 +79,7 @@ export function LinesEditor({ field, child, lines, roles, readOnly, parent, serv
                           id={id}
                           value={l.values[c.name]}
                           refLabel={l.values[`${c.name}__label`] as string | null}
-                          onChange={(v, label) => onChange(i, c.name, v, label)}
+                          onChange={(v, label) => onChange(i, c.name, v, label as string | null | undefined)} // spec 050: una partida no tiene campos de varios valores
                           disabled={readOnly || (!isEditableField(c) && !totalsOnly(c))}
                           required={isRequiredFor(c, roles)}
                           invalid={!!err}
