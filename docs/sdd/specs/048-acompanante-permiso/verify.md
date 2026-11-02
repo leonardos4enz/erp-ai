@@ -103,7 +103,19 @@ También: `buscar_en_el_sistema` mandaba `"recortado": null`; ahora solo se mand
 - [x] Claro y oscuro (capturas), 375 px por la E2E de móvil; solo Lucide fuera del avatar
 - [x] Lo que ya se sabía y sigue: la lista abierta no se recarga sola tras aplicar (R-047-2)
 
-## 5. Riesgos residuales
+## 5. Después del cierre (mismo día)
+- **Pantalla desactualizada (R-047-2)**: el dueño, al probar, vio que el Gato pasó de «En cuarentena» a «Disponible» y la
+  pantalla siguió igual. Se descartó recargar sola (pisaría lo que se captura); decisión del dueño: un aviso. Al aplicarse
+  una acción, la lista y el registro abiertos muestran «El Acompañante aplicó cambios: es posible que … esté
+  desactualizado» con «Actualizar» (cualquier catálogo: una automatización puede haber tocado el que se ve). Evento
+  `erp:datos-cambiados` (`lib/hooks.ts`). Pruebas: `acompanante.spec.ts › H5 CA2 · CA3: confirmar…` (aviso en el registro) y
+  `› R-047-2 (048): en la lista abierta…`; sin el aviso, la primera falla.
+- **CI de `cfcef01` en rojo**: interbloqueo intermitente en `StudioTests › H5_CA1_una_sesion_interrumpida_tambien_borra_lo_leido`
+  (no la toca la 048): la prueba insertaba la sesión vencida y sus pasos en dos sentencias, y el barrido de Studio podía
+  tomar la sesión entre ambas. Ahora van en una transacción.
+- Corridas: E2E completa 488 en verde (12 min 26 s); `acompanante.spec.ts --veces=3` 21 en verde ×3 (5 min 21 s); `StudioTests` ×3 en verde (57; el interbloqueo no se reprodujo en local: es una carrera con el barrido). Vitest 84.
+
+## 6. Riesgos residuales
 Registrados en [riesgos.md](../../riesgos.md): [R-048-1](../../riesgos.md#048) (la caducidad reanuda sin la persona; sin
 tope de vueltas por turno), [R-048-2](../../riesgos.md#048) (confirmación lenta y «sin confirmar»), [R-048-3](../../riesgos.md#048)
 (la purga al esperar borra el motivo de una propuesta fallida), [R-048-4](../../riesgos.md#048) (transiciones de sistema en

@@ -20,6 +20,7 @@ import {
 } from '../lib/draft';
 import { activeFields, formatFormula, isEditableField, isRequiredFor, lockHint, StateBadge, useChildDefs, useEntityDef, withState } from '../lib/entity';
 import { formatDateTime } from '../lib/format';
+import { useOnDataChanged } from '../lib/hooks';
 import { ForbiddenPage, NotFoundPage } from './StatusPages';
 
 const COMPUTE_DEBOUNCE_MS = 350;
@@ -79,6 +80,8 @@ export function EntityFormPage() {
   const [deleting, setDeleting] = useState(false);
   const [transition, setTransition] = useState<RecordTransition | null>(null);
   const [dirty, setDirty] = useState(false);
+  /** Spec 048 (R-047-2): el Acompañante aplicó cambios: lo que se ve puede estar desactualizado (se avisa, no se relee solo). */
+  const [stale, setStale] = useState(false);
   const [editTick, setEditTick] = useState(0);
   // Spec 007: visibilidad condicional del layout (la calcula el servidor) y pestaña activa.
   const [layoutState, setLayoutState] = useState<LayoutState | null>(null);
@@ -118,6 +121,7 @@ export function EntityFormPage() {
     setLayoutState((r._layout as LayoutState | undefined) ?? null);
     setWarnings((r._warnings as Warnings | undefined) ?? null);
     setDirty(false);
+    setStale(false);
     setConflict(false);
     setError(null);
     setClientErrors({});
@@ -158,6 +162,10 @@ export function EntityFormPage() {
   }, [editTick, calc, runCompute]);
 
   useEffect(() => () => computeAbort.current?.abort(), []);
+
+  // Spec 048 (R-047-2): el Acompañante aplicó un cambio (a este registro o, por una automatización, a otro): se avisa y la
+  // persona decide cuándo actualizar (no se pisa lo que está capturando).
+  useOnDataChanged(() => { if (!isNew) setStale(true); });
 
   if (defLoading || (def && childrenLoading)) return <LoadingBlock />;
   if (!def) return <NotFoundPage />;
@@ -370,6 +378,12 @@ export function EntityFormPage() {
 
   const alerts: ReactNode = (
     <>
+      {stale && !conflict && (
+        <Alert tone="info" title="El Acompañante aplicó cambios"
+          action={<Button size="sm" icon={RefreshCw} onClick={() => void load()}>Actualizar</Button>}>
+          Es posible que este registro esté desactualizado.{dirty ? ' Al actualizar se pierde lo que no has guardado; si guardas y el registro cambió, el sistema te lo dirá.' : ''}
+        </Alert>
+      )}
       {conflict && (
         // Spec 030 (guardia de alerta): el guardado se rechazó; es un error que se anuncia, no un aviso.
         <Alert

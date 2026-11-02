@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { ArrowDown, ArrowUp, ArrowUpDown, BookmarkPlus, ChevronLeft, ChevronRight, Columns3, Download, Filter, Inbox, Network, Plus, Search, SearchX, Trash2, Upload } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, BookmarkPlus, RefreshCw, ChevronLeft, ChevronRight, Columns3, Download, Filter, Inbox, Network, Plus, Search, SearchX, Trash2, Upload } from 'lucide-react';
 import { ApiError, fieldError } from '../api/client';
 import { dataApi, viewsApi } from '../api/endpoints';
 import type { EntityDef, RowList, SavedView, StateCount, ViewFilter, ViewList } from '../api/types';
@@ -12,7 +12,7 @@ import { ExportDialog, ImportDialog } from '../components/ImportExport';
 import { useToast } from '../components/Toast';
 import { Alert, Button, Checkbox, EmptyState, Input, LoadingBlock, PageHeader, Select, Spinner } from '../components/ui';
 import { activeFields, CellValue, isNumericField, stateTone, useEntityDef } from '../lib/entity';
-import { useAsync, useDebounced } from '../lib/hooks';
+import { useAsync, useDebounced, useOnDataChanged } from '../lib/hooks';
 import { formatDateTime } from '../lib/format';
 import { ForbiddenPage, NotFoundPage } from './StatusPages';
 
@@ -70,6 +70,10 @@ export function EntityListPage() {
   const [exportOpen, setExportOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [reload, setReload] = useState(0);
+  // Spec 048 (R-047-2): el Acompañante aplicó un cambio: se avisa que la lista puede estar desactualizada (no se relee sola).
+  const [stale, setStale] = useState(false);
+  useOnDataChanged(() => setStale(true));
+  useEffect(() => { setStale(false); }, [entity]);
   const debouncedSearch = useDebounced(search, 300);
 
   function update(next: Record<string, string | undefined>) {
@@ -229,6 +233,12 @@ export function EntityListPage() {
         {data && <span className="muted" style={{ fontSize: 'var(--text-sm)' }}>{total.toLocaleString('es-MX')} {total === 1 ? 'registro' : 'registros'}</span>}
       </div>
 
+      {stale && (
+        <Alert tone="info" title="El Acompañante aplicó cambios"
+          action={<Button size="sm" icon={RefreshCw} onClick={() => { setStale(false); setReload((r) => r + 1); }}>Actualizar</Button>}>
+          Es posible que esta lista esté desactualizada.
+        </Alert>
+      )}
       {error ? (
         <Alert tone="danger" title={error instanceof ApiError ? error.title : 'No se pudieron cargar los registros'}>
           {error instanceof ApiError ? error.detail : undefined}

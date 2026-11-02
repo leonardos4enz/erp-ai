@@ -383,10 +383,36 @@ test('H5 CA2 · CA3: confirmar manda la huella y aplica una vez (doble clic); la
   // Regresión (revisión exploratoria 047, F-02): con ese registro abierto, «Ver el registro» no hacía nada y la pantalla
   // seguía con el teléfono de antes.
   await expect(page.getByLabel('Teléfono')).toHaveValue('100');
+  // Spec 048 (R-047-2, decisión del dueño): la pantalla no se recarga sola; avisa que puede estar desactualizada.
+  const stale = page.getByRole('main').getByText('El Acompañante aplicó cambios');
+  await expect(stale).toBeVisible();
+  await expect(page.getByRole('main').getByText('Es posible que este registro esté desactualizado.')).toBeVisible();
+  await expect(page.getByLabel('Teléfono')).toHaveValue('100');
   await c.getByRole('link', { name: 'Ver el registro' }).click();
   await expect(page).toHaveURL(new RegExp(`/c/AcE2eNota/${id}$`));
   await expect(page.getByLabel('Teléfono')).toHaveValue('200');
   await expect(card(page, `Propuesta: Editar Nota Acompañante n.º ${id}`).getByText('Aplicada', { exact: true })).toBeVisible();
+});
+
+test('R-047-2 (048): en la lista abierta, aplicar un cambio avisa que puede estar desactualizada y «Actualizar» la relee', async ({ page }) => {
+  await login(page);
+  const id = await newNota({ Nombre: 'Lista vieja', Telefono: '300', Monto: 1 });
+  scripts['lista'] = steps(
+    { blocks: [tool('proponer_accion', { tipo: 'editar', catalogo: 'AcE2eNota', id, valores: { Telefono: '301' }, explicacion: 'x' })] },
+    { blocks: [say('Listo, ya quedó.')] },
+  );
+  await page.goto('/c/AcE2eNota');
+  const main = page.getByRole('main');
+  await expect(main.getByRole('cell', { name: '300', exact: true })).toBeVisible();
+  await start(page, '[guion:lista] Cambia el teléfono a 301');
+  await idle(page);
+  await expect(main.getByText('El Acompañante aplicó cambios')).toHaveCount(0);
+  await card(page, `Propuesta: Editar Nota Acompañante n.º ${id}`).getByRole('button', { name: 'Sí, adelante' }).click();
+  await expect(main.getByText('Es posible que esta lista esté desactualizada.')).toBeVisible();
+  await expect(main.getByRole('cell', { name: '300', exact: true })).toBeVisible();
+  await main.getByRole('button', { name: 'Actualizar' }).click();
+  await expect(main.getByRole('cell', { name: '301', exact: true })).toBeVisible();
+  await expect(main.getByText('El Acompañante aplicó cambios')).toHaveCount(0);
 });
 
 test('H1 CA2 · H6 CA1 (048): «No, y dile qué cambiar» le llega al Acompañante y el turno sigue', async ({ page }) => {

@@ -53,15 +53,19 @@ public partial class StudioTests
     public async Task H5_CA1_una_sesion_interrumpida_tambien_borra_lo_leido()
     {
         var uid = host.Users["st-gil"];
-        var id = await host.ScalarAsync<int>($"""
+        // CI de cfcef01 (intermitente): la sesión ya vencida y sus pasos van en una transacción. En dos sentencias, el barrido
+        // podía tomar la sesión entre ambas: interbloqueo con el INSERT de los pasos, o pasos que llegaban después de la purga.
+        var id = await host.ScalarAsync<int>($$"""
+            SET XACT_ABORT ON; BEGIN TRAN;
+            DECLARE @s TABLE (Id int);
             INSERT meta.StudioSession (UserId, SecurityStamp, Prompt, Scopes, Status, Model, LeaseToken, LeaseUntil, StartedAt)
-            OUTPUT inserted.Id SELECT {uid}, SecurityStamp, N'caída con datos', N'datos', 'running', N'prueba', NEWID(), DATEADD(second, -30, SYSUTCDATETIME()), SYSUTCDATETIME()
-              FROM meta.[User] WHERE Id = {uid}
-            """);
-        await host.ExecAsync($$"""
+            OUTPUT inserted.Id INTO @s SELECT {{uid}}, SecurityStamp, N'caída con datos', N'datos', 'running', N'prueba', NEWID(), DATEADD(second, -30, SYSUTCDATETIME()), SYSUTCDATETIME()
+              FROM meta.[User] WHERE Id = {{uid}};
             INSERT meta.StudioStep (SessionId, Seq, Kind, Tool, InputJson, OutputJson, Status, Summary, DurationMs)
-            VALUES ({{id}}, 1, 'tool', 'leer_registro', N'{"entity":"StCanario"}', N'{"Nombre":"{{host.Canary}}-caida"}', 'ok', N'200', 5),
-                   ({{id}}, 2, 'tool', 'listar_catalogos', N'{}', N'[{"name":"StTarea"}]', 'ok', N'200', 3)
+            SELECT Id, 1, 'tool', 'leer_registro', N'{"entity":"StCanario"}', N'{"Nombre":"{{host.Canary}}-caida"}', 'ok', N'200', 5 FROM @s
+            UNION ALL SELECT Id, 2, 'tool', 'listar_catalogos', N'{}', N'[{"name":"StTarea"}]', 'ok', N'200', 3 FROM @s;
+            COMMIT;
+            SELECT Id FROM @s;
             """);
         await WaitForAsync(() => host.ScalarAsync<string>($"SELECT Status FROM meta.StudioSession WHERE Id = {id}"), s => s == "interrupted", "sesión interrumpida");
         Assert.Equal(0, await StoredDataAsync(id));

@@ -5,6 +5,7 @@ import { ApiError } from '../../api/client';
 import { companionApi } from '../../api/endpoints';
 import type { CompanionAction } from '../../api/types';
 import { actionView, showValue, warningsOf } from '../../lib/companion';
+import { announceDataChanged } from '../../lib/hooks';
 import { problemText } from '../../pages/studio/ChatView';
 import { Badge, Button } from '../ui';
 
@@ -63,6 +64,8 @@ export function ActionCard({ action, entityLabel, onChanged, asking = true, posi
     try {
       const r = await companionApi.confirm(a.id, a.hash, warnings ?? undefined);
       setWarnings(null);
+      // Spec 048 (R-047-2): la pantalla abierta (lista o registro) se actualiza sola.
+      if (r.action.status === 'applied') announceDataChanged();
       refocus.current = true;
       onChanged(r.action);
     } catch (e) {
