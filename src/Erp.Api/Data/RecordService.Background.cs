@@ -186,7 +186,7 @@ public sealed partial class RecordService
     {
         var bag = new RecordFilter.ParamBag("@rf");
         var where = RecordFilter.TranslateRollup(s.Where, e, model, bag);
-        var scope = RecordFilter.For(e, svc, write: false);
+        var scope = RecordFilter.For(e, svc, write: false, model);
         var pars = new List<(string, object)>([.. bag.Items, .. scope?.Parameters ?? []]);
         var filter = $"t.[IsDeleted] = 0 AND {where}{(scope is null ? "" : $" AND {scope.Sql}")}";
         if (lockId is { } id)

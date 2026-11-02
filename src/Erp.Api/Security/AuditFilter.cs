@@ -90,7 +90,7 @@ public static class AuditFilter
         {
             var name = Add(e.Name);
             // Sin IsDeleted: el rastro de un registro eliminado se conserva para quien lo veía.
-            if (RecordFilter.For(e, user, write: false) is not { } scope)
+            if (RecordFilter.For(e, user, write: false, model) is not { } scope)
             {
                 parts.Add($"(a.[EntityName] = {name} AND (a.[Action] IN ({entity}) OR {recordAction}))");
                 continue;

@@ -520,9 +520,9 @@ public static partial class PlanCompiler
             foreach (var s in t.Set ?? [])
                 if (e.FindField(s.Field) is not { IsArchived: false } fd || fd.ReadOnly || fd.Type == FieldTypes.Lines)
                     ctx.Error($"{where}: no se puede asignar '{s.Field}'.");
-                // Spec 050: una expresión da un valor simple; un campo de varios valores no se asigna así.
-                else if (FieldTypes.IsMulti(fd.Type))
-                    ctx.Error($"{where}: '{s.Field}' tiene varios valores y no se asigna con una expresión.");
+                // Spec 051: un campo de varios valores se asigna agregando o quitando un valor (mode); uno simple, sin modo.
+                else if (AssignModes.Error(fd, s) is { } error)
+                    ctx.Error($"{where}: {error}");
         }
         if (ctx.ErrorCount > start) return null;
 

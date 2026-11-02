@@ -57,7 +57,7 @@ public sealed partial class RecordService(Db db, MetadataStore store)
         foreach (var (name, value) in labelParams) cmd.Parameters.Add(new SqlParameter(name, value));
 
         // Spec 006: solo los registros a su alcance (también en el total y en los conteos por estado).
-        if (RecordFilter.For(e, user, write: false) is { } scope)
+        if (RecordFilter.For(e, user, write: false, model) is { } scope)
         {
             scope.AddTo(cmd.Parameters);
             where.Append(" AND ").Append(scope.Sql);
@@ -129,7 +129,7 @@ public sealed partial class RecordService(Db db, MetadataStore store)
         var (e, model) = await RootEntityAsync(entityName, ct);
         Require(user.Access(e.Name).Read);
         await using var cn = await db.OpenAsync(ct);
-        await EnsureAccessAsync(cn, null, e, id, user, write: false, ct);
+        await EnsureAccessAsync(cn, null, e, model, id, user, write: false, ct);
         return await LoadOutputAsync(cn, null, e, model, id, user, ct, warnings: true) ?? throw new NotFound("El registro no existe.");
     }
 
@@ -212,11 +212,11 @@ public sealed partial class RecordService(Db db, MetadataStore store)
 
     public async Task<IReadOnlyList<HistoryItem>> HistoryAsync(string entityName, long id, UserContext user, CancellationToken ct)
     {
-        var (e, _) = await RootEntityAsync(entityName, ct);
+        var (e, model) = await RootEntityAsync(entityName, ct);
         Require(user.Access(e.Name).Read);
         if (e.Workflow is null) return [];
         await using var cn = await db.OpenAsync(ct);
-        await EnsureAccessAsync(cn, null, e, id, user, write: false, ct);
+        await EnsureAccessAsync(cn, null, e, model, id, user, write: false, ct);
         await using var cmd = new SqlCommand("""
             SELECT h.At, u.DisplayName, h.FromState, h.ToState, h.Transition, h.Comment
               FROM meta.WorkflowHistory h JOIN meta.[User] u ON u.Id = h.UserId
@@ -249,7 +249,7 @@ public sealed partial class RecordService(Db db, MetadataStore store)
         await using var tx = (SqlTransaction)await cn.BeginTransactionAsync(ct);
         var id = await CreateInTransactionAsync(cn, tx, e, model, body, user, http, ct);
         // Spec 006: no se crea un registro fuera del propio alcance de escritura (sin commit, todo se revierte).
-        if (RecordFilter.For(e, user, write: true) is { } scope && !await MatchesAsync(cn, tx, e, id, scope, ct))
+        if (RecordFilter.For(e, user, write: true, model) is { } scope && !await MatchesAsync(cn, tx, e, id, scope, ct))
             throw new Forbidden("No puedes crear este registro: quedaría fuera de los registros que tu rol puede modificar.");
         var row = (await LoadOutputAsync(cn, tx, e, model, id, user, ct, warnings: true))!;
         await tx.CommitAsync(ct);
@@ -317,7 +317,7 @@ public sealed partial class RecordService(Db db, MetadataStore store)
 
         await using var cn = await db.OpenAsync(ct);
         await using var tx = (SqlTransaction)await cn.BeginTransactionAsync(ct);
-        await EnsureAccessAsync(cn, tx, e, id, user, write: true, ct);
+        await EnsureAccessAsync(cn, tx, e, model, id, user, write: true, ct);
         var loader = new RelatedLoader(cn, tx, model);
         var draft = await LoadDraftAsync(cn, tx, e, model, id, ct) ?? throw new NotFound("El registro no existe.");
         var before = Snapshot(draft);
@@ -343,7 +343,7 @@ public sealed partial class RecordService(Db db, MetadataStore store)
         await Audit.WriteAsync(cn, tx, http, AuditActions.Update, e.Name, id.ToString(), before, AuditAfter(draft, warnings));
         await FireAsync(new AutoCtx(cn, tx, model, user, http, 0, [], ct), e, id, AutomationEvents.Update, null);
         // Spec 006: no se puede sacar un registro del propio alcance (p. ej. cambiarlo a otro departamento).
-        if (RecordFilter.For(e, user, write: true) is { } scope && !await MatchesAsync(cn, tx, e, id, scope, ct))
+        if (RecordFilter.For(e, user, write: true, model) is { } scope && !await MatchesAsync(cn, tx, e, id, scope, ct))
             throw new Forbidden("No se guardó: el registro quedaría fuera de los que tu rol puede modificar.");
         var row = (await LoadOutputAsync(cn, tx, e, model, id, user, ct, warnings: true))!;
         await tx.CommitAsync(ct);
@@ -357,7 +357,7 @@ public sealed partial class RecordService(Db db, MetadataStore store)
         var (e, model) = await RootEntityAsync(entityName, ct);
         Require(id is null ? user.Access(e.Name).Create : user.Access(e.Name).Update);
         await using var cn = await db.OpenAsync(ct);
-        if (id is not null) await EnsureAccessAsync(cn, null, e, id.Value, user, write: true, ct);
+        if (id is not null) await EnsureAccessAsync(cn, null, e, model, id.Value, user, write: true, ct);
         var loader = new RelatedLoader(cn, null, model, viewer: user); // spec 029: en vivo, con el alcance de quien calcula
         var draft = id is null ? new DocDraft { CreatorId = user.Id } : await LoadDraftAsync(cn, null, e, model, id.Value, ct) ?? throw new NotFound("El registro no existe.");
         if (id is null && e.Workflow is not null) draft.Header[Workflow.StateField] = e.Workflow.Initial;
@@ -387,7 +387,7 @@ public sealed partial class RecordService(Db db, MetadataStore store)
         await using var tx = (SqlTransaction)await cn.BeginTransactionAsync(ct);
         // Spec 006: con roles declarados basta con ver el registro (autorización de proceso). Spec 012 (H2): sin roles, la
         // autorización es «permiso de edición», así que exige también el alcance de escritura del registro.
-        await EnsureAccessAsync(cn, tx, e, id, user, write: t.Roles is not { Count: > 0 }, ct);
+        await EnsureAccessAsync(cn, tx, e, model, id, user, write: t.Roles is not { Count: > 0 }, ct);
         var draft = await LoadDraftAsync(cn, tx, e, model, id, ct) ?? throw new NotFound("El registro no existe.");
         // Spec 012 (H3): los documentos que tocarán sus automatizaciones se bloquean antes de validar, y se leen después.
         await LockAutomationTargetsAsync(cn, tx, e, model, draft, t, ct);
@@ -462,9 +462,39 @@ public sealed partial class RecordService(Db db, MetadataStore store)
         d.Header[Workflow.StateField] = t.To;
         var scope = HeaderScope(d, e, model, loader);
         foreach (var s in t.Set ?? [])
-            if (e.FindField(s.Field) is { } f)
-                d.Header[f.Name] = Coerce(f, ExprEvaluator.Evaluate(s.Value, scope, env));
+            if (e.FindField(s.Field) is not { } f) continue;
+            else if (FieldTypes.IsMulti(f.Type)) ApplyMember(d.Header, f, s.Mode, ExprEvaluator.Evaluate(s.Value, scope, env), loader);
+            else d.Header[f.Name] = Coerce(f, ExprEvaluator.Evaluate(s.Value, scope, env));
         Compute(d, e, model, loader, env);
+    }
+
+    /// <summary>
+    /// Spec 051: agrega o quita de la lista de <paramref name="f"/> el id que dio una asignación del motor (transición o
+    /// automatización). Vacío: no cambia nada. Al agregar, el valor debe existir (registro vigente del catálogo, o una persona que
+    /// no es equipo) y respetar el tope; si no, la operación completa se rechaza (400, misma transacción: nada escrito). Escribe
+    /// con la autoridad del motor, como cualquier asignación: no exige que quien dispara vea el registro.
+    /// </summary>
+    internal static void ApplyMember(Values values, FieldDef f, string? mode, object? raw, RelatedLoader loader)
+    {
+        // Revisión adversarial 051 (F-04): vacío, o CURRENTUSER() del motor (id 0, sin persona), no cambia nada.
+        if (ExprEvaluator.Normalize(raw) is not { } value || value is 0m) return;
+        if (value is not decimal d || d != decimal.Truncate(d) || d is < 1 or > long.MaxValue)
+            throw new ValidationFailed(new Dictionary<string, string[]> { [f.Name] = [$"{f.Label}: el valor asignado no es un registro."] });
+        var id = (long)d;
+        var list = new SortedSet<long>(values.GetValueOrDefault(f.Name) as IEnumerable<long> ?? []);
+        if (mode == AssignModes.Remove) list.Remove(id);
+        else if (!list.Contains(id))
+        {
+            var exists = f.Type == FieldTypes.MultiUser
+                ? id <= int.MaxValue && loader.Principal((int)id) is { IsTeam: false }
+                : loader.Row(f.ReferenceEntity!, id) is not null;
+            if (!exists)
+                throw new ValidationFailed(new Dictionary<string, string[]> { [f.Name] = [$"{f.Label}: el valor asignado no existe."] });
+            if (list.Count >= FieldTypes.MaxMultiValues)
+                throw new ValidationFailed(new Dictionary<string, string[]> { [f.Name] = [$"{f.Label} admite máximo {FieldTypes.MaxMultiValues} valores."] });
+            list.Add(id);
+        }
+        values[f.Name] = list.ToList();
     }
 
     public async Task DeleteAsync(string entityName, long id, HttpContext http, CancellationToken ct)
@@ -476,7 +506,7 @@ public sealed partial class RecordService(Db db, MetadataStore store)
 
         await using var cn = await db.OpenAsync(ct);
         await using var tx = (SqlTransaction)await cn.BeginTransactionAsync(ct);
-        await EnsureAccessAsync(cn, tx, e, id, user, write: true, ct);
+        await EnsureAccessAsync(cn, tx, e, model, id, user, write: true, ct);
         // Revisión adversarial 045 (F-01): el documento se bloquea antes de leerlo; si no, una transición que confirma entre
         // la lectura y el borrado dejaba borrar un documento ya no editable (o que ya no cumple «deletableWhen»).
         await using (var lockCmd = new SqlCommand($"SELECT 1 FROM {AppTable(e.Name)} WITH (UPDLOCK, HOLDLOCK) WHERE [Id] = @id", cn, tx))
@@ -1212,7 +1242,7 @@ public sealed partial class RecordService(Db db, MetadataStore store)
         }
 
         // Spec 013: el cliente sabe si este registro se puede modificar (alcance de escritura por registro).
-        var canWrite = RecordFilter.For(e, user, write: true) is not { } w || await MatchesAsync(cn, tx, e, id, w, ct);
+        var canWrite = RecordFilter.For(e, user, write: true, model) is not { } w || await MatchesAsync(cn, tx, e, id, w, ct);
         row["_access"] = AccessOf(e, user.Access(e.Name), canWrite);
         if (e.Workflow is { } wf)
         {
@@ -1480,11 +1510,11 @@ public sealed partial class RecordService(Db db, MetadataStore store)
     /// Spec 006: el registro debe estar al alcance del usuario. Fuera del alcance de lectura responde 404 (no revela
     /// que existe); visible pero sin escritura, 403.
     /// </summary>
-    private static async Task EnsureAccessAsync(SqlConnection cn, SqlTransaction? tx, EntityDef e, long id, UserContext user, bool write, CancellationToken ct)
+    private static async Task EnsureAccessAsync(SqlConnection cn, SqlTransaction? tx, EntityDef e, IReadOnlyDictionary<string, EntityDef> model, long id, UserContext user, bool write, CancellationToken ct)
     {
-        if (RecordFilter.For(e, user, write: false) is { } read && !await MatchesAsync(cn, tx, e, id, read, ct))
+        if (RecordFilter.For(e, user, write: false, model) is { } read && !await MatchesAsync(cn, tx, e, id, read, ct))
             throw new NotFound("El registro no existe.");
-        if (write && RecordFilter.For(e, user, write: true) is { } w && !await MatchesAsync(cn, tx, e, id, w, ct))
+        if (write && RecordFilter.For(e, user, write: true, model) is { } w && !await MatchesAsync(cn, tx, e, id, w, ct))
             throw new Forbidden(CannotWrite);
     }
 

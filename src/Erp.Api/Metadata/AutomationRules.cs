@@ -258,6 +258,9 @@ public static class AutomationRules
         foreach (var s in a.Capture)
             if (scope.FindField(s.Field) is not { IsArchived: false } f || f.ReadOnly || f.Type == FieldTypes.Lines)
                 yield return $"captura: no se puede asignar '{s.Field}' en {scope.Name}.";
+            // Spec 051: la captura reemplaza un valor; agregar o quitar de una lista va en «set».
+            else if (FieldTypes.IsMulti(f.Type) || s.Mode is not null)
+                yield return $"captura: '{s.Field}' no se captura (un campo de varios valores se asigna con «set» y «mode»).";
     }
 
     /// <summary>Texto de una expresión que es solo una literal de texto, o nulo.</summary>
@@ -272,9 +275,9 @@ public static class AutomationRules
         foreach (var s in set ?? [])
             if (target.FindField(s.Field) is not { IsArchived: false } f || f.ReadOnly || f.Type == FieldTypes.Lines)
                 yield return $"no se puede asignar '{s.Field}' en {target.Name}.";
-            // Spec 050: una expresión da un valor simple; un campo de varios valores no se asigna así.
-            else if (FieldTypes.IsMulti(f.Type))
-                yield return $"'{s.Field}' tiene varios valores y no se asigna con una expresión.";
+            // Spec 051: un campo de varios valores se asigna agregando o quitando un valor (mode); uno simple, sin modo.
+            else if (AssignModes.Error(f, s) is { } error)
+                yield return error;
     }
 
     private static IEnumerable<string> MissingRequired(EntityDef target, IEnumerable<string> provided)

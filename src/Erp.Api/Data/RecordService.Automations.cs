@@ -112,8 +112,10 @@ public sealed partial class RecordService
                 {
                     if (SelfOrTarget(e, id, scopeEntity, a, values, c.Model) is not { } tgt) break;
                     var (target, tid) = tgt;
-                    var set = a.Set!.Select(s => (Field: target.FindField(s.Field)!, Value: ExprEvaluator.Evaluate(s.Value, scope, env))).ToList();
-                    await SystemUpdateAsync(c, target, tid, set.Select(s => (s.Field, Coerce(s.Field, s.Value))).ToList());
+                    var set = a.Set!.Select(s => (Field: target.FindField(s.Field)!, Value: ExprEvaluator.Evaluate(s.Value, scope, env), s.Mode)).ToList();
+                    // Spec 051: un campo de varios valores agrega o quita el valor sobre la lista que lee SystemUpdateAsync.
+                    await SystemUpdateAsync(c, target, tid, set.Select(s => (s.Field,
+                        FieldTypes.IsMulti(s.Field.Type) ? new MemberChange(s.Mode, s.Value) : Coerce(s.Field, s.Value))).ToList());
                     break;
                 }
                 case AutomationActions.Transition:
@@ -129,7 +131,9 @@ public sealed partial class RecordService
                     var target = c.Model[a.Entity!];
                     var newDraft = new DocDraft { CreatorId = c.User.Id };
                     foreach (var s in a.Set ?? [])
-                        if (target.FindField(s.Field) is { } f) newDraft.Header[f.Name] = Coerce(f, ExprEvaluator.Evaluate(s.Value, scope, env));
+                        if (target.FindField(s.Field) is not { } f) continue;
+                        else if (FieldTypes.IsMulti(f.Type)) ApplyMember(newDraft.Header, f, s.Mode, ExprEvaluator.Evaluate(s.Value, scope, env), loader);
+                        else newDraft.Header[f.Name] = Coerce(f, ExprEvaluator.Evaluate(s.Value, scope, env));
                     // Spec 020: partidas del documento nuevo (p. ej. las de una póliza), en el ámbito de la acción. Spec 043: con
                     // `from`, una por cada partida del origen, en el ámbito de esa partida (su documento, por el campo padre).
                     foreach (var lt in a.CreateLines ?? [])
@@ -286,6 +290,9 @@ public sealed partial class RecordService
     /// Asigna campos de un registro (o de una partida, guardando su documento). Recalcula fórmulas, valida las
     /// reglas del registro modificado y dispara «al editar» del documento. Si nada cambia, no escribe.
     /// </summary>
+    /// <summary>Spec 051: una asignación que agrega o quita un valor de un campo de varios valores.</summary>
+    private sealed record MemberChange(string? Mode, object? Value);
+
     private async Task SystemUpdateAsync(AutoCtx c, EntityDef target, long id, IReadOnlyList<(FieldDef Field, object? Value)> set)
     {
         if (await LockRootAsync(c, target, id) is not { } locked)
@@ -309,6 +316,14 @@ public sealed partial class RecordService
         var changed = false;
         foreach (var (f, v) in set)
         {
+            // Spec 051: sobre la lista ya leída con la fila bloqueada (LockRootAsync): diez a la vez no se pisan.
+            if (v is MemberChange m)
+            {
+                var had = values.GetValueOrDefault(f.Name) as IReadOnlyCollection<long> ?? [];
+                ApplyMember(values, f, m.Mode, m.Value, new RelatedLoader(c.Cn, c.Tx, c.Model));
+                changed |= !had.SequenceEqual(values.GetValueOrDefault(f.Name) as IReadOnlyCollection<long> ?? []);
+                continue;
+            }
             if (Equals(ExprEvaluator.Normalize(values.GetValueOrDefault(f.Name)), ExprEvaluator.Normalize(v))) continue;
             values[f.Name] = v;
             changed = true;
@@ -454,6 +469,12 @@ public sealed partial class RecordService
             throw new AppException(400, $"Hay más de {MaxRollupSources:N0} registros de {source.LabelPlural} para acumular.");
 
         var loader = new RelatedLoader(c.Cn, c.Tx, c.Model);
+        // Revisión adversarial 051 (F-02): las filas se leen sin sus campos de varios valores; si el filtro pregunta por pertenencia,
+        // se cargan (sin ellas, «X IN Campo» daba falso en silencio).
+        var members = a.Filter is not null && ExprAnalyzer.UsedFunctions(a.Filter).Contains("CONTAINS") ? source.MultiFields : [];
+        foreach (var row in rows)
+            foreach (var mf in members)
+                row[mf.Name] = loader.Members(source.Name, Convert.ToInt64(row["Id"], CultureInfo.InvariantCulture), [mf.Name]);
         var total = 0m;
         foreach (var row in rows)
         {

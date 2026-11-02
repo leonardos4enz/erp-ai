@@ -56,7 +56,7 @@ public static class AssistantPrompt
         - restoreEntity { entity } / restoreField { entity, field }   (reactivan lo archivado con los datos que conservó)
         - setWorkflow { entity, workflow: { initial, states: [{ name, label, color?, editable? }],
           transitions: [{ name, label, from: string[], to, roles?, when?, whenMessage?, requireComment?, requiredFields?,
-          set?: [{ field, value }], icon?, variant?, system?, onWarning?: confirm|block|allow }] } }
+          set?: [{ field, value, mode? }], icon?, variant?, system?, onWarning?: confirm|block|allow }] } }
           onWarning: qué hacer si al ejecutarla quedan avisos (confirm = la persona los confirma; block = no se ejecuta).
           color: neutral | accent | success | warning | danger. variant: primary | secondary | danger. editable: false
           bloquea la edición en ese estado. value de set es una expresión. system: solo la ejecuta una automatización.
@@ -132,7 +132,8 @@ public static class AssistantPrompt
         folio automático), formula (formula + resultType: decimal|integer|text|boolean|date; solo lectura), user (un
         usuario del ERP), multireference (varios registros de referenceEntity; no en partidas), multiuser (varias
         personas), lines (partidas: childEntity) y parent (en la partida, referenceEntity = documento). Los de varios
-        valores no se usan en fórmulas, reglas ni condiciones.
+        valores no son un valor simple: se pregunta si un valor pertenece a ellos (X IN Campo, ver Expresiones) y en un
+        set de transición o automatización llevan mode: "add" o "remove" con una expresión que da un id.
         unique se permite en text, integer, date y choice. editable: false = lo asigna el sistema (valor por defecto o
         transiciones). Documento con partidas: primero createEntity de la partida con un campo parent que apunta al
         documento (el documento debe existir antes), luego addField del documento con type lines y childEntity.
@@ -140,7 +141,9 @@ public static class AssistantPrompt
         Expresiones (fórmulas, valores por defecto, reglas, condiciones, visibleWhen, where, filter): operadores
         = <> < <= > >= IN (...), AND OR NOT, + - * /, & concatena texto; literales 'texto', números, TRUE, FALSE, NULL;
         rutas Campo, Referencia.Campo o hasta tres saltos (Recepcion.OrdenCompra.Moneda.Clave: cada salto intermedio es
-        una referencia o el documento). Funciones: IF(c,a,b), COALESCE(a,b,…), ISBLANK(x), ROUND(x,n), ABS(x),
+        una referencia o el documento). Pertenencia: X IN Campo o CONTAINS(Campo, X), con Campo de varios valores propio o
+        al final de una ruta (CURRENTUSER() IN Departamento.Responsables, Categoria IN Proveedor.Categorias); vacío da falso.
+        También vale en where de permisos por registro. Funciones: IF(c,a,b), COALESCE(a,b,…), ISBLANK(x), ROUND(x,n), ABS(x),
         MIN(a,b), MAX(a,b), LEN(s), UPPER(s), ISEMAIL(s), TODAY(), NOW(), ADDDAYS(fecha,n), DAYS(desde,hasta),
         CURRENTUSER(), CURRENTUNIT(), HASROLE('Rol'), ISCREATOR(), SUM(Partidas.Campo), COUNT(Partidas),
         BASECURRENCY(), CURRENTCOMPANY(), RATE(de,a[,fecha]), CONVERT(importe,de,a[,fecha]), UNITCOST('CatálogoSaldo', cantidad, llave…). Las monedas son códigos

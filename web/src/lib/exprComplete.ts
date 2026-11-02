@@ -38,7 +38,7 @@ const FUNCTION_HINTS: Record<string, string> = {
   TODAY: 'TODAY()', NOW: 'NOW()', ADDDAYS: 'ADDDAYS(fecha, días)', DAYS: 'DAYS(desde, hasta)', CURRENTUSER: 'CURRENTUSER()',
   CURRENTUNIT: 'CURRENTUNIT()', HASROLE: "HASROLE('Rol')", ISCREATOR: 'ISCREATOR()', SUM: 'SUM(Partidas.Campo)', COUNT: 'COUNT(Partidas)',
   BASECURRENCY: 'BASECURRENCY()', CURRENTCOMPANY: 'CURRENTCOMPANY()', RATE: 'RATE(de, a, fecha?)', CONVERT: 'CONVERT(importe, de, a, fecha?)',
-  UNITCOST: "UNITCOST('Catálogo', cantidad, llave…)",
+  UNITCOST: "UNITCOST('Catálogo', cantidad, llave…)", CONTAINS: 'CONTAINS(Lista, valor)',
 };
 
 const find = (fields: FieldDef[], name: string) => fields.find((f) => !f.isArchived && f.name.toLowerCase() === name.toLowerCase());
@@ -113,6 +113,9 @@ export function complete(text: string, caret: number, scope: CompletionScope, fo
   while (to < text.length && /[A-Za-z0-9_]/.test(text[to])) to++;
   const from = caret - word.length;
   if (!word && !force) return null;
+  // Spec 051: después de «IN » o dentro de «CONTAINS(», un campo de varios valores es la lista de una pertenencia.
+  const member = /(?:\bIN\s+|\bCONTAINS\s*\(\s*)$/i.test(text.slice(0, from));
+  const offered = (f: FieldDef) => member || !isMultiField(f);
 
   if (word.includes('.')) {
     const segs = word.split('.');
@@ -123,11 +126,11 @@ export function complete(text: string, caret: number, scope: CompletionScope, fo
     const prefix = segs.join('.') + '.';
     const items = at.user
       ? USER_FIELDS.filter((n) => matches(last, n)).map((n): Suggestion => ({ kind: 'field', insert: prefix + n, label: n, detail: 'Dato del usuario' }))
-      : at.fields.filter((f) => !f.isArchived && f.type !== 'lines' && !isMultiField(f) && matches(last, f.name, f.label)).map((f) => fieldItem(f, prefix));
+      : at.fields.filter((f) => !f.isArchived && f.type !== 'lines' && offered(f) && matches(last, f.name, f.label)).map((f) => fieldItem(f, prefix));
     return items.length ? { from, to, items: items.slice(0, MAX_ITEMS), closeQuote: false } : null;
   }
 
-  const fields = scope.fields.filter((f) => !f.isArchived && !isMultiField(f) && matches(word, f.name, f.label)).map((f) => fieldItem(f, ''));
+  const fields = scope.fields.filter((f) => !f.isArchived && offered(f) && matches(word, f.name, f.label)).map((f) => fieldItem(f, ''));
   const upper = word.toUpperCase();
   const fns = scope.functions.filter((f) => f.name.startsWith(upper))
     .map((f): Suggestion => ({ kind: 'function', insert: `${f.name}(${f.max === 0 ? ')' : ''}`, label: f.name, detail: FUNCTION_HINTS[f.name] ?? `${f.name}()` }));

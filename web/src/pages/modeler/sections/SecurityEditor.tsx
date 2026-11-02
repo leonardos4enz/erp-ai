@@ -89,7 +89,7 @@ export function SecurityEditor({ policy, onChange, ctx }: { policy: SecurityPoli
               </Select>
               <MultiPick legend={`Regla ${i + 1}: roles`} options={roles} value={g.roles ?? []} onChange={(r) => patchGrant(i, { roles: r })} hint="Ninguno: todos los roles." />
               <ExprInput condition className="span-all" label={`Regla ${i + 1}: además, solo donde (opcional)`} value={g.where ?? ''} onChange={(v) => patchGrant(i, { where: v })}
-                scope={selfScope(ctx)} entities={ctx.entities} hint="Condición traducible a SQL, p. ej. Departamento = USER.Departamento." />
+                scope={selfScope(ctx)} entities={ctx.entities} hint="Condición traducible a SQL, p. ej. CURRENTUSER() IN Departamento.Responsables (quien está en la lista del departamento)." />
             </div>
             <Button size="sm" variant="ghost" icon={Trash2} onClick={() => set({ records: records.filter((_, k) => k !== i) })}>Quitar regla {i + 1}</Button>
           </div>

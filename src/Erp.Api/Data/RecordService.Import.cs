@@ -82,7 +82,7 @@ public sealed partial class RecordService
                         using var doc = JsonDocument.Parse(body.ToJsonString());
                         var sink = new WarningSink();
                         var id = await CreateInTransactionAsync(cn, tx, e, model, doc.RootElement, user, http, ct, folios, sink);
-                        if (RecordFilter.For(e, user, write: true) is { } scope && !await MatchesAsync(cn, tx, e, id, scope, ct))
+                        if (RecordFilter.For(e, user, write: true, model) is { } scope && !await MatchesAsync(cn, tx, e, id, scope, ct))
                             throw new Forbidden("Quedaría fuera de los registros que tu rol puede modificar.");
                         imported++;
                         foreach (var w in sink.Items.Take(MaxImportErrors - warnings.Count)) // spec 031: ya son los que se le dicen

@@ -361,7 +361,7 @@ public sealed class ReportService(Db db, MetadataStore store)
         if (!string.IsNullOrWhiteSpace(r.Filter))
         {
             var bag = new RecordFilter.ParamBag("@rf");
-            where.Append(" AND ").Append(RecordFilter.Translate(r.Filter, e, RecordFilter.Of(user), bag));
+            where.Append(" AND ").Append(RecordFilter.Translate(r.Filter, e, RecordFilter.Of(user), bag, model: model));
             foreach (var (n, v) in bag.Items) cmd.Parameters.Add(new SqlParameter(n, v));
         }
         if (FilterSql.Build(e, filters, user, cmd.Parameters, "uf") is { Length: > 0 } uf) where.Append(" AND ").Append(uf);

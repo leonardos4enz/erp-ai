@@ -50,8 +50,9 @@ public static class RecordFilter
     /// empresa solo los registros de su empresa actual, también para el superusuario (la empresa es contexto, no
     /// privilegio); los permisos por registro (006) sí se los salta el superusuario.
     /// </summary>
-    public static SqlPredicate? For(EntityDef e, UserContext user, bool write) =>
-        Build(e, Of(user), write, grants: !user.IsSuperuser);
+    /// <param name="model">Spec 051: para seguir la ruta de una pertenencia (<c>CURRENTUSER() IN Departamento.Responsables</c>).</param>
+    public static SqlPredicate? For(EntityDef e, UserContext user, bool write, IReadOnlyDictionary<string, EntityDef>? model = null) =>
+        Build(e, Of(user), write, grants: !user.IsSuperuser, model: model);
 
     /// <summary>
     /// Igual que <see cref="For"/>, pero una partida hereda el alcance de su documento (buscadores y referencias
@@ -60,8 +61,8 @@ public static class RecordFilter
     /// </summary>
     public static SqlPredicate? ForRecordOrParent(EntityDef e, IReadOnlyDictionary<string, EntityDef> model, UserContext user)
     {
-        if (!e.IsChild) return For(e, user, write: false);
-        if (!model.TryGetValue(e.ParentEntity ?? "", out var parent) || For(parent, user, write: false) is not { } p) return null;
+        if (!e.IsChild) return For(e, user, write: false, model);
+        if (!model.TryGetValue(e.ParentEntity ?? "", out var parent) || For(parent, user, write: false, model) is not { } p) return null;
         return p with { Sql = $"t.{Quote(e.ParentField!.Name)} IN (SELECT t.[Id] FROM {AppTable(parent.Name)} t WHERE t.[IsDeleted] = 0 AND {p.Sql})" };
     }
 
@@ -69,30 +70,38 @@ public static class RecordFilter
     /// Spec 029: ¿los permisos por registro (no la empresa) restringen la lectura de este catálogo para el usuario? Es lo
     /// que hace que una fórmula que lo recorre se le oculte (<see cref="DerivedAccess"/>).
     /// </summary>
-    public static bool HasGrants(EntityDef e, UserContext user) =>
-        !user.IsSuperuser && Grants(e, Of(user), write: false, new ParamBag()) is not null;
+    public static bool HasGrants(EntityDef e, UserContext user)
+    {
+        // Spec 051: sin traducir (no necesita el modelo): restringe si ningún permiso aplicable es «todos» sin condición.
+        if (user.IsSuperuser || e.Security?.Records is not { } grants) return false;
+        var who = Of(user);
+        return !grants.Any(g => Applies(g, who, write: false) && string.Equals(g.EffectiveScope, RecordScopes.All, StringComparison.OrdinalIgnoreCase)
+                               && string.IsNullOrWhiteSpace(g.Where));
+    }
 
-    internal static SqlPredicate? Build(EntityDef e, Who who, bool write, bool grants = true)
+    private static bool Applies(RecordGrant g, Who who, bool write) =>
+        (g.Roles is not { Count: > 0 } roles || roles.Any(r => who.Roles.Contains(r, StringComparer.OrdinalIgnoreCase))) && (!write || g.Writes);
+
+    internal static SqlPredicate? Build(EntityDef e, Who who, bool write, bool grants = true, IReadOnlyDictionary<string, EntityDef>? model = null)
     {
         var bag = new ParamBag();
         // Spec 010: sin empresa no hay registros de un catálogo por empresa (el id 0 no existe).
         var company = e.PerCompany ? $"t.[CompanyId] = {bag.Add(who.CompanyId ?? 0)}" : null;
-        var records = grants ? Grants(e, who, write, bag) : null;
+        var records = grants ? Grants(e, who, write, bag, model) : null;
         if (company is null) return records is null ? null : new SqlPredicate(records, bag.Items);
         return new SqlPredicate(records is null ? company : $"({company} AND {records})", bag.Items);
     }
 
     /// <summary>Spec 006: <c>OR</c> de los permisos por registro aplicables; null = sin restricción.</summary>
-    private static string? Grants(EntityDef e, Who who, bool write, ParamBag bag)
+    private static string? Grants(EntityDef e, Who who, bool write, ParamBag bag, IReadOnlyDictionary<string, EntityDef>? model)
     {
         if (e.Security?.Records is not { } grants) return null;
         var parts = new List<string>();
         foreach (var g in grants)
         {
-            if (g.Roles is { Count: > 0 } roles && !roles.Any(r => who.Roles.Contains(r, StringComparer.OrdinalIgnoreCase))) continue;
-            if (write && !g.Writes) continue;
+            if (!Applies(g, who, write)) continue;
             var scope = ScopeSql(e, g.EffectiveScope, who, bag);
-            var where = string.IsNullOrWhiteSpace(g.Where) ? null : Translate(g.Where, e, who, bag);
+            var where = string.IsNullOrWhiteSpace(g.Where) ? null : Translate(g.Where, e, who, bag, model: model);
             if (scope is null && where is null) return null; // «todos» sin condición: no restringe
             parts.Add(scope is null ? where! : where is null ? scope : $"({scope} AND {where})");
         }
@@ -129,8 +138,9 @@ public static class RecordFilter
     /// Traduce una condición del lenguaje de expresiones (subconjunto) a SQL. Lanza <see cref="ExprException"/>
     /// con un mensaje para el modelador si usa algo que no se puede evaluar en la base.
     /// </summary>
-    public static string Translate(string source, EntityDef e, Who who, ParamBag bag, IReadOnlySet<string>? knownRoles = null) =>
-        new Translator(e, who, bag, knownRoles).Bool(ExprParser.Parse(source));
+    public static string Translate(string source, EntityDef e, Who who, ParamBag bag, IReadOnlySet<string>? knownRoles = null,
+        IReadOnlyDictionary<string, EntityDef>? model = null) =>
+        new Translator(e, who, bag, knownRoles, model, rollup: false).Bool(ExprParser.Parse(source));
 
     /// <summary>
     /// Spec 014 (H2): filtro de un acumulado, que el motor evalúa con <see cref="ExprEnv.System"/> sobre el alias <c>t</c>.
@@ -140,12 +150,12 @@ public static class RecordFilter
     /// condición no es traducible; el motor la evalúa entonces en memoria.
     /// </summary>
     public static string TranslateRollup(string source, EntityDef e, IReadOnlyDictionary<string, EntityDef> model, ParamBag bag) =>
-        new Translator(e, new Who(0, null, []), bag, null, model).Bool(ExprParser.Parse(source));
+        new Translator(e, new Who(0, null, []), bag, null, model, rollup: true).Bool(ExprParser.Parse(source));
 
     /// <summary>Valida una regla <c>where</c> con un usuario ficticio; devuelve el error o null.</summary>
-    public static string? Check(string source, EntityDef e, IReadOnlySet<string> knownRoles)
+    public static string? Check(string source, EntityDef e, IReadOnlySet<string> knownRoles, IReadOnlyDictionary<string, EntityDef>? model = null)
     {
-        try { Translate(source, e, new Who(0, "unidad", []), new ParamBag(), knownRoles); return null; }
+        try { Translate(source, e, new Who(0, "unidad", []), new ParamBag(), knownRoles, model); return null; }
         catch (ExprException ex) { return ex.Message; }
     }
 
@@ -161,9 +171,10 @@ public static class RecordFilter
         }
     }
 
-    /// <param name="model">Con modelo, modo acumulado (ver <see cref="TranslateRollup"/>).</param>
+    /// <param name="model">Spec 051: para las rutas (de una pertenencia, o de cualquier valor en modo acumulado).</param>
+    /// <param name="rollup">Modo acumulado (ver <see cref="TranslateRollup"/>).</param>
     private sealed class Translator(EntityDef e, Who who, ParamBag bag, IReadOnlySet<string>? knownRoles,
-        IReadOnlyDictionary<string, EntityDef>? model = null)
+        IReadOnlyDictionary<string, EntityDef>? model, bool rollup)
     {
         private static readonly HashSet<string> Comparisons = ["=", "<>", "<", "<=", ">", ">="];
         private int _aliases;
@@ -173,9 +184,9 @@ public static class RecordFilter
             Binary { Op: "AND" or "OR" } b => $"({Bool(b.Left)} {b.Op} {Bool(b.Right)})",
             Unary { Op: "NOT" } u => $"(NOT {Bool(u.Operand)})",
             // Como ExprEvaluator.Compare: nulo = nulo es verdadero y nulo = x es falso (dos valores, también bajo NOT).
-            Binary { Op: "=" or "<>" } b when model is not null => TwoValued(Value(b.Left), Value(b.Right), b.Op == "="),
+            Binary { Op: "=" or "<>" } b when rollup => TwoValued(Value(b.Left), Value(b.Right), b.Op == "="),
             Binary b when Comparisons.Contains(b.Op) => $"{Value(b.Left)} {b.Op} {Value(b.Right)}",
-            InList i when model is not null => $"(CASE WHEN {Value(i.Value)} IN ({string.Join(", ", i.Items.Select(Value))}) THEN 1 ELSE 0 END = 1)",
+            InList i when rollup => $"(CASE WHEN {Value(i.Value)} IN ({string.Join(", ", i.Items.Select(Value))}) THEN 1 ELSE 0 END = 1)",
             InList i => $"{Value(i.Value)} IN ({string.Join(", ", i.Items.Select(Value))})",
             Literal { Value: bool v } => v ? "1 = 1" : "1 = 0",
             // Regresión (spec 007): una fórmula sí/no guardada (p. ej. «Bajo mínimo») también es una condición.
@@ -189,7 +200,7 @@ public static class RecordFilter
 
         private string BoolCall(Call c)
         {
-            if (model is not null && c.Name is "HASROLE" or "ISCREATOR")
+            if (rollup && c.Name is "HASROLE" or "ISCREATOR")
                 throw new ExprException($"{c.Name}() depende de quién dispara el evento: se evalúa en memoria.");
             switch (c.Name)
             {
@@ -204,6 +215,8 @@ public static class RecordFilter
                     return who.Roles.Contains(role, StringComparer.OrdinalIgnoreCase) ? "1 = 1" : "1 = 0";
                 case "ISCREATOR" when c.Args.Count == 0:
                     return $"t.[CreatedBy] = {bag.Add(who.UserId)}";
+                case "CONTAINS" when c.Args is [PathRef list, var x]:
+                    return Membership(list, x);
                 default:
                     throw new ExprException($"{c.Name}() no se puede usar como condición en una regla de acceso.");
             }
@@ -216,7 +229,7 @@ public static class RecordFilter
             Literal l => bag.Add(l.Value),
             Unary { Op: "-", Operand: Literal { Value: decimal d } } => bag.Add(-d),
             PathRef p => Column(p).Sql,
-            Call { Name: "CURRENTUSER" or "CURRENTUNIT" } c when model is not null =>
+            Call { Name: "CURRENTUSER" or "CURRENTUNIT" } c when rollup =>
                 throw new ExprException($"{c.Name}() depende de quién dispara el evento: se evalúa en memoria."),
             Call { Name: "CURRENTUSER", Args.Count: 0 } => bag.Add(who.UserId),
             Call { Name: "CURRENTUNIT", Args.Count: 0 } => bag.Add(who.Unit),
@@ -235,9 +248,56 @@ public static class RecordFilter
             _ => null,
         };
 
-        private (string Sql, FieldDef Field) Column(PathRef p)
+        /// <summary>
+        /// Spec 051: <c>X IN Lista</c> → <c>EXISTS</c> sobre la tabla de unión del campo de varios valores, con la llave del dueño
+        /// (el propio registro, o la cadena de subconsultas por Id de una ruta, con el dueño vigente) y X como parámetro o
+        /// columna. Dos valores: sin dueño, sin filas o X nulo, falso. Identificadores solo de los metadatos.
+        /// </summary>
+        private string Membership(PathRef list, Node x)
         {
-            if (!p.IsOwn && model is null) throw new ExprException($"'{p}': una regla de acceso solo usa campos del propio catálogo.");
+            var head = e.FindField(list.Head);
+            if (head is null || head.IsArchived) throw new ExprException($"El campo '{list.Head}' no existe en {e.Name}.");
+            string owner;
+            EntityDef ownerEntity;
+            FieldDef field;
+            if (list.IsOwn) (owner, ownerEntity, field) = ("t.[Id]", e, head);
+            else
+            {
+                if (model is null) throw new ExprException($"'{list}': la regla necesita el modelo para seguir la ruta.");
+                if (head.Type is not (FieldTypes.Reference or FieldTypes.Parent))
+                    throw new ExprException($"'{list.Head}' no es una referencia; no se puede usar '{list}'.");
+                // La llave del penúltimo salto (una columna o la cadena de subconsultas de una ruta) y el dueño, vigente.
+                var before = list.Rest.Take(list.Rest.Count - 1).ToList();
+                var key = before.Count == 0 ? $"t.{Quote(head.Name)}" : Column(new PathRef(list.Head, before), forList: true).Sql;
+                var hop = before.Count == 0 ? head : ExprAnalyzer.MemberPath(head, before, model, list.ToString(), out _);
+                if (hop is not { Type: FieldTypes.Reference or FieldTypes.Parent } || !model.TryGetValue(hop.ReferenceEntity ?? "", out var target))
+                    throw new ExprException($"'{list}' no se puede leer en la base.");
+                ownerEntity = target;
+                field = target.FindField(list.Rest[^1]) ?? throw new ExprException($"'{list.Rest[^1]}' no existe en {target.Name}.");
+                var o = $"o{_aliases++}";
+                owner = $"(SELECT {o}.[Id] FROM {AppTable(target.Name)} {o} WHERE {o}.[Id] = {key} AND {o}.[IsDeleted] = 0)";
+            }
+            if (field.IsArchived || !FieldTypes.IsMulti(field.Type))
+                throw new ExprException($"'{list}' no tiene varios valores: «X IN Campo» pregunta por un campo de varios valores.");
+            var value = x switch
+            {
+                Literal { Value: decimal d } when d == decimal.Truncate(d) && d is > 0 and <= long.MaxValue => bag.Add((long)d),
+                Call { Name: "CURRENTUSER" } when field.Type == FieldTypes.MultiUser => Value(x),
+                // Una columna del mismo tipo que los valores (una persona, o una referencia al mismo catálogo): nunca una
+                // conversión implícita de texto en la base.
+                PathRef p when Column(p) is var (sql, vf) && (field.Type == FieldTypes.MultiUser ? vf.Type == FieldTypes.User
+                    : vf.Type is FieldTypes.Reference or FieldTypes.Parent && string.Equals(vf.ReferenceEntity, field.ReferenceEntity, StringComparison.OrdinalIgnoreCase)) => sql,
+                _ => throw new ExprException($"En «X IN {field.Name}», X debe ser CURRENTUSER(), un campo o un número."),
+            };
+            var j = $"j{_aliases++}";
+            return $"EXISTS (SELECT 1 FROM {JoinTable(ownerEntity.Name, field.Name)} {j} WHERE {j}.[OwnerId] = {owner} AND {j}.[ValueId] = {value})";
+        }
+
+        /// <param name="forList">Spec 051: la llave de la lista de una pertenencia (una ruta también vale en una regla de acceso).</param>
+        private (string Sql, FieldDef Field) Column(PathRef p, bool forList = false)
+        {
+            if (!p.IsOwn && !rollup && !forList) throw new ExprException($"'{p}': una regla de acceso solo usa campos del propio catálogo.");
+            if (!p.IsOwn && model is null) throw new ExprException($"'{p}' no se puede leer en la base.");
             var f = Stored(e, p.Head);
             if (p.IsOwn) return ($"t.{Quote(f.Name)}", f);
             // Spec 014: campo de un registro referido o del documento, vigente; si no existe, nulo. Spec 023: hasta tres

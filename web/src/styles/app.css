@@ -802,6 +802,11 @@ code, pre, .mono { font-family: var(--font-mono); font-size: 0.8125rem; }
 .wf-assign { gap: var(--space-2); align-items: flex-start; }
 .wf-assign > :first-child { width: 40%; flex-shrink: 0; }
 .wf-assign > .input { flex: 1; width: auto; min-width: 0; }
+/* Spec 051: con el modo (agregar o quitar) la fila se parte: campo y modo arriba, el valor abajo con su botón. */
+.wf-assign.has-mode { flex-wrap: wrap; }
+.wf-assign.has-mode > :first-child { width: auto; flex: 1 1 40%; min-width: 0; }
+.wf-assign.has-mode > :nth-child(2) { flex: 1 1 30%; min-width: 0; }
+.wf-assign.has-mode > .input { flex: 1 1 calc(100% - 48px); }
 
 /* ---------- Spec 024: navegación por módulos ---------- */
 .app-grid { list-style: none; margin: 0; padding: 0; }
@@ -887,6 +892,8 @@ code, pre, .mono { font-family: var(--font-mono); font-size: 0.8125rem; }
 .subgroup > legend { padding: 0 var(--space-1); }
 .subitem { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: var(--space-3); display: grid; gap: var(--space-2); background: var(--surface-2); min-width: 0; }
 .assign-row { display: grid; grid-template-columns: minmax(140px, 0.8fr) minmax(0, 1.4fr) auto; gap: var(--space-2); align-items: start; }
+/* Spec 051: campo, modo (agregar o quitar), valor y quitar. */
+.assign-row.has-mode { grid-template-columns: minmax(140px, 0.8fr) minmax(120px, 0.6fr) minmax(0, 1.4fr) auto; }
 /* Spec 039: medidas con nombre, etiqueta y decimales; colores de las series de la gráfica. */
 .measure-row { display: grid; gap: var(--space-2); padding-bottom: var(--space-2); border-bottom: 1px solid var(--border); }
 .measure-row:last-of-type { border-bottom: 0; }
@@ -900,6 +907,9 @@ code, pre, .mono { font-family: var(--font-mono); font-size: 0.8125rem; }
 @media (max-width: 640px) {
   .assign-row { grid-template-columns: minmax(0, 1fr) auto; }
   .assign-row > :nth-child(2) { grid-column: 1 / -1; grid-row: 2; }
+  .assign-row.has-mode { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; }
+  .assign-row.has-mode > :nth-child(2) { grid-column: auto; grid-row: auto; }
+  .assign-row.has-mode > :nth-child(3) { grid-column: 1 / -1; grid-row: 2; }
   .filter-row-editor { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; }
   .filter-row-editor > :nth-child(3) { grid-column: 1 / -1; grid-row: 2; }
 }

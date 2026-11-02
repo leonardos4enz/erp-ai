@@ -47,6 +47,7 @@ public sealed class RelatedLoader(SqlConnection cn, SqlTransaction? tx, IReadOnl
     private readonly Dictionary<int, Values?> _users = new();
     private readonly Dictionary<int, (bool IsTeam, bool IsActive)?> _principals = new();
     private readonly Dictionary<(string, string, DateTime), decimal?> _rates = new();
+    private readonly Dictionary<(string, string, long), IReadOnlyCollection<long>> _members = new();
 
     public SqlConnection Connection => cn;
     public SqlTransaction? Transaction => tx;
@@ -56,6 +57,7 @@ public sealed class RelatedLoader(SqlConnection cn, SqlTransaction? tx, IReadOnl
     {
         _rows.Clear();
         _visible.Clear();
+        _members.Clear();
     }
 
     public Values? Row(string entity, long id)
@@ -96,6 +98,36 @@ public sealed class RelatedLoader(SqlConnection cn, SqlTransaction? tx, IReadOnl
             if (f.Type is not (FieldTypes.Reference or FieldTypes.Parent) || f.ReferenceEntity is null) return null;
             (entity, id) = (f.ReferenceEntity, Convert.ToInt64(value));
         }
+    }
+
+    /// <summary>
+    /// Spec 051: ids del campo de varios valores al final de <paramref name="path"/> desde el registro <paramref name="id"/> de
+    /// <paramref name="entity"/>: los saltos intermedios son referencias o el padre (como <see cref="Walk"/>), y el dueño de la lista
+    /// debe estar vigente. Vacía si la ruta se corta por los datos (salto vacío o borrado); null si, en vivo, un salto está fuera del
+    /// alcance de quien mira (desconocido, revisión adversarial 051 F-01). Nombres de los metadatos.
+    /// </summary>
+    public IReadOnlyCollection<long>? Members(string entity, long id, IReadOnlyList<string> path)
+    {
+        for (var i = 0; ; i++)
+        {
+            if (viewer is not null && !Visible(entity, id, viewer)) return null;
+            if (Row(entity, id) is not { } row || !model.TryGetValue(entity, out var e) || e.FindField(path[i]) is not { } f) return [];
+            if (i == path.Count - 1)
+                return FieldTypes.IsMulti(f.Type) ? JoinValues(e.Name, f.Name, id) : [];
+            if (f.Type is not (FieldTypes.Reference or FieldTypes.Parent) || f.ReferenceEntity is null || row.GetValueOrDefault(f.Name) is not { } next) return [];
+            (entity, id) = (f.ReferenceEntity, Convert.ToInt64(next));
+        }
+    }
+
+    private IReadOnlyCollection<long> JoinValues(string entity, string field, long owner)
+    {
+        if (_members.TryGetValue((entity, field, owner), out var cached)) return cached;
+        using var cmd = new SqlCommand($"SELECT [ValueId] FROM {JoinTable(entity, field)} WHERE [OwnerId] = @id", cn, tx);
+        cmd.Parameters.Add(new SqlParameter("@id", owner));
+        using var r = cmd.ExecuteReader();
+        var ids = new HashSet<long>();
+        while (r.Read()) ids.Add(Convert.ToInt64(r.GetValue(0)));
+        return _members[(entity, field, owner)] = ids;
     }
 
     /// <summary>Spec 006: ¿el registro está dentro del alcance de lectura del usuario?</summary>
@@ -217,4 +249,17 @@ public sealed class DocScope(EntityDef entity, Values values, RelatedLoader load
 
     public IReadOnlyList<IExprScope> Lines(string linesField) =>
         lines is not null && lines.TryGetValue(linesField, out var l) ? l : [];
+
+    /// <summary>Spec 051: la lista del borrador (campo propio), la del documento en memoria (por el padre) o la de un registro referido.</summary>
+    public IReadOnlyCollection<long>? Members(string field, IReadOnlyList<string> path)
+    {
+        var f = entity.FindField(field);
+        if (f is null) return null;
+        if (path.Count == 0)
+            return FieldTypes.IsMulti(f.Type) ? values.GetValueOrDefault(f.Name) as IReadOnlyCollection<long> ?? [] : null;
+        if (f.Type == FieldTypes.Parent && parent is not null) return parent.Members(path[0], path.Skip(1).ToList());
+        var raw = values.GetValueOrDefault(f.Name);
+        return raw is null || f.Type is not (FieldTypes.Reference or FieldTypes.Parent) ? []
+            : loader.Members(f.ReferenceEntity!, Convert.ToInt64(raw), path);
+    }
 }

@@ -270,7 +270,7 @@ public static class InterfaceRules
                 .Select(m => m.Name!).ToHashSet(StringComparer.OrdinalIgnoreCase);
             foreach (var m in r.Measures.Where(m => m.Fn == "calc"))
                 if (CheckCalc(m.Expr, usable) is { } cerr) msgs.Add($"{where}: medida calculada '{m.Label ?? m.Name ?? "sin nombre"}': {cerr}");
-            if (!string.IsNullOrWhiteSpace(r.Filter) && RecordFilter.Check(r.Filter, e, roles) is { } ferr) msgs.Add($"{where} (filter): {ferr}");
+            if (!string.IsNullOrWhiteSpace(r.Filter) && RecordFilter.Check(r.Filter, e, roles, model) is { } ferr) msgs.Add($"{where} (filter): {ferr}");
             if (r.OrderBy is not (null or "group" or "measure")) msgs.Add($"{where}: «orderBy» es group o measure.");
             if (r.OrderBy == "measure" && r.Measures is [{ Fn: "calc" }, ..])
                 msgs.Add($"{where}: para ordenar por la medida, la primera no puede ser calculada (el orden se aplica en la base).");

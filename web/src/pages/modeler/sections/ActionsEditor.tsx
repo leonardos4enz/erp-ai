@@ -3,8 +3,10 @@ import type { AutomationAction, EntityDef, FieldDef } from '../../../api/types';
 import { ExprInput, type ExprScope } from '../../../components/ExprInput';
 import { Button, Checkbox, Select } from '../../../components/ui';
 import { activeFields, clean, entityByName, entityOptions, fieldOptions, isNumeric, scopeOf, writable, type SectionCtx } from './common';
+import { isMultiField } from '../../../lib/entity';
+import { AssignMode, withMode } from '../assignMode';
 
-type Assignment = { field: string; value: string };
+type Assignment = { field: string; value: string; mode?: 'add' | 'remove' };
 type Action = AutomationAction;
 
 export const ACTION_LABELS: Record<Action['type'], string> = {
@@ -37,11 +39,14 @@ function AssignList({ label, value, onChange, fields, scope, ctx, hint, addLabel
       <legend className="field-label">{label}</legend>
       {hint && <p className="field-hint">{hint}</p>}
       {value.map((s, i) => (
-        <div className="assign-row" key={i}>
-          <Select aria-label={`${label}: campo ${i + 1}`} value={s.field ?? ''} onChange={(e) => onChange(value.map((x, k) => (k === i ? { ...x, field: e.target.value } : x)))}>
+        <div className={`assign-row${fields.some((f) => f.name === s.field && isMultiField(f)) ? ' has-mode' : ''}`} key={i}>
+          <Select aria-label={`${label}: campo ${i + 1}`} value={s.field ?? ''} onChange={(e) => onChange(value.map((x, k) => (k === i ? withMode({ ...x, field: e.target.value }, fields) : x)))}>
             {fieldOptions(fields, 'Campo…')}
             {s.field && !fields.some((f) => f.name === s.field) && <option value={s.field}>{s.field} (no existe)</option>}
           </Select>
+          {fields.some((f) => f.name === s.field && isMultiField(f)) && (
+            <AssignMode label={`${label}: qué hace con ${s.field}`} value={s.mode} onChange={(mode) => onChange(value.map((x, k) => (k === i ? { ...x, mode } : x)))} />
+          )}
           <ExprInput label={<span className="sr-only">{`${label}: valor de ${s.field || `campo ${i + 1}`}`}</span>} value={s.value ?? ''} scope={scope} entities={ctx.entities}
             placeholder="Valor (expresión)" onChange={(v) => onChange(value.map((x, k) => (k === i ? { ...x, value: v } : x)))} />
           <Button variant="ghost" size="sm" iconOnly icon={Trash2} aria-label={`Quitar ${s.field || `campo ${i + 1}`}`} onClick={() => onChange(value.filter((_, k) => k !== i))} />
@@ -147,7 +152,7 @@ function ActionForm({ a, patch, ctx, isChild, schedule }: { a: Action; patch: (p
             hint="Los obligatorios sin valor por defecto deben asignarse." />
           <CreateLines a={a} patch={patch} ctx={ctx} target={target} exprScope={exprScope} sourceFields={a.lines ? [] : (scope?.fields ?? [])} />
           <AssignList label="Capturar en este registro (opcional)" value={a.capture ?? []} onChange={(capture) => patch({ capture })}
-            fields={(scope?.fields ?? []).filter(writable)} scope={createdScope} ctx={ctx} addLabel="Agregar captura"
+            fields={(scope?.fields ?? []).filter((f) => writable(f) && !isMultiField(f))} scope={createdScope} ctx={ctx} addLabel="Agregar captura"
             hint="Valores del registro creado que se guardan en el que disparó la acción (p. ej. su costo real)." />
         </>
       )}

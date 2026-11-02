@@ -5,7 +5,7 @@ import type { CompletionScope } from '../exprComplete';
 const f = (name: string, type: FieldDef['type'], extra: Partial<FieldDef> = {}): FieldDef => ({ name, label: name, type, ...extra });
 const entity = (name: string, fields: FieldDef[]) => ({ name, label: name, labelPlural: name, fields }) as unknown as EntityDef;
 
-export const zona = entity('Zona', [f('Clave', 'text'), f('Nombre', 'text')]);
+export const zona = entity('Zona', [f('Clave', 'text'), f('Nombre', 'text'), f('Encargados', 'multiuser')]);
 export const cliente = entity('Cliente', [f('Nombre', 'text'), f('Zona', 'reference', { referenceEntity: 'Zona' }), f('Limite', 'decimal')]);
 export const partida = entity('PedidoPartida', [f('Cantidad', 'decimal'), f('Importe', 'decimal')]);
 export const pedido = entity('Pedido', [
@@ -16,6 +16,7 @@ export const pedido = entity('Pedido', [
   f('Fecha', 'date'),
   f('Urgente', 'boolean'),
   f('Responsable', 'user'),
+  f('Seguidores', 'multiuser'),
   f('Estado', 'state'),
   f('Partidas', 'lines', { childEntity: 'PedidoPartida' }),
   f('Viejo', 'text', { isArchived: true }),

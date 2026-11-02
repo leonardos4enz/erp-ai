@@ -71,6 +71,8 @@ internal interface IPrintData
     bool Visible(string entity, long id);
     Values? Row(string entity, long id);
     Values? User(int id);
+    /// <summary>Spec 051: ids del campo de varios valores <paramref name="field"/> del registro <paramref name="owner"/>.</summary>
+    IReadOnlyCollection<long> Members(string entity, long owner, string field);
 }
 
 internal sealed class LoaderPrintData(RelatedLoader loader, UserContext user) : IPrintData
@@ -78,6 +80,7 @@ internal sealed class LoaderPrintData(RelatedLoader loader, UserContext user) : 
     public bool Visible(string entity, long id) => loader.Visible(entity, id, user);
     public Values? Row(string entity, long id) => loader.Row(entity, id);
     public Values? User(int id) => loader.User(id);
+    public IReadOnlyCollection<long> Members(string entity, long owner, string field) => loader.Members(entity, owner, [field]) ?? [];
 }
 
 public sealed partial class RecordService
@@ -91,7 +94,7 @@ public sealed partial class RecordService
         var (e, model) = await RootEntityAsync(entityName, ct);
         Require(user.Access(e.Name).Read);
         await using var cn = await db.OpenAsync(ct);
-        await EnsureAccessAsync(cn, null, e, id, user, write: false, ct);
+        await EnsureAccessAsync(cn, null, e, model, id, user, write: false, ct);
         if (e.PrintTemplates is not { Count: > 0 }) return [];
         var draft = await LoadDraftAsync(cn, null, e, model, id, ct) ?? throw new NotFound("El registro no existe.");
         var loader = new RelatedLoader(cn, null, model, viewer: user); // spec 031 (H5): UNITCOST con su alcance, como /compute
@@ -112,7 +115,7 @@ public sealed partial class RecordService
         var (e, model) = await RootEntityAsync(entityName, ct);
         Require(user.Access(e.Name).Read);
         await using var cn = await db.OpenAsync(ct);
-        await EnsureAccessAsync(cn, null, e, id, user, write: false, ct);
+        await EnsureAccessAsync(cn, null, e, model, id, user, write: false, ct);
         var draft = await LoadDraftAsync(cn, null, e, model, id, ct) ?? throw new NotFound("El registro no existe.");
         var loader = new RelatedLoader(cn, null, model, viewer: user); // spec 031 (H5): UNITCOST con su alcance, como /compute
         var ctx = new PrintContext(new LoaderPrintData(loader, user), user, model);
@@ -448,4 +451,26 @@ internal sealed class PrintScope(EntityDef entity, Values values, PrintContext c
 
     public IReadOnlyList<IExprScope> Lines(string linesField) =>
         lines is not null && lines.TryGetValue(linesField, out var l) ? l : [];
+
+    /// <summary>
+    /// Spec 051 (revisión adversarial F-03): «pertenece a» en una plantilla. Cada salto, y el dueño de la lista, al alcance de quien
+    /// imprime (si no, «(sin acceso)», como <see cref="RelatedPath"/>).
+    /// </summary>
+    public IReadOnlyCollection<long>? Members(string field, IReadOnlyList<string> path)
+    {
+        var f = entity.FindField(field);
+        if (f is null) return null;
+        if (path.Count == 0) return values.GetValueOrDefault(f.Name) as IReadOnlyCollection<long> ?? [];
+        if (f.Type == FieldTypes.Parent && parent is not null) return parent.Members(path[0], path.Skip(1).ToList());
+        if (values.GetValueOrDefault(f.Name) is not { } raw || f.Type is not (FieldTypes.Reference or FieldTypes.Parent) || f.ReferenceEntity is null) return [];
+        var (target, id) = (f.ReferenceEntity, Convert.ToInt64(raw));
+        for (var i = 0; ; i++)
+        {
+            if (!ctx.Visible(target, id)) throw new PrintNoAccess();
+            if (ctx.Data.Row(target, id) is not { } row || !ctx.Model.TryGetValue(target, out var te) || te.FindField(path[i]) is not { } hop) return [];
+            if (i == path.Count - 1) return FieldTypes.IsMulti(hop.Type) ? ctx.Data.Members(te.Name, id, hop.Name) : [];
+            if (row.GetValueOrDefault(hop.Name) is not { } next || hop.Type is not (FieldTypes.Reference or FieldTypes.Parent) || hop.ReferenceEntity is null) return [];
+            (target, id) = (hop.ReferenceEntity, Convert.ToInt64(next));
+        }
+    }
 }

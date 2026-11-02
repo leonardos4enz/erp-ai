@@ -41,7 +41,7 @@ public sealed partial class RecordService
             if (hits.Count >= GlobalSearchTotal) break;
             await using var cmd = cn.CreateCommand();
             var where = "t.[IsDeleted] = 0";
-            if (RecordFilter.For(e, user, write: false) is { } scope)
+            if (RecordFilter.For(e, user, write: false, model) is { } scope)
             {
                 scope.AddTo(cmd.Parameters);
                 where += " AND " + scope.Sql;

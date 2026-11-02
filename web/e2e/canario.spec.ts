@@ -8,6 +8,7 @@
 // Spec 045 (auditoría 8, D-01): y una partida detrás de un campo de partidas oculto (exploración, reporte del modelo y saltos).
 // Spec 050 (H6 CA1): y campos de varios valores: uno visible a un registro fuera de alcance, uno a un catálogo cuyo campo para
 // mostrar es una fórmula oculta y uno oculto por campo (registro, lista, exportación, OData con $expand y PDF).
+// Spec 051 (H2 CA4): y un registro fuera de alcance por pertenencia («CURRENTUSER() IN Grupo.Miembros», un EXISTS en SQL).
 // Autocontenido: crea sus catálogos (grupo «Pruebas 029»), su empresa y su usuario, y los archiva al terminar.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -28,7 +29,7 @@ const ROLE = 'CN Lector';
 const COMPANY = { code: 'CN029', name: 'Empresa canario 029', baseCurrency: 'MXN' };
 const AVISO = 'Aviso del canario: el dato secreto está vacío.';
 const AVISO_OCULTO = 'Aviso del canario: el campo oculto tiene valor.';
-const ENTITIES = ['CnDoc', 'CnPuente2', 'CnPuente', 'CnSecreto', 'CnEmpresa', 'CnNombre'] as const;
+const ENTITIES = ['CnMiembro', 'CnGrupo', 'CnDoc', 'CnPuente2', 'CnPuente', 'CnSecreto', 'CnEmpresa', 'CnNombre'] as const;
 const REPORTS = ['PorDato', 'PorCopia', 'PorPuente', 'Conteo', 'PorSecreto2', 'PorSecretoRef2', 'PorPuenteDoble'] as const;
 /**
  * Spec 041: definiciones que el lector explora (y exporta, y guarda) por los mismos caminos que los reportes del modelo:
@@ -103,6 +104,16 @@ const MODEL = (canary: string) => ({
       { name: 'Nombres', label: 'Nombres', type: 'multireference', referenceEntity: 'CnNombre' },
       { name: 'Puentes', label: 'Puentes', type: 'multireference', referenceEntity: 'CnPuente' },
       { name: 'NombresOcultos', label: 'Nombres ocultos', type: 'multireference', referenceEntity: 'CnNombre' } ] },
+    // Spec 051: el lector ve un miembro solo si está en la lista de su grupo; el del grupo ajeno lleva el canario.
+    { op: 'createEntity', group: GROUP, name: 'CnGrupo', label: 'Grupo 051', labelPlural: 'Grupos 051', displayField: 'Nombre', fields: [
+      { name: 'Nombre', label: 'Nombre', type: 'text', maxLength: 80, required: true },
+      { name: 'Miembros', label: 'Miembros', type: 'multiuser' } ] },
+    { op: 'createEntity', group: GROUP, name: 'CnMiembro', label: 'Ficha 051', labelPlural: 'Fichas 051', displayField: 'Folio', fields: [
+      { name: 'Folio', label: 'Folio', type: 'autonumber', prefix: 'CNM-', padding: 4 },
+      { name: 'Nombre', label: 'Nombre', type: 'text', maxLength: 80, required: true },
+      { name: 'Grupo', label: 'Grupo', type: 'reference', referenceEntity: 'CnGrupo', required: true },
+      { name: 'Dato', label: 'Dato', type: 'text', maxLength: 120 } ] },
+    { op: 'setSecurity', entity: 'CnMiembro', security: { records: [{ roles: [ROLE], where: 'CURRENTUSER() IN Grupo.Miembros' }] } },
     // Spec 045 (auditoría 8, D-01): partidas que solo ve el administrador (su campo de partidas está oculto para el lector).
     { op: 'createEntity', name: 'CnDocPartida', label: 'Partida 029', labelPlural: 'Partidas 029', fields: [
       { name: 'Doc', label: 'Documento', type: 'parent', referenceEntity: 'CnDoc' },
@@ -183,15 +194,17 @@ test('preparar: canario en un campo oculto, fuera de alcance, detrás de uno vis
   if (!(await a.get('/api/model/entities/CnDoc')).ok()) await applyPlan(a, MODEL(canary));
   const perms = [
     { entity: 'CnDoc', canRead: true, canCreate: true, canUpdate: true, canDelete: false },
-    ...['CnPuente', 'CnPuente2', 'CnSecreto', 'CnEmpresa', 'CnNombre'].map((entity) => ({ entity, canRead: true, canCreate: false, canUpdate: false, canDelete: false })),
+    ...['CnPuente', 'CnPuente2', 'CnSecreto', 'CnEmpresa', 'CnNombre', 'CnGrupo', 'CnMiembro'].map((entity) => ({ entity, canRead: true, canCreate: false, canUpdate: false, canDelete: false })),
   ];
   const roleBody = { name: ROLE, description: 'E2E spec 029', canManageModel: false, canManageUsers: false, canViewAudit: true, permissions: perms };
   const r = await a.put(`/api/admin/roles/${role}`, { data: roleBody });
   expect(r.status(), await r.text()).toBe(200);
   const users = (await (await a.get('/api/admin/users')).json()) as { id: number; username: string }[];
-  if (!users.some((u) => u.username === LECTOR)) {
+  let lectorId = users.find((u) => u.username === LECTOR)?.id;
+  if (!lectorId) {
     const u = await a.post('/api/admin/users', { data: { username: LECTOR, displayName: 'Lector canario', password: PWD, roleIds: [role] } });
     expect(u.status(), await u.text()).toBe(201);
+    lectorId = (await u.json()).id as number;
   }
   if (state.ids.doc) return;
 
@@ -222,6 +235,11 @@ test('preparar: canario en un campo oculto, fuera de alcance, detrás de uno vis
   ids.doc = await post('CnDoc', { Nombre: 'Documento visible', Puente: ids.puente, Puente2: ids.puente2, Oculto: canary,
     Partidas: [{ Concepto: 'Partida oculta', Dato: canary }], Nombres: [ids.nombre], Puentes: [ids.puente], NombresOcultos: [ids.nombre] });
   ids.docEmpresa = await post('CnDoc', { Nombre: 'Documento con otra empresa', Puente: ids.puenteEmpresa });
+  // Spec 051: un grupo con el lector en su lista y otro sin él; la ficha del ajeno lleva el canario.
+  ids.grupoDentro = await post('CnGrupo', { Nombre: 'Grupo del lector', Miembros: [lectorId] });
+  ids.grupoFuera = await post('CnGrupo', { Nombre: 'Grupo ajeno', Miembros: [] });
+  ids.miembroDentro = await post('CnMiembro', { Nombre: 'Ficha visible', Grupo: ids.grupoDentro, Dato: 'sin secreto' });
+  ids.miembroFuera = await post('CnMiembro', { Nombre: 'Ficha ajena', Grupo: ids.grupoFuera, Dato: canary });
   state = { canary, ids };
   save();
 
@@ -230,6 +248,8 @@ test('preparar: canario en un campo oculto, fuera de alcance, detrás de uno vis
   expect((await l.get(`/api/data/CnDoc/${ids.doc}`)).status()).toBe(200);
   expect((await l.get(`/api/data/CnPuente/${ids.puente}`)).status()).toBe(200);
   expect((await l.get(`/api/data/CnSecreto/${ids.secreto}`)).status()).toBe(404);
+  expect((await l.get(`/api/data/CnMiembro/${ids.miembroDentro}`)).status()).toBe(200);
+  expect((await l.get(`/api/data/CnMiembro/${ids.miembroFuera}`)).status()).toBe(404);
   // Y que el canario existe para quien sí puede verlo.
   expect(JSON.stringify(await (await a.get(`/api/data/CnDoc/${ids.doc}`)).json())).toContain(canary);
 });
@@ -275,6 +295,7 @@ function expand(template: string, ids: Record<string, number>): string[] {
   const byEntity: Record<string, number[]> = {
     CnDoc: [ids.doc, ids.docEmpresa], CnPuente: [ids.puente, ids.puenteEmpresa], CnPuente2: [ids.puente2],
     CnSecreto: [ids.secreto], CnEmpresa: [ids.empresa], CnNombre: [ids.nombre],
+    CnGrupo: [ids.grupoDentro, ids.grupoFuera], CnMiembro: [ids.miembroDentro, ids.miembroFuera],
   };
   let urls = [template];
   const fill = (param: string, values: string[]) => {
@@ -711,6 +732,25 @@ test('H6 CA1 (050): varios valores fuera de alcance, con etiqueta oculta o en un
   expect((await l.get('/odata/CnDoc', { params: { $expand: 'NombresOcultos' } })).status()).toBe(400);
   // Filtrar por el campo oculto: 400 (no es un oráculo).
   expect((await l.get('/api/data/CnDoc', { params: { filters: JSON.stringify([{ field: 'NombresOcultos', op: 'contains', value: ids.nombre }]) } })).status()).toBe(400);
+});
+
+// Spec 051 (H2 CA4): la ficha de un grupo que no tiene al lector en su lista. El administrador ve el canario (control); el
+// lector ve la de su grupo y por ningún camino la ajena.
+test('H2 CA4 (051): fuera de alcance por pertenencia: el administrador ve el canario y el lector no', async () => {
+  const a = await admin();
+  const l = await lector();
+  const { canary, ids } = state;
+  const reads = ['/api/data/CnMiembro?pageSize=50', '/api/data/CnMiembro/export?format=csv&columns=Nombre,Dato', '/odata/CnMiembro',
+    '/api/data/CnMiembro/lookup?search=CNM-', `/api/data/CnMiembro/${ids.miembroFuera}`];
+  for (const p of reads) expect(await (await a.get(p)).text(), p).toContain(p.includes('lookup') ? 'CNM-' : canary);
+  const list = await (await l.get('/api/data/CnMiembro', { params: { pageSize: 50 } })).json();
+  expect(list.items.map((r: { id: number }) => r.id)).toEqual([ids.miembroDentro]);
+  for (const p of reads) {
+    const res = await l.get(p);
+    expect(await res.text(), p).not.toContain(canary);
+  }
+  expect((await l.get(`/api/data/CnMiembro/${ids.miembroFuera}`)).status()).toBe(404);
+  expect((await l.get(`/odata/CnMiembro(${ids.miembroFuera})`)).status()).toBe(404);
 });
 
 // ---------------- H4 CA3: el bloqueo por avisos no lista los que leen ocultos (D-08) ----------------

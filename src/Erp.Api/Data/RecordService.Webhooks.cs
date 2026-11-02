@@ -36,7 +36,7 @@ public sealed partial class RecordService
             var service = await ServiceRole.LoadAsync(c.Cn, c.Tx, h.Role, c.User.Company);
             // El rol debe poder leer el catálogo y el registro; si no, no sale nada.
             if (!service.Access(e.Name).Read) continue;
-            if (RecordFilter.For(e, service, write: false) is { } scope && !await MatchesAsync(c.Cn, c.Tx, e, id, scope, c.Ct)) continue;
+            if (RecordFilter.For(e, service, write: false, c.Model) is { } scope && !await MatchesAsync(c.Cn, c.Tx, e, id, scope, c.Ct)) continue;
             var row = await LoadOutputAsync(c.Cn, c.Tx, e, c.Model, id, service, c.Ct);
             if (row is null) continue;
             var data = Trim(row, h.Fields);

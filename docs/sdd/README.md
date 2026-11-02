@@ -115,3 +115,4 @@ y cada sesión queda como registro de una sola entrega. Al cerrar la spec:
 | 048 | [Acompañante 2: permiso en la conversación y de dónde sale cada campo](specs/048-acompanante-permiso/spec.md) | Implementado |
 | 049 | [Endurecimiento 8: el interruptor del Acompañante apaga lo que está en marcha y una propuesta no sobrevive a su turno](specs/049-endurecimiento-8/spec.md) | Implementado |
 | 050 | [Campos de varios valores](specs/050-campos-varios-valores/spec.md) | Implementado |
+| 051 | [«Pertenece a» en expresiones y en la seguridad por registro](specs/051-pertenece-a/spec.md) | Implementado |

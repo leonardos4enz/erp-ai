@@ -4,12 +4,11 @@ import {
   defaultValue, fieldAt, kindOfField, OP_TEXT, OPS_FOR, type Cond, type CondGroup, type CondOp, type CondValue, type FieldKind,
 } from '../lib/conditionBuilder';
 import { fieldsAtPath, MAX_HOPS, type CompletionScope } from '../lib/exprComplete';
-import { isMultiField } from '../lib/entity';
 import { Button, Input, Select } from './ui';
 
 const hop = (f: FieldDef) => f.type === 'reference' || f.type === 'parent';
-// Spec 050: los campos de varios valores todavía no van en expresiones («pertenece a» llega en la 051).
-const usable = (fs: FieldDef[]) => fs.filter((f) => !f.isArchived && f.type !== 'lines' && !isMultiField(f));
+// Spec 051: los campos de varios valores entran con el operador «contiene» (X IN Campo).
+const usable = (fs: FieldDef[]) => fs.filter((f) => !f.isArchived && f.type !== 'lines');
 
 /** Campo por pasos: el propio o, si es una referencia, uno de su catálogo (hasta tres saltos, spec 023). */
 function PathPicker({ path, onChange, scope, label }: { path: string; onChange: (p: string) => void; scope: CompletionScope; label: string }) {
@@ -45,7 +44,12 @@ const SOURCES: Record<FieldKind, { v: CondValue['kind']; l: string }[]> = {
   choice: [{ v: 'text', l: 'una opción' }, { v: 'field', l: 'otro campo' }],
   user: [{ v: 'me', l: 'quien usa el sistema' }, { v: 'field', l: 'otro campo' }],
   reference: [{ v: 'field', l: 'otro campo' }],
+  multiuser: [{ v: 'me', l: 'quien usa el sistema' }, { v: 'field', l: 'otro campo' }],
+  multireference: [{ v: 'field', l: 'otro campo' }],
 };
+
+/** Spec 051: de qué clase es el valor que se busca en una lista (una persona o un registro del mismo catálogo). */
+const valueKind = (k: FieldKind): FieldKind => (k === 'multiuser' ? 'user' : k === 'multireference' ? 'reference' : k);
 
 function ValueEditor({ c, f, kind, scope, label, onChange }: { c: Cond; f?: FieldDef; kind: FieldKind; scope: CompletionScope; label: string; onChange: (v: CondValue) => void }) {
   const v = c.value;
@@ -90,7 +94,8 @@ function ValueEditor({ c, f, kind, scope, label, onChange }: { c: Cond; f?: Fiel
       onChange={(e) => onChange({ kind: 'today', days: Number(e.target.value) || 0 })} />;
   } else if (v.kind === 'field') {
     // Otro campo del mismo tipo (sin el propio).
-    const same = usable(scope.fields).filter((x) => x.name !== c.path && kindOfField(x) === kind && (kind !== 'reference' || x.referenceEntity === f?.referenceEntity));
+    const vk = valueKind(kind);
+    const same = usable(scope.fields).filter((x) => x.name !== c.path && kindOfField(x) === vk && (vk !== 'reference' || x.referenceEntity === f?.referenceEntity));
     control = <Select aria-label={`${label}: otro campo`} value={v.value} onChange={(e) => onChange({ kind: 'field', value: e.target.value })}>
       <option value="">Campo…</option>
       {same.map((x) => <option key={x.name} value={x.name}>{x.label || x.name}</option>)}

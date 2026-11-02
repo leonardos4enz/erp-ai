@@ -75,7 +75,7 @@ public static class SecurityRules
                 CheckRoles(g.Roles, where);
                 if (!RecordScopes.Valid.Contains(g.EffectiveScope)) msgs.Add($"{where}: alcance '{g.Scope}' inválido (all, unitTree, unit u own).");
                 if (g.Access is not null && g.Access is not ("read" or "write")) msgs.Add($"{where}: acceso '{g.Access}' inválido (read o write).");
-                if (!string.IsNullOrWhiteSpace(g.Where) && RecordFilter.Check(g.Where, e, roles) is { } err) msgs.Add($"{where} (where): {err}");
+                if (!string.IsNullOrWhiteSpace(g.Where) && RecordFilter.Check(g.Where, e, roles, model) is { } err) msgs.Add($"{where} (where): {err}");
             }
         }
         return msgs;

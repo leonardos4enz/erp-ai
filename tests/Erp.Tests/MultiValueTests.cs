@@ -117,11 +117,12 @@ public class MultiValueTests
     [InlineData("Categorias")]
     [InlineData("ISBLANK(Responsables)")]
     [InlineData("Nombre & Categorias")]
-    public void Una_expresion_no_lee_el_campo_todavia(string expr)
+    public void Una_expresion_no_lee_el_campo_como_valor_simple(string expr)
     {
+        // Spec 051: se pregunta si un valor pertenece a él (X IN Campo); como valor simple sigue rechazado.
         var model = Compile().ResultingModel;
         var errors = ExprAnalyzer.Analyze(expr, model["Proveedor"], model, Roles).Errors;
-        Assert.Contains(errors, m => m.Contains("tiene varios valores") && m.Contains("051"));
+        Assert.Contains(errors, m => m.Contains("tiene varios valores: no es un valor simple") && m.Contains(" IN "));
     }
 
     [Fact]
@@ -142,7 +143,7 @@ public class MultiValueTests
     }
 
     [Fact]
-    public void Una_automatizacion_ni_una_transicion_lo_asignan_con_una_expresion()
+    public void Una_automatizacion_ni_una_transicion_lo_asignan_sin_decir_si_agregan_o_quitan()
     {
         var r = Compile(
             new CreateEntityOp { Name = "Visita", Label = "Visita", LabelPlural = "Visitas", Fields = [Text("Nota")] },
@@ -163,8 +164,9 @@ public class MultiValueTests
                 },
             });
         var e = Errors(r);
-        Assert.Contains("'Categorias' tiene varios valores y no se asigna", e);
-        Assert.Contains("'Responsables' tiene varios valores y no se asigna", e);
+        // Spec 051: sin «mode» (add o remove) no se sabe qué hacer con la lista.
+        Assert.Contains("'Categorias' tiene varios valores: indica si se agrega o se quita", e);
+        Assert.Contains("'Responsables' tiene varios valores: indica si se agrega o se quita", e);
     }
 
     // Regresión (revisión adversarial 050, F-03): una transición podía pedir el campo, que su acción no sabe capturar.

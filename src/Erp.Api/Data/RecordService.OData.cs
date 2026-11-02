@@ -70,7 +70,7 @@ public sealed partial class RecordService
         foreach (var (name, value) in labelParams) cmd.Parameters.Add(new SqlParameter(name, value));
         var where = new StringBuilder("t.[IsDeleted] = 0");
         // Spec 006/010/015: el mismo filtro de alcance y empresa que la API de datos, también en el conteo.
-        if (RecordFilter.For(e, user, write: false) is { } scope)
+        if (RecordFilter.For(e, user, write: false, model) is { } scope)
         {
             scope.AddTo(cmd.Parameters);
             where.Append(" AND ").Append(scope.Sql);
@@ -159,7 +159,7 @@ public sealed partial class RecordService
             await using var cmd = cn.CreateCommand();
             foreach (var (name, value) in labelParams) cmd.Parameters.Add(new SqlParameter(name, value));
             var where = new StringBuilder($"t.[IsDeleted] = 0 AND t.[Id] IN ({string.Join(", ", ids.Select((v, i) => Param(cmd, $"@ex{i}", v)))})");
-            if (RecordFilter.For(target, user, write: false) is { } scope)
+            if (RecordFilter.For(target, user, write: false, model) is { } scope)
             {
                 scope.AddTo(cmd.Parameters);
                 where.Append(" AND ").Append(scope.Sql);
@@ -227,7 +227,7 @@ public sealed partial class RecordService
             foreach (var (name, value) in labelParams) cmd.Parameters.Add(new SqlParameter(name, value));
             var ids = string.Join(", ", byOwner.Keys.Select((v, i) => Param(cmd, $"@ex{i}", v)));
             var where = new StringBuilder("t.[IsDeleted] = 0");
-            if (RecordFilter.For(target, user, write: false) is { } scope)
+            if (RecordFilter.For(target, user, write: false, model) is { } scope)
             {
                 scope.AddTo(cmd.Parameters);
                 where.Append(" AND ").Append(scope.Sql);

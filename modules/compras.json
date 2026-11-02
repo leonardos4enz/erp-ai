@@ -1,7 +1,7 @@
 {
   "id": "compras",
   "name": "Compras",
-  "version": "1.11.0",
+  "version": "1.12.0",
   "icon": "shopping-cart",
   "description": "Requisiciones, órdenes de compra con autorización por montos y recepción de mercancía con cantidades recibidas y pendientes. Incluye proveedores, productos y catálogos base.",
   "plan": {
@@ -623,6 +623,46 @@
       "plan": { "description": "Compras 1.11.0: categorías que surte el proveedor y responsables del departamento", "operations": [
         { "op": "addField", "entity": "Proveedor", "field": { "name": "Categorias", "label": "Categorías que surte", "type": "multireference", "referenceEntity": "CategoriaProducto", "showInList": false } },
         { "op": "addField", "entity": "Departamento", "field": { "name": "Responsables", "label": "Responsables", "type": "multiuser", "showInList": false } }
+      ] } },
+    { "version": "1.12.0",
+      "description": "«Pertenece a» (spec 051): la requisición registra quiénes intervinieron (cada transición agrega a quien la ejecuta) y el responsable de un departamento consulta las requisiciones de ese departamento.",
+      "plan": { "description": "Compras 1.12.0: quienes intervinieron y lectura por responsable del departamento", "operations": [
+        { "op": "addField", "entity": "Requisicion", "field": { "name": "Participantes", "label": "Quienes intervinieron", "type": "multiuser", "showInList": false, "editable": false } },
+        { "op": "setWorkflow", "entity": "Requisicion", "workflow": {
+            "initial": "Borrador",
+            "states": [
+              { "name": "Borrador", "label": "Borrador", "color": "neutral", "editable": true },
+              { "name": "PorAprobar", "label": "Por aprobar", "color": "warning", "editable": false },
+              { "name": "Aprobada", "label": "Aprobada", "color": "success", "editable": false },
+              { "name": "Rechazada", "label": "Rechazada", "color": "danger", "editable": false },
+              { "name": "Atendida", "label": "Atendida", "color": "accent", "editable": false }
+            ],
+            "transitions": [
+              { "name": "enviar", "label": "Enviar a aprobación", "from": ["Borrador"], "to": "PorAprobar", "icon": "send", "variant": "primary",
+                "when": "COUNT(Partidas) > 0", "whenMessage": "Agrega al menos una partida.",
+                "set": [ { "field": "Participantes", "value": "CURRENTUSER()", "mode": "add" } ] },
+              { "name": "aprobar", "label": "Aprobar", "from": ["PorAprobar"], "to": "Aprobada", "icon": "check", "variant": "primary",
+                "roles": ["Gerente de compras", "Director"],
+                "when": "NOT ISCREATOR() OR HASROLE('Director')", "whenMessage": "No puedes aprobar una requisición que tú creaste (control interno).",
+                "set": [ { "field": "Participantes", "value": "CURRENTUSER()", "mode": "add" } ] },
+              { "name": "devolver", "label": "Devolver", "from": ["PorAprobar"], "to": "Borrador", "icon": "undo-2",
+                "roles": ["Gerente de compras", "Director"], "requireComment": true,
+                "set": [ { "field": "Participantes", "value": "CURRENTUSER()", "mode": "add" } ] },
+              { "name": "rechazar", "label": "Rechazar", "from": ["PorAprobar"], "to": "Rechazada", "icon": "x", "variant": "danger",
+                "roles": ["Gerente de compras", "Director"], "requiredFields": ["MotivoRechazo"],
+                "set": [ { "field": "Participantes", "value": "CURRENTUSER()", "mode": "add" } ] },
+              { "name": "atender", "label": "Marcar como atendida", "from": ["Aprobada"], "to": "Atendida", "icon": "check-check",
+                "roles": ["Comprador", "Gerente de compras"] }
+            ]
+          } },
+        { "op": "setSecurity", "entity": "Requisicion", "security": {
+            "owner": "Solicitante",
+            "fields": [ { "field": "MotivoRechazo", "editableIn": [] } ],
+            "records": [
+              { "roles": ["Solicitante"], "scope": "own" },
+              { "roles": ["Solicitante"], "where": "CURRENTUSER() IN Departamento.Responsables", "access": "read" },
+              { "roles": ["Comprador", "Gerente de compras", "Director"], "scope": "all" }
+            ] } }
       ] } }
   ],
   "roles": [    { "name": "Solicitante", "description": "Crea y envía requisiciones de compra.", "canManageModel": false, "canManageUsers": false, "canViewAudit": false,

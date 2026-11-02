@@ -7,7 +7,7 @@ import { fieldsAtPath, type CompletionScope } from './exprComplete';
  * una condición escrita se lee en renglones solo si tiene esa forma simple; si no, se edita como texto.
  */
 
-export type CondOp = 'eq' | 'ne' | 'gt' | 'gte' | 'lt' | 'lte' | 'blank' | 'notBlank' | 'in';
+export type CondOp = 'eq' | 'ne' | 'gt' | 'gte' | 'lt' | 'lte' | 'blank' | 'notBlank' | 'in' | 'contains';
 export type CondValue =
   | { kind: 'text'; value: string }
   | { kind: 'number'; value: string }
@@ -19,11 +19,11 @@ export type CondValue =
 export interface Cond { path: string; op: CondOp; value?: CondValue }
 export interface CondGroup { join: 'AND' | 'OR'; items: Cond[] }
 
-export type FieldKind = 'text' | 'number' | 'date' | 'boolean' | 'choice' | 'user' | 'reference';
+export type FieldKind = 'text' | 'number' | 'date' | 'boolean' | 'choice' | 'user' | 'reference' | 'multiuser' | 'multireference';
 
 export const OP_TEXT: Record<CondOp, string> = {
   eq: 'es igual a', ne: 'es distinto de', gt: 'es mayor que', gte: 'es mayor o igual a', lt: 'es menor que', lte: 'es menor o igual a',
-  blank: 'está vacío', notBlank: 'no está vacío', in: 'es uno de',
+  blank: 'está vacío', notBlank: 'no está vacío', in: 'es uno de', contains: 'contiene',
 };
 const SYMBOL: Partial<Record<CondOp, string>> = { eq: '=', ne: '<>', gt: '>', gte: '>=', lt: '<', lte: '<=' };
 const FROM_SYMBOL: Record<string, CondOp> = { '=': 'eq', '<>': 'ne', '>': 'gt', '>=': 'gte', '<': 'lt', '<=': 'lte' };
@@ -37,6 +37,8 @@ export function kindOfField(f?: FieldDef): FieldKind {
   if (t === 'boolean') return 'boolean';
   if (t === 'user') return 'user';
   if (t === 'reference' || t === 'parent') return 'reference';
+  // Spec 051: un campo de varios valores se pregunta con «contiene» (X IN Campo).
+  if (t === 'multiuser' || t === 'multireference') return t;
   return 'text';
 }
 
@@ -49,6 +51,8 @@ export const OPS_FOR: Record<FieldKind, CondOp[]> = {
   choice: ['eq', 'ne', 'in', 'blank', 'notBlank'],
   user: ['eq', 'ne', 'blank', 'notBlank'],
   reference: ['blank', 'notBlank', 'eq', 'ne'],
+  multiuser: ['contains'],
+  multireference: ['contains'],
 };
 
 /** Campo al que lleva una ruta (`Cliente.Zona.Clave`), o undefined. */
@@ -66,8 +70,8 @@ export function defaultValue(kind: FieldKind, f?: FieldDef, states?: string[]): 
     case 'date': return { kind: 'today', days: 0 };
     case 'boolean': return { kind: 'bool', value: true };
     case 'choice': return { kind: 'text', value: (f?.type === 'state' ? states?.[0] : f?.options?.[0]) ?? '' };
-    case 'user': return { kind: 'me' };
-    case 'reference': return { kind: 'field', value: '' };
+    case 'user': case 'multiuser': return { kind: 'me' };
+    case 'reference': case 'multireference': return { kind: 'field', value: '' };
     default: return { kind: 'text', value: '' };
   }
 }
@@ -92,6 +96,7 @@ export function condText(c: Cond): string {
   if (c.op === 'blank') return `ISBLANK(${c.path})`;
   if (c.op === 'notBlank') return `NOT ISBLANK(${c.path})`;
   if (c.op === 'in') return `${c.path} IN ${valueText(c.value?.kind === 'list' ? c.value : { kind: 'list', values: [] })}`;
+  if (c.op === 'contains') return `${valueText(c.value)} IN ${c.path}`;
   return `${c.path} ${SYMBOL[c.op]} ${valueText(c.value)}`;
 }
 
@@ -158,6 +163,11 @@ function parseCond(part: string, scope: CompletionScope): Cond | null {
     const values: string[] = [];
     for (const it of items) { const v = new RegExp(`^${STR}$`).exec(it); if (!v) return null; values.push(unquote(v[1])); }
     return known({ path: m[1], op: 'in', value: { kind: 'list', values } }, scope);
+  }
+  // Spec 051: «X IN Campo» (sin paréntesis), con X = CURRENTUSER() o un campo.
+  if ((m = new RegExp(`^(CURRENTUSER\\(\\)|${PATH})\\s+IN\\s+${PATH}$`, 'i').exec(part))) {
+    const value = parseValue(m[1]);
+    return value ? known({ path: m[3], op: 'contains', value }, scope) : null;
   }
   if ((m = new RegExp(`^${PATH}\\s*(<>|<=|>=|=|<|>)\\s*(.+)$`).exec(part))) {
     const value = parseValue(m[3]);

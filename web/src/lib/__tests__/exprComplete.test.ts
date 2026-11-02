@@ -63,4 +63,14 @@ describe('autocompletado de expresiones (026 H3)', () => {
     const fn = at('IS')!.items[0];
     expect(completeAfterChoice(fn, { text: 'ISBLANK(', caret: 8 }, scope)?.items.length).toBeGreaterThan(0);
   });
+
+  // Spec 051: un campo de varios valores solo es la lista de una pertenencia.
+  it('ofrece los campos de varios valores después de IN y dentro de CONTAINS(, no en otro lugar', () => {
+    expect(inserts('Segu')).toEqual([]);
+    expect(inserts('CURRENTUSER() IN Segu')).toEqual(['Seguidores']);
+    expect(inserts('CONTAINS(Segu')).toEqual(['Seguidores']);
+    expect(inserts('CURRENTUSER() IN Cliente.Zona.Enc')).toEqual(['Cliente.Zona.Encargados']);
+    expect(inserts('Cliente.Zona.Enc')).toEqual([]);
+    expect(inserts('Total IN (Segu')).toEqual([]);
+  });
 });

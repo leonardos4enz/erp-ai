@@ -50,4 +50,19 @@ describe('constructor de condiciones (026 H3 CA5)', () => {
   it('AND y OR dentro de cadenas o paréntesis no parten la condición', () => {
     expect(parseCondition("Clave = 'A OR B' AND Prioridad IN ('Alta', 'Baja')", scope)?.items).toHaveLength(2);
   });
+
+  // Spec 051: «pertenece a» en renglones.
+  it('un campo de varios valores se pregunta con «contiene» y se lee de vuelta', () => {
+    expect(kindOfField(field('Seguidores'))).toBe('multiuser');
+    expect(OPS_FOR.multiuser).toEqual(['contains']);
+    expect(defaultValue('multiuser')).toEqual({ kind: 'me' });
+    const g: CondGroup = { join: 'AND', items: [
+      { path: 'Cliente.Zona.Encargados', op: 'contains', value: { kind: 'me' } },
+      { path: 'Seguidores', op: 'contains', value: { kind: 'field', value: 'Responsable' } },
+    ] };
+    expect(buildCondition(g)).toBe('CURRENTUSER() IN Cliente.Zona.Encargados AND Responsable IN Seguidores');
+    expect(parseCondition(buildCondition(g), scope)).toEqual(g);
+    // Una lista entre paréntesis sigue siendo «es uno de»; «contiene» sobre un campo simple no se lee en renglones.
+    expect(parseCondition('CURRENTUSER() IN Responsable', scope)).toBeNull();
+  });
 });

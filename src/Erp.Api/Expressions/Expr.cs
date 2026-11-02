@@ -172,6 +172,13 @@ public static class ExprParser
             if (IsKeyword("IN"))
             {
                 Next();
+                // Spec 051: «X IN Campo» (sin paréntesis) es la pertenencia a un campo de varios valores: CONTAINS(Campo, X).
+                if (Current.Kind == T.Ident)
+                {
+                    if (ParsePrimary(d + 1) is not PathRef list)
+                        throw new ExprException("Después de IN va una lista entre paréntesis o un campo de varios valores.");
+                    return new Call("CONTAINS", [list, left]);
+                }
                 Expect(T.LParen, "'('");
                 var items = new List<Node> { ParseOr(d + 1) };
                 while (Current.Kind == T.Comma) { Next(); items.Add(ParseOr(d + 1)); }

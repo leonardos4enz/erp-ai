@@ -112,7 +112,25 @@ public sealed record WorkflowState
     public bool Editable { get; init; } = true;
 }
 
-public sealed record FieldAssignment(string Field, string Value);
+/// <param name="Mode">
+/// Spec 051: en un campo de varios valores, <see cref="AssignModes.Add"/> o <see cref="AssignModes.Remove"/> el id que da
+/// <c>Value</c>; en los demás campos se omite (reemplaza el valor).
+/// </param>
+public sealed record FieldAssignment(string Field, string Value,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Mode = null);
+
+/// <summary>Spec 051: qué hace una asignación con un campo de varios valores.</summary>
+public static class AssignModes
+{
+    public const string Add = "add";
+    public const string Remove = "remove";
+
+    /// <summary>El error de una asignación según su campo, o null: un campo de varios valores pide modo y uno simple no lo admite.</summary>
+    public static string? Error(FieldDef f, FieldAssignment s) =>
+        FieldTypes.IsMulti(f.Type)
+            ? s.Mode is Add or Remove ? null : $"'{f.Name}' tiene varios valores: indica si se agrega o se quita (mode: add o remove)."
+            : s.Mode is null ? null : $"«mode» solo aplica a un campo de varios valores; '{f.Name}' no lo es.";
+}
 
 public sealed record WorkflowTransition
 {

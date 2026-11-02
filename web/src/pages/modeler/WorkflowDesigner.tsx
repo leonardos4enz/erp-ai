@@ -6,6 +6,8 @@ import { IconPicker } from '../../components/IconPicker';
 import { TagInput } from '../../components/TagInput';
 import { Badge, Button, Checkbox, EmptyState, Field, Input, Select, Switch } from '../../components/ui';
 import { IDENTIFIER_RE } from '../../lib/format';
+import { isMultiField } from '../../lib/entity';
+import { AssignMode, withMode } from './assignMode';
 import {
   LABEL_H, NODE_H, NODE_W, addState, clip, addTransition, layoutDiagram, newWorkflow, patchObject, removeState, renameState, stateImpact, uniqueName,
 } from '../../lib/workflowEdit';
@@ -242,18 +244,22 @@ export function WorkflowDesigner({ workflow, onChange, savedStates, savedTransit
         <Field label="Asignaciones al ejecutarla" hint="Campo = expresión, p. ej. FechaAutorizacion = TODAY().">
           <div className="stack" style={{ gap: 'var(--space-2)' }}>
             {(t.set ?? []).map((a, i) => (
-              <div key={i} className="row wf-assign">
+              <div key={i} className={`row wf-assign${assignable.some((f) => f.name === a.field && isMultiField(f)) ? ' has-mode' : ''}`}>
                 <Select selectSize="sm" aria-label={`Campo de la asignación ${i + 1}`} value={a.field}
-                  onChange={(e) => patchTransition(t.name, { set: (t.set ?? []).map((x, j) => (j === i ? { ...x, field: e.target.value } : x)) })}>
+                  onChange={(e) => patchTransition(t.name, { set: (t.set ?? []).map((x, j) => (j === i ? withMode({ ...x, field: e.target.value }, assignable) : x)) })}>
                   {!assignable.some((f) => f.name === a.field) && <option value={a.field}>{a.field || 'Elige…'}</option>}
                   {assignable.map((f) => <option key={f.name} value={f.name}>{f.label || f.name}</option>)}
                 </Select>
+                {assignable.some((f) => f.name === a.field && isMultiField(f)) && (
+                  <AssignMode size="sm" label={`Qué hace la asignación ${i + 1} con ${a.field}`} value={a.mode}
+                    onChange={(mode) => patchTransition(t.name, { set: (t.set ?? []).map((x, j) => (j === i ? { ...x, mode } : x)) })} />
+                )}
                 <Input inputSize="sm" wrapClassName="grow" className="mono" aria-label={`Valor de la asignación ${i + 1}`} value={a.value} placeholder="TODAY()"
                   onChange={(e) => patchTransition(t.name, { set: (t.set ?? []).map((x, j) => (j === i ? { ...x, value: e.target.value } : x)) })} />
                 <Button variant="ghost" size="sm" iconOnly icon={X} aria-label={`Quitar la asignación ${i + 1}`} onClick={() => patchTransition(t.name, { set: (t.set ?? []).filter((_, j) => j !== i) })} />
               </div>
             ))}
-            <div><Button size="sm" icon={Plus} disabled={!assignable.length} onClick={() => patchTransition(t.name, { set: [...(t.set ?? []), { field: assignable[0]?.name ?? '', value: '' }] })}>Agregar asignación</Button></div>
+            <div><Button size="sm" icon={Plus} disabled={!assignable.length} onClick={() => patchTransition(t.name, { set: [...(t.set ?? []), withMode({ field: assignable[0]?.name ?? '', value: '' }, assignable)] })}>Agregar asignación</Button></div>
           </div>
         </Field>
         <IconPicker label="Icono del botón" allowNone value={t.icon} onChange={(icon) => patchTransition(t.name, { icon })} />

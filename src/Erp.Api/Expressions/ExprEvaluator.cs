@@ -15,6 +15,12 @@ public interface IExprScope
     /// </summary>
     object? RelatedPath(string refField, IReadOnlyList<string> path) => path.Count == 1 ? Related(refField, path[0]) : null;
     IReadOnlyList<IExprScope> Lines(string linesField);
+    /// <summary>
+    /// Spec 051: ids de un campo de varios valores, propio (<paramref name="path"/> vacío: <paramref name="field"/> es el campo) o
+    /// al final de una ruta desde la referencia <paramref name="field"/>. Vacía si un salto está vacío o borrado (como el EXISTS de la
+    /// base); null («desconocido») si un salto está fuera del alcance de quien mira (revisión adversarial 051, F-01).
+    /// </summary>
+    IReadOnlyCollection<long>? Members(string field, IReadOnlyList<string> path) => null;
 }
 
 /// <summary>Spec 010: tipos de cambio registrados en el entorno.</summary>
@@ -173,6 +179,15 @@ public static partial class ExprEvaluator
             {
                 var key = c.Args.Skip(2).Select(a => Eval(a, s, env)).ToList();
                 return env.Costs?.UnitCost(Text(Arg(0)), Num(Arg(1)), key, env.Company);
+            }
+            case "CONTAINS":
+            {
+                // Spec 051: como el EXISTS de la base, lista vacía (o ruta rota) o valor vacío → falso. Revisión adversarial 051
+                // (F-01): una lista fuera del alcance de quien mira es desconocida, no falsa: con NOT no debe volverse verdadera.
+                var p = (PathRef)c.Args[0];
+                if (s.Members(p.Head, p.Rest) is not { } members) return null;
+                return Normalize(Arg(1)) is decimal id && id == decimal.Truncate(id)
+                       && id is >= long.MinValue and <= long.MaxValue && members.Contains((long)id);
             }
             case "SUM":
             {

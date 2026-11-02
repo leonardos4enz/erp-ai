@@ -360,7 +360,8 @@ export interface WorkflowTransitionDef {
   whenMessage?: string;
   requireComment?: boolean;
   requiredFields?: string[];
-  set?: { field: string; value: string }[];
+  /** Spec 051: en un campo de varios valores, `mode` agrega o quita el id que da `value`. */
+  set?: { field: string; value: string; mode?: 'add' | 'remove' }[];
   icon?: string;
   variant?: 'primary' | 'secondary' | 'danger';
   /** Spec 005: solo la ejecuta una automatización (no aparece como botón). */
@@ -378,7 +379,8 @@ export interface AutomationAction {
   lines?: string;
   when?: string;
   target?: string;
-  set?: { field: string; value: string }[];
+  /** Spec 051: en un campo de varios valores, `mode` agrega o quita el id que da `value`. */
+  set?: { field: string; value: string; mode?: 'add' | 'remove' }[];
   transition?: string;
   entity?: string;
   match?: { field: string; source: string }[];

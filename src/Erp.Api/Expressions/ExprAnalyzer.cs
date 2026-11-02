@@ -20,6 +20,8 @@ public static class ExprAnalyzer
         ["BASECURRENCY"] = (0, 0), ["CURRENTCOMPANY"] = (0, 0), ["RATE"] = (2, 3), ["CONVERT"] = (3, 4),
         // Spec 020: costo unitario de las siguientes N unidades de las capas de una llave.
         ["UNITCOST"] = (3, 7),
+        // Spec 051: pertenencia a un campo de varios valores («X IN Campo» es lo mismo).
+        ["CONTAINS"] = (2, 2),
     };
 
     public sealed record FunctionInfo(string Name, int Min, int Max);
@@ -97,6 +99,11 @@ public static class ExprAnalyzer
                 CheckAggregate(c);
                 return;
             }
+            if (c.Name == "CONTAINS")
+            {
+                CheckMembership(c);
+                return;
+            }
             if (c.Name == "HASROLE")
             {
                 if (c.Args[0] is not Literal { Value: string role }) errors.Add("HASROLE necesita el nombre del rol entre comillas.");
@@ -129,6 +136,66 @@ public static class ExprAnalyzer
             var f = child.FindField(name);
             if (f is null || f.IsArchived) errors.Add($"'{name}' no existe en {child.Name}.");
             else if (!IsNumeric(f)) errors.Add($"SUM necesita un campo numérico; '{name}' no lo es.");
+        }
+
+        // Spec 051: CONTAINS(Lista, X): la lista es un campo de varios valores (propio o al final de una ruta) y X, un id compatible.
+        void CheckMembership(Call c)
+        {
+            if (c.Args[0] is not PathRef p) { errors.Add("CONTAINS necesita un campo de varios valores, p. ej. CURRENTUSER() IN Responsables."); return; }
+            var head = entity.FindField(p.Head);
+            if (head is null || head.IsArchived) { errors.Add($"El campo '{p.Head}' no existe en {entity.Name}."); return; }
+            FieldDef list;
+            if (p.IsOwn) list = head;
+            else if (head.Type is not (FieldTypes.Reference or FieldTypes.Parent))
+            {
+                errors.Add($"'{p.Head}' no es una referencia; no se puede usar '{p}'.");
+                return;
+            }
+            else if (MemberPath(head, p.Rest, model, p.ToString(), out var error) is { } last) list = last;
+            else { errors.Add(error!); return; }
+            if (!FieldTypes.IsMulti(list.Type))
+            {
+                errors.Add($"'{p}' no tiene varios valores: «X IN Campo» pregunta por un campo de varios valores (para una lista fija, X IN ('a', 'b')).");
+                return;
+            }
+            own.Add(head.Name);
+            if (MemberValueError(c.Args[1], list) is { } verr) { errors.Add(verr); return; }
+            Walk(c.Args[1], false);
+        }
+
+        string? MemberValueError(Node x, FieldDef list)
+        {
+            var wanted = list.Type == FieldTypes.MultiUser ? "CURRENTUSER(), un campo de personas o un número" : $"un campo que apunte a {list.ReferenceEntity} o un número";
+            var message = $"En «X IN {list.Name}», X debe ser {wanted}.";
+            switch (x)
+            {
+                case Literal { Value: decimal d } when d == decimal.Truncate(d) && d > 0: return null;
+                case Call { Name: "CURRENTUSER" } when list.Type == FieldTypes.MultiUser: return null;
+                case PathRef v:
+                {
+                    var f = ValueField(v);
+                    if (f is null) return null; // el campo inexistente lo reporta Walk
+                    var ok = list.Type == FieldTypes.MultiUser
+                        ? f.Type == FieldTypes.User
+                        : f.Type is FieldTypes.Reference or FieldTypes.Parent && string.Equals(f.ReferenceEntity, list.ReferenceEntity, StringComparison.OrdinalIgnoreCase);
+                    return ok ? null : message;
+                }
+                default: return message;
+            }
+        }
+
+        // El campo al final de una ruta de valor (null si no se puede seguir: el error lo da CheckPath).
+        FieldDef? ValueField(PathRef v)
+        {
+            var f = entity.FindField(v.Head);
+            if (f is null || f.IsArchived) return null;
+            foreach (var seg in v.Rest)
+            {
+                if (f.Type is not (FieldTypes.Reference or FieldTypes.Parent) || !model.TryGetValue(f.ReferenceEntity ?? "", out var t)) return null;
+                if (t.FindField(seg) is not { IsArchived: false } next) return null;
+                f = next;
+            }
+            return f;
         }
 
         void CheckPath(PathRef p)
@@ -180,9 +247,36 @@ public static class ExprAnalyzer
         return null;
     }
 
-    /// <summary>Spec 050: un campo de varios valores no es un valor simple; «pertenece a» llega en la 051.</summary>
+    /// <summary>
+    /// Spec 051: la lista de una pertenencia al final de una ruta (<c>Departamento.Responsables</c>): cada salto intermedio es una
+    /// referencia o el padre; el último, un campo activo (que sea de varios valores lo comprueba quien llama). Null con
+    /// <paramref name="error"/> si la ruta no se puede seguir.
+    /// </summary>
+    public static FieldDef? MemberPath(FieldDef hop, IReadOnlyList<string> rest, IReadOnlyDictionary<string, EntityDef> model, string path, out string? error)
+    {
+        error = null;
+        for (var i = 0; i < rest.Count; i++)
+        {
+            if (hop.Type is not (FieldTypes.Reference or FieldTypes.Parent) || !model.TryGetValue(hop.ReferenceEntity ?? "", out var target))
+            {
+                error = $"'{rest[i - 1 < 0 ? 0 : i - 1]}' no es una referencia; no se puede seguir la ruta '{path}'.";
+                return null;
+            }
+            var next = target.FindField(rest[i]);
+            if (next is null || next.IsArchived || next.Type == FieldTypes.Lines)
+            {
+                error = $"'{rest[i]}' no existe en {target.Name} ('{path}').";
+                return null;
+            }
+            if (i == rest.Count - 1) return next;
+            hop = next;
+        }
+        return hop;
+    }
+
+    /// <summary>Spec 050/051: un campo de varios valores no es un valor simple; se pregunta si un valor pertenece a él.</summary>
     public static string MultiValued(string field) =>
-        $"'{field}' tiene varios valores: todavía no se usa en expresiones (llega «pertenece a», spec 051).";
+        $"'{field}' tiene varios valores: no es un valor simple; pregunta si un valor pertenece a él, p. ej. CURRENTUSER() IN {field}.";
 
     /// <summary>Spec 050: ¿la expresión es solo un campo propio de varios valores? (una plantilla lo imprime con sus etiquetas).</summary>
     public static bool IsOwnMulti(string source, EntityDef entity)

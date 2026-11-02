@@ -338,6 +338,8 @@ public class PrintTests
         public bool Visible(string entity, long id) => !hidden.Contains((entity, id));
         public Erp.Api.Data.Values? Row(string entity, long id) => rows.GetValueOrDefault((entity, id));
         public Erp.Api.Data.Values? User(int id) => new() { ["Nombre"] = "Ana Peña", ["Usuario"] = "ana" };
+        // Spec 051: el proveedor 7 tiene como contacto a la persona 5 (quien imprime).
+        public IReadOnlyCollection<long> Members(string entity, long owner, string field) => (entity, owner, field) == ("Proveedor", 7, "Contactos") ? [5L] : [];
     }
 
     private static Dictionary<string, EntityDef> SecuredModel()
@@ -357,7 +359,11 @@ public class PrintTests
             Security = new SecurityPolicy { Fields = [new() { Field = "Precio", Read = buyers }] },
         };
         // El RFC del proveedor solo lo ve compras (oculto en un salto de la ruta).
-        m["Proveedor"] = m["Proveedor"] with { Security = new SecurityPolicy { Fields = [new() { Field = "RFC", Read = buyers }] } };
+        m["Proveedor"] = m["Proveedor"] with
+        {
+            Fields = [.. m["Proveedor"].Fields, new() { Name = "Contactos", Label = "Contactos", Type = FieldTypes.MultiUser }],
+            Security = new SecurityPolicy { Fields = [new() { Field = "RFC", Read = buyers }] },
+        };
         return m;
     }
 
@@ -403,6 +409,16 @@ public class PrintTests
         };
         return Erp.Api.Data.RecordService.ResolvePrint(e, template, draft, scope, env, ctx,
             new Erp.Api.Data.RecordService.PrintCompany("DEMO", "Demo", "MXN", null, null, null), new Dictionary<string, byte[]>());
+    }
+
+    // Regresión (revisión adversarial 051, F-03): la plantilla no respondía «pertenece a» (siempre falso); ahora sí, y un salto
+    // fuera del alcance de quien imprime no deja ver la lista.
+    [Fact]
+    public void Pertenencia_en_una_plantilla_con_el_alcance_de_quien_imprime()
+    {
+        var t = new PrintTemplate { Name = "T", Label = "T", Blocks = [new() { Type = PrintBlockTypes.Text, VisibleWhen = "CURRENTUSER() IN Proveedor.Contactos", Text = "Soy contacto" }] };
+        Assert.Contains(Resolve("Comprador", template: t).Body, x => x is TextElement { Text: "Soy contacto" });
+        Assert.DoesNotContain(Resolve("Comprador", proveedor: 8, template: t).Body, x => x is TextElement { Text: "Soy contacto" });
     }
 
     [Fact]

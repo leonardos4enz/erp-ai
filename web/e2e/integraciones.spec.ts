@@ -517,7 +517,7 @@ test('H4 CA1 · CA2: exportar el listado como se ve, sin campos ocultos ni inyec
 test('H5 CA1 · CA2 · CA3: Compras 1.5.0 trae su rol de servicio y el webhook sin destino; la orden autorizada llega sin importes', async ({ page }) => {
   const admin = await as('admin');
   const mod = (await (await admin.get('/api/admin/modules')).json()).find((m: { id: string }) => m.id === 'compras');
-  expect(mod.installedVersion).toBe('1.11.0'); // Compras 1.8.0 (spec 014), 1.9.0 (spec 024), 1.10.0 (spec 027, plantillas) y 1.11.0 (spec 050, varios valores) ya están instalados
+  expect(mod.installedVersion).toBe('1.12.0'); // Compras 1.8.0 (spec 014), 1.9.0 (spec 024), 1.10.0 (spec 027, plantillas), 1.11.0 (spec 050, varios valores) y 1.12.0 (spec 051, pertenece a) ya están instalados
   await page.goto('/admin/integrations');
   const row = page.getByRole('row', { name: /Orden autorizada/ });
   await expect(row).toContainText('Integración de almacén');
