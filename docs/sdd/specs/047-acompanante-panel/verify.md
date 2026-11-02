@@ -5,7 +5,7 @@
 - cierre: 2026-11-02 01:10
 - unitarias: 764 (+0); Vitest 81 (+8)
 - e2e: 485 (+17)
-- corridas completas: 2 (11 min 48 s, 485 en verde); la segunda completa fue CI en `main` (`8371867`), en rojo por una carrera de la prueba en `visual-pdf › H5 CA1 (móvil)`, corregida en el commit siguiente (ver §2)
+- corridas completas: 2 (11 min 48 s, 485 en verde); la segunda completa fue CI en `main` (`8371867`), en rojo por una carrera de la prueba en `visual-pdf › H5 CA1 (móvil)`, corregida en el commit siguiente, `1fdc65b`, cuya CI quedó en verde (ver §2)
 - corridas parciales: 17 (`acompanante.spec.ts` al iterar ×9; `capacidades.spec.ts` ×2 y `--veces=3 --lento` con el código anterior y con la corrección; `acompanante.spec.ts` con correcciones revertidas ×5; `acompanante.spec.ts` + `capacidades.spec.ts --veces=3`, 4 min 51 s)
 - contra el código anterior: 6 (`capacidades.spec.ts --veces=3 --lento` con `ModulesPage.tsx` de `d422553`; `acompanante.spec.ts` con cada corrección de VERIFY revertida a mano: 5 corridas)
 - hallazgos: 0/4/9 (revisión adversarial F-01…F-11, exploratoria F-01 y F-02, sin contar la intermitente de CI de la 046)
@@ -37,6 +37,7 @@ en `groupTurns`, y la regresión F-04 (una lectura vieja no devuelve a «pendien
 | 3 | `--veces=3` (con `--lento`) sobre `e2e/acompanante.spec.ts` y `e2e/capacidades.spec.ts`, al cerrar | 26 en verde, 3 vueltas | 4 min 51 s |
 | 4 | CI de `8371867` ([corrida](https://github.com/leonardos4enz/erp-ai/actions/runs/41403890386)) | Roja: `visual-pdf › H5 CA1 (móvil)` («Cannot read properties of null (reading 'width')») | — |
 | 5 | `compras`, `inventario`, `valuacion-*` y `visual-pdf` con la prueba corregida | 92 en verde | 1 min 30 s |
+| 6 | CI de `1fdc65b` (la corrección de la fila 4; [corrida](https://github.com/leonardos4enz/erp-ai/actions/runs/41407163887)), comprobada al abrir la 048 | Verde | — |
 
 La falla de CI es una carrera de la prueba: `boundingBox()` no espera a que el título del formulario se vea y en el runner lo
 medía antes (null). En local pasa con y sin `--lento`; no se reprodujo. La prueba ahora espera el título y el botón antes de

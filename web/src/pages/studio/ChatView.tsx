@@ -281,7 +281,7 @@ export function ChatView({ id, status, dataTools, onListChanged, onOpenBar }: {
                     if (seg.kind === 'text') return <Markdown key={seg.seq} text={seg.text} />;
                     if (seg.kind === 'tools') return <ToolGroup key={seg.steps[0].seq} steps={seg.steps} dataTools={dataTools} />;
                     if (seg.kind === 'notice') return <Notice key={seg.step.seq} step={seg.step} />;
-                    if (seg.kind === 'action') return null; // solo el Acompañante (047) propone acciones
+                    if (seg.kind === 'action' || seg.kind === 'answer') return null; // solo el Acompañante (047, 048) propone y espera respuesta
                     const isProposal = seg.seq === proposalSeq || seg.delivery.hasPlan;
                     return (
                       <div key={seg.seq} className="chat-deliver">

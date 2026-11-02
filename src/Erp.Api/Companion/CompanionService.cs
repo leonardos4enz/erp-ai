@@ -49,6 +49,15 @@ public sealed class CompanionService(Db db, MetadataStore store, CompanionOption
     /// </summary>
     public const string Deleted = "deleted";
 
+    /// <summary>
+    /// Spec 048 (H1 CA1): el turno se detuvo en una propuesta y espera a la persona (sin trabajador ni lease). Decidir la última
+    /// pendiente lo vuelve a encolar. Cuenta como activa para «una conversación por persona».
+    /// </summary>
+    public const string Waiting = "waiting";
+
+    /// <summary>Estados que ocupan a la persona: en cola, corriendo o esperando su respuesta (spec 048, CLARIFY 2).</summary>
+    private const string Busy = "('queued', 'running', 'waiting')";
+
     public static async Task LockUserAsync(DbConnection cn, DbTransaction tx, int userId)
     {
         var locked = await cn.ExecuteScalarAsync<int>("""
@@ -78,7 +87,7 @@ public sealed class CompanionService(Db db, MetadataStore store, CompanionOption
         var reason = await UnavailableAsync(ct);
         await using var cn = await db.OpenAsync(ct);
         var (conversations, cost) = await TodayAsync(cn, null, user.Id);
-        var active = await cn.ExecuteScalarAsync<int?>("SELECT TOP 1 Id FROM meta.CompanionConversation WHERE UserId = @Id AND Status IN ('queued', 'running') ORDER BY Id DESC", new { user.Id });
+        var active = await cn.ExecuteScalarAsync<int?>($"SELECT TOP 1 Id FROM meta.CompanionConversation WHERE UserId = @Id AND Status IN {Busy} ORDER BY Id DESC", new { user.Id });
         return new(reason is null, reason, new(options.MaxPromptChars, options.MaxTurns, options.MaxPendingActions, options.ConversationsPerDay, options.CostPerDayUsd),
             conversations, cost / 1_000_000m, active);
     }
@@ -95,7 +104,7 @@ public sealed class CompanionService(Db db, MetadataStore store, CompanionOption
         await using (var tx = await cn.BeginTransactionAsync(ct))
         {
             await LockUserAsync(cn, tx, user.Id);
-            if (await cn.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM meta.CompanionConversation WHERE UserId = @Id AND Status IN ('queued', 'running')", new { user.Id }, tx) > 0)
+            if (await cn.ExecuteScalarAsync<int>($"SELECT COUNT(*) FROM meta.CompanionConversation WHERE UserId = @Id AND Status IN {Busy}", new { user.Id }, tx) > 0)
                 throw new Conflict(OtherActive);
             var (conversations, cost) = await TodayAsync(cn, tx, user.Id);
             if (conversations >= options.ConversationsPerDay)
@@ -128,13 +137,19 @@ public sealed class CompanionService(Db db, MetadataStore store, CompanionOption
             var c = await cn.QuerySingleOrDefaultAsync<Row>(SelectRow + " WITH (UPDLOCK, ROWLOCK) WHERE Id = @id AND UserId = @UserId AND Status <> 'deleted'", new { id, UserId = user.Id }, tx)
                     ?? throw new NotFound("La conversación no existe.");
             if (Blocked(c, user) is { } blocked) throw new Conflict(blocked);
-            if (await cn.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM meta.CompanionConversation WHERE UserId = @UserId AND Id <> @id AND Status IN ('queued', 'running')",
+            if (await cn.ExecuteScalarAsync<int>($"SELECT COUNT(*) FROM meta.CompanionConversation WHERE UserId = @UserId AND Id <> @id AND Status IN {Busy}",
                     new { id, UserId = user.Id }, tx) > 0)
                 throw new Conflict(OtherActive);
             var limit = Limit(c);
             if (limit is null && (await TodayAsync(cn, tx, user.Id)).CostMicros >= options.CostPerDayMicros)
                 limit = $"Llegaste al costo máximo del Acompañante del día ({options.CostPerDayUsd} USD).";
             if (limit is not null) throw new AppException(StatusCodes.Status429TooManyRequests, limit);
+            if (c.Status == Waiting && await AnswerAsync(cn, tx, http, c, text))
+            {
+                await tx.CommitAsync(ct);
+                signals.Pulse(id);
+                return await GetAsync(id, int.MaxValue, user, ct);
+            }
             var turn = c.Turns + 1;
             await cn.ExecuteAsync("""
                 UPDATE meta.CompanionConversation SET Status = 'queued', Turns = @turn, SecurityStamp = @Stamp, ErrorCode = NULL,
@@ -149,6 +164,46 @@ public sealed class CompanionService(Db db, MetadataStore store, CompanionOption
         signals.Pulse(id);
         return await GetAsync(id, int.MaxValue, user, ct);
     }
+
+    /// <summary>
+    /// Spec 048 (H1 CA3): escribir mientras el turno espera es decir que no, con ese texto, a todo lo pendiente; el turno sigue
+    /// (sin turno nuevo) y el texto le llega al modelo como el motivo, en un bloque <c>&lt;pedido&gt;</c>. Con una propuesta
+    /// aplicándose, 409: su resultado todavía no se sabe.
+    /// </summary>
+    /// <returns>
+    /// False si no quedaba nada pendiente (revisión adversarial 048, F-04: ya se decidió todo y falta la vuelta del barrido): el
+    /// texto no sería el motivo de nada, así que va como un mensaje normal, en un turno nuevo.
+    /// </returns>
+    private async Task<bool> AnswerAsync(DbConnection cn, DbTransaction tx, HttpContext http, Row c, string text)
+    {
+        if (await cn.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM meta.CompanionAction WITH (UPDLOCK, HOLDLOCK) WHERE ConversationId = @Id AND Status = 'applying'", new { c.Id }, tx) > 0)
+            throw new Conflict("Una propuesta se está aplicando: espera a que termine para responder.");
+        var discarded = (await cn.QueryAsync<(int Id, string EntityName, long? RecordId, string Kind)>("""
+            UPDATE meta.CompanionAction SET Status = 'discarded', Reason = @text, DecidedAt = SYSUTCDATETIME(), PreviewJson = NULL
+            OUTPUT inserted.Id, inserted.EntityName, inserted.RecordId, inserted.Kind
+             WHERE ConversationId = @Id AND Status = 'proposed'
+            """, new { c.Id, text }, tx)).ToList();
+        if (discarded.Count == 0) return false;
+        foreach (var a in discarded)
+            await Audit.WriteAsync(cn, tx, http, AuditActions.CompanionAction, entity: a.EntityName, recordId: a.RecordId?.ToString(),
+                after: new { action = a.Id, conversation = c.Id, kind = a.Kind, status = CompanionActionStatus.Discarded, reasonLength = text.Length });
+        await cn.ExecuteAsync("""
+            INSERT meta.CompanionStep (ConversationId, Seq, Kind, Tool, InputJson, OutputJson, Status, Summary, DurationMs, Turn)
+            SELECT @Id, ISNULL(MAX(Seq), 0) + 1, 'answer', NULL, NULL, @output, 'ok', @summary, 0, @Turns FROM meta.CompanionStep WITH (UPDLOCK, HOLDLOCK) WHERE ConversationId = @Id;
+            UPDATE meta.CompanionConversation SET Status = 'queued', SecurityStamp = @Stamp, ErrorCode = NULL, CancelRequested = 0, LastActivityAt = SYSUTCDATETIME()
+             WHERE Id = @Id;
+            """, new { c.Id, c.Turns, Stamp = http.CurrentUser().SecurityStamp, output = new JsonObject { ["text"] = text }.ToJsonString(), summary = StudioAgent.Cut(text, 400) }, tx);
+        await Audit.WriteAsync(cn, tx, http, AuditActions.CompanionMessage, entity: "companion", recordId: c.Id.ToString(),
+            after: new { turn = c.Turns, length = text.Length, answer = true, discarded = discarded.Count });
+        return true;
+    }
+
+    /// <summary>Spec 048 (H1 CA6): detener mientras espera es «no» a lo pendiente (sin motivo de la persona: «detenida»).</summary>
+    internal static Task DiscardOnStopAsync(DbConnection cn, DbTransaction tx, int id) =>
+        cn.ExecuteAsync("""
+            UPDATE meta.CompanionAction SET Status = 'discarded', Error = N'La persona detuvo la conversación.', DecidedAt = SYSUTCDATETIME(), PreviewJson = NULL
+             WHERE ConversationId = @id AND Status = 'proposed'
+            """, new { id }, tx);
 
     public async Task<IReadOnlyList<CompanionSummaryDto>> ListAsync(UserContext user, CancellationToken ct)
     {
@@ -203,6 +258,14 @@ public sealed class CompanionService(Db db, MetadataStore store, CompanionOption
                 await cn.ExecuteAsync("UPDATE meta.CompanionConversation SET Status = 'cancelled', ErrorCode = 'cancelled', FinishedAt = SYSUTCDATETIME() WHERE Id = @id", new { id }, tx);
             else if (status == StudioStatus.Running)
                 await cn.ExecuteAsync("UPDATE meta.CompanionConversation SET CancelRequested = 1 WHERE Id = @id", new { id }, tx);
+            // Spec 048 (H1 CA6): detener mientras espera es «no» a lo pendiente, sin volver al modelo. Una propuesta que ya se está
+            // aplicando termina (su resultado se guarda) pero la conversación no se reanuda.
+            else if (status == Waiting)
+            {
+                await cn.ExecuteAsync("UPDATE meta.CompanionConversation SET Status = 'cancelled', ErrorCode = 'cancelled', FinishedAt = SYSUTCDATETIME(), LastActivityAt = SYSUTCDATETIME() WHERE Id = @id",
+                    new { id }, tx);
+                await DiscardOnStopAsync(cn, tx, id);
+            }
             await tx.CommitAsync(ct);
         }
         if (stopLease is { } l) signals.Stop(id, l);
@@ -295,7 +358,7 @@ public sealed class CompanionService(Db db, MetadataStore store, CompanionOption
         await using var cn = await db.OpenAsync(ct);
         return await cn.ExecuteAsync("""
             DELETE TOP (200) FROM meta.CompanionConversation
-             WHERE LastActivityAt < DATEADD(day, -@days, SYSUTCDATETIME()) AND Status NOT IN ('queued', 'running')
+             WHERE LastActivityAt < DATEADD(day, -@days, SYSUTCDATETIME()) AND Status NOT IN ('queued', 'running', 'waiting')
                AND NOT EXISTS (SELECT 1 FROM meta.CompanionAction a WHERE a.ConversationId = meta.CompanionConversation.Id AND a.Status = 'applying')
             """, new { days = options.RetentionDays });
     }
@@ -321,7 +384,7 @@ public sealed class CompanionService(Db db, MetadataStore store, CompanionOption
 
     // ---------- Ayudas ----------
 
-    private const string OtherActive = "Tienes otra conversación con el Acompañante en curso: espera a que termine o detenla.";
+    private const string OtherActive = "Tienes otra conversación con el Acompañante en curso o esperando tu respuesta: termínala o detenla.";
     private const string Working = "El Acompañante está respondiendo en esta conversación: espera a que termine o detenlo.";
     private const string OtherCompanyMessage = "Esta conversación es de otra empresa: vuelve a esa empresa o empieza una conversación nueva.";
 
@@ -383,7 +446,8 @@ public sealed class CompanionService(Db db, MetadataStore store, CompanionOption
         : null;
 
     private string? Limit(Row r) =>
-        r.Turns >= options.MaxTurns ? $"Esta conversación llegó al tope de {options.MaxTurns} mensajes: empieza una nueva."
+        // Spec 048: responder a una propuesta no es un mensaje nuevo (sigue el mismo turno).
+        r.Turns >= options.MaxTurns && r.Status != Waiting ? $"Esta conversación llegó al tope de {options.MaxTurns} mensajes: empieza una nueva."
         : r.Steps >= options.MaxSteps ? $"Esta conversación llegó al tope de {options.MaxSteps} pasos: empieza una nueva."
         : r.ToolCalls >= options.MaxToolCalls ? $"Esta conversación llegó al tope de {options.MaxToolCalls} consultas: empieza una nueva."
         : r.InputTokens + r.OutputTokens + options.MaxTokensPerCall > options.MaxTokens ? "Esta conversación es muy larga: empieza una nueva."

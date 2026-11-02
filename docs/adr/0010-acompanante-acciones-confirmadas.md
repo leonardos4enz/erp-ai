@@ -37,3 +37,9 @@ confiable.»
 - (−) La persona puede confirmar sin leer: la vista previa debe ser clara (047) y cada acción es una sola escritura acotada.
 - (−) Si el proceso cae entre ejecutar la acción y guardar su resultado, la acción queda «sin confirmar si se aplicó» y no se
   repite sola (la persona revisa el registro): preferimos no duplicar a reintentar a ciegas.
+
+## Nota (spec 048, 2026-11-02)
+La confirmación pasa a ser **parte del turno**, como el permiso de una herramienta en Claude Code: al proponer, el turno se
+detiene a esperar a la persona («Sí, adelante», «No», «No, y dile qué cambiar», o escribir otro mensaje, que cuenta como «no»)
+y el resultado vuelve al modelo como el resultado de su propia llamada. Nada de lo decidido aquí cambia: una acción a la
+vez, con huella, por la ruta de siempre, con los permisos del momento y sin «no vuelvas a preguntar».

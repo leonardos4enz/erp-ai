@@ -79,6 +79,9 @@ public sealed record FieldDef
     public IReadOnlyList<string>? EditableIn { get; init; }
     /// <summary>Spec 015, solo salida: el campo dueño acepta equipos (<see cref="SecurityPolicy.TeamOwners"/>).</summary>
     public bool? AcceptsTeams { get; init; }
+    /// <summary>Spec 048, solo salida (<c>GET /api/model/entities/{name}</c>): quién le asigna valor (<see cref="FieldSources"/>).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<FieldSource>? FilledBy { get; init; }
 
     public bool ReadOnly => FieldTypes.ReadOnly.Contains(Type);
 

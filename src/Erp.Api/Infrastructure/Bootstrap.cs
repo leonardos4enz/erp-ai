@@ -980,6 +980,11 @@ public static class Bootstrap
             CREATE INDEX IX_CompanionAction_User ON meta.CompanionAction (UserId, Status, CreatedAt);
         IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_CompanionAction_Conversation')
             CREATE INDEX IX_CompanionAction_Conversation ON meta.CompanionAction (ConversationId, Status);
+        -- Spec 048: la llamada del modelo que la propuso (su resultado vuelve como el tool_result de esa llamada) y el «no» de la persona.
+        IF COL_LENGTH('meta.CompanionAction', 'ToolUseId') IS NULL ALTER TABLE meta.CompanionAction ADD ToolUseId nvarchar(100) NULL;
+        IF COL_LENGTH('meta.CompanionAction', 'Reason') IS NULL ALTER TABLE meta.CompanionAction ADD Reason nvarchar(4000) NULL;
+        -- Revisión adversarial 048 (F-02): cabe el mensaje más largo que admite Companion:MaxPromptChars (4000).
+        IF COL_LENGTH('meta.CompanionAction', 'Reason') < 8000 ALTER TABLE meta.CompanionAction ALTER COLUMN Reason nvarchar(4000) NULL;
         -- Spec 046 (H4 CA4): de dónde vino un cambio (null = la pantalla o la API; 'acompañante' = una acción confirmada).
         IF COL_LENGTH('meta.AuditLog', 'Origin') IS NULL ALTER TABLE meta.AuditLog ADD Origin nvarchar(20) NULL;
 

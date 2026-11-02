@@ -33,7 +33,10 @@ public static class ModelEndpoints
             var u = http.CurrentUser();
             var e = await store.GetActiveAsync(name, ct);
             if (!u.CanManageModel && !CanSee(u, e)) throw new Forbidden();
-            return ForUser(e, u);
+            // Spec 048 (H3 CA1): de dónde sale cada campo, solo con automatizaciones de catálogos que la persona ve (la regla de la lista).
+            var sources = FieldSources.For(e, await store.GetAsync(ct), s => u.CanManageModel || CanSee(u, s));
+            var shaped = ForUser(e, u);
+            return shaped with { Fields = shaped.Fields.Select(f => sources.TryGetValue(f.Name, out var by) ? f with { FilledBy = by } : f).ToList() };
         }).Requires(Capability.Authenticated);
 
         // Spec 024: módulos de navegación con al menos un catálogo que el usuario puede leer (filtrado aquí, no en el cliente).
@@ -128,6 +131,7 @@ public static class ModelEndpoints
         var fields = (u.CanManageModel ? e.Fields : e.ActiveFields)
             .Select(f => f with
             {
+                FilledBy = null, // revisión adversarial 048 (F-07): solo salida; la calcula la ruta de un catálogo
                 Access = FieldAccess.ByRole(e, f, u), EditableIn = e.Security?.For(f.Name)?.EditableIn,
                 AcceptsTeams = e.Security?.AcceptsTeams(f.Name) == true ? true : null, // spec 015
             })

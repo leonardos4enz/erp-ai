@@ -14,7 +14,7 @@ namespace Erp.IntegrationTests;
 /// (canario), acciones que solo se ejecutan confirmadas (una vez, con huella y versión), inyección desde un registro, topes,
 /// empresa, retención y fallas parciales.
 /// </summary>
-public class CompanionTests(CompanionTests.Host host) : IClassFixture<CompanionTests.Host>
+public partial class CompanionTests(CompanionTests.Host host) : IClassFixture<CompanionTests.Host>
 {
     public const string Pwd = "frase larga del acompañante 2026";
     private const string Group = "Pruebas 046";
@@ -69,16 +69,20 @@ public class CompanionTests(CompanionTests.Host host) : IClassFixture<CompanionT
                 new { op = "createEntity", group = Group, name = "CoPrivado", label = "Privado 046", labelPlural = "Privados 046", displayField = "Nombre", fields = new object[] {
                     new { name = "Nombre", label = "Nombre", type = "text", required = true } } },
             } });
+            await admin.ApplyPlanAsync(GatosPlan);
             static object Perm(string entity) => new { entity, canRead = true, canCreate = true, canUpdate = true, canDelete = false };
+            // Spec 048: Gatos y Vacunas los ven todos; la Clínica, nadie más que el administrador.
             foreach (var role in new[] { "Comp Usuario", "Comp Gerente", "Comp Temporal" })
                 Assert.Equal(200, (await admin.PutAsync($"/api/admin/roles/{await admin.RoleIdAsync(role)}", new { name = role, description = "Spec 046", canManageModel = false,
-                    canManageUsers = false, canViewAudit = false, permissions = new[] { Perm("CoPedido"), Perm("CoCliente") } })).Status);
+                    canManageUsers = false, canViewAudit = false, permissions = new[] { Perm("CoPedido"), Perm("CoCliente"), Perm("CoGato"), Perm("CoVacuna") } })).Status);
             var usuario = await admin.RoleIdAsync("Comp Usuario");
             var gerente = await admin.RoleIdAsync("Comp Gerente");
             var temporal = await admin.RoleIdAsync("Comp Temporal");
             foreach (var (u, roles) in new[] { ("co-ana", new[] { usuario }), ("co-beto", new[] { usuario }), ("co-gera", new[] { usuario, gerente }),
                          ("co-dani", new[] { usuario }), ("co-eli", new[] { usuario }), ("co-temp", new[] { temporal }), ("co-fer", new[] { usuario }),
-                         ("co-gil", new[] { usuario }), ("co-hugo", new[] { usuario }) })
+                         ("co-gil", new[] { usuario }), ("co-hugo", new[] { usuario }),
+                         // Spec 048 (co-eli cambia de contraseña en H1 CA4 de la 046).
+                         ("co-iris", new[] { usuario }), ("co-juan", new[] { usuario }) })
             {
                 var res = await admin.PostAsync("/api/admin/users", new { username = u, displayName = u, password = Pwd, roleIds = roles });
                 Assert.True(res.Status == 201, res.Text);
@@ -87,7 +91,8 @@ public class CompanionTests(CompanionTests.Host host) : IClassFixture<CompanionT
         }
     }
 
-    private static readonly string[] Done = ["answered", "failed", "cancelled", "interrupted"];
+    /// <summary>Spec 048: «waiting» también es un alto (el turno espera a la persona).</summary>
+    private static readonly string[] Done = ["answered", "failed", "cancelled", "interrupted", "waiting"];
 
     /// <summary>El guion por llamadas al modelo; después del último, contesta «Listo.» (el Acompañante no tiene «entregar»).</summary>
     private static Func<FakeStudioModel.Turn, Task<StudioReply>> Script(params Func<FakeStudioModel.Turn, StudioReply>[] steps) => t =>
@@ -95,10 +100,27 @@ public class CompanionTests(CompanionTests.Host host) : IClassFixture<CompanionT
 
     private static async Task<JsonNode> StartAsync(Client api, string tag, string text, object? context = null)
     {
+        await FreeAsync(api);
         var res = await api.PostAsync("/api/companion/conversations", new { text = $"[guion:{tag}] {text}", context });
         Assert.True(res.Status == 202, res.Text);
         return res.Body!;
     }
+
+    /// <summary>
+    /// Spec 048: una conversación que espera respuesta cuenta como activa; la de una prueba anterior de la misma persona se
+    /// detiene antes de empezar otra (las pruebas comparten usuarios).
+    /// </summary>
+    private static async Task FreeAsync(Client api)
+    {
+        if ((await api.GetAsync("/api/companion")).Body!["activeId"] is not { } active) return;
+        var c = await WaitAsync(api, active.GetValue<int>());
+        if (c.Str("status") == "waiting") Assert.Equal(200, (await api.PostAsync($"/api/companion/conversations/{c.Id()}/cancel")).Status);
+    }
+
+    /// <summary>Spec 048: hasta que el turno reanudado termine (no basta con que deje de estar en cola: tampoco esperando).</summary>
+    private static Task<JsonNode> WaitResumedAsync(Client api, int id) =>
+        WaitForAsync(async () => (await api.GetAsync($"/api/companion/conversations/{id}")).Body!,
+            c => Done.Contains(c.Str("status")) && c.Str("status") != "waiting", $"conversación {id} reanudada y terminada", seconds: 90);
 
     private static Task<JsonNode> WaitAsync(Client api, int id) =>
         WaitForAsync(async () => (await api.GetAsync($"/api/companion/conversations/{id}")).Body!,
@@ -299,7 +321,8 @@ public class CompanionTests(CompanionTests.Host host) : IClassFixture<CompanionT
             _ => Reply.Tools(null, ("mis_pendientes", new { }), ("por_que_no_puedo", new { catalogo = "CoPrivado" })),
             t => { none = t.Results[0].Content; hidden = t.Results[1].Content; return Reply.Text("Nada."); });
         await WaitAsync(beto, (await StartAsync(beto, "porque-b", "¿Qué me toca?")).Id());
-        Assert.Empty(Data(none!)["catalogos"]!.AsArray());
+        // (Gatos, de la 048, tiene una transición sin rol: esa sí le toca.)
+        Assert.DoesNotContain(Data(none!)["catalogos"]!.AsArray().Nodes(), x => x.Str("catalogo") == "CoPedido");
         Assert.Contains("403", hidden);
         Assert.DoesNotContain("Privado 046", hidden);
     }
@@ -317,7 +340,7 @@ public class CompanionTests(CompanionTests.Host host) : IClassFixture<CompanionT
     {
         host.Llm.Scripts[tag] = Script(_ => Reply.Tool(CompanionTools.Propose, input), _ => Reply.Text("Te dejé la propuesta."));
         var c = await WaitAsync(api, (await StartAsync(api, tag, "Hazlo por mí")).Id());
-        Assert.Equal("answered", c.Str("status"));
+        Assert.Equal("waiting", c.Str("status")); // spec 048: el turno espera la decisión
         var action = Assert.Single(c.Arr("actions").Nodes());
         return (c.Id(), action);
     }
@@ -508,13 +531,13 @@ public class CompanionTests(CompanionTests.Host host) : IClassFixture<CompanionT
         var pedido = await PedidoAsync(admin, "Pedido con muchas propuestas");
         using var dani = await host.LoginAsync("co-dani", Pwd);
         object Edit(int n) => new { tipo = "editar", catalogo = "CoPedido", id = pedido.Id(), valores = new { Notas = $"Versión {n}" }, explicacion = "x" };
-        string? cuarta = null;
         host.Llm.Scripts["tope"] = Script(
             _ => Reply.Tools(null, (CompanionTools.Propose, Edit(1)), (CompanionTools.Propose, Edit(2)), (CompanionTools.Propose, Edit(3)), (CompanionTools.Propose, Edit(4))),
-            t => { cuarta = t.Results[3].Content; return Reply.Text("Listo."); });
+            _ => Reply.Text("Listo."));
         var c = await WaitAsync(dani, (await StartAsync(dani, "tope", "Propón cuatro")).Id());
         Assert.Equal(3, c.Arr("actions").Count);
-        Assert.Contains("esperando a la persona", cuarta);
+        // Spec 048: el turno espera a la persona; la cuarta se rechazó (su paso guarda el motivo).
+        Assert.Contains(Trail(c), s => s.Str("tool") == CompanionTools.Propose && s.Str("status") == "error" && s.Str("summary")!.Contains("esperando a la persona"));
     }
 
     // ---------- H6 ----------

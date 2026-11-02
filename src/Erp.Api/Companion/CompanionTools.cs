@@ -1,13 +1,15 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Erp.Api.Infrastructure;
+using Erp.Api.Metadata;
 using Erp.Api.Security;
 using Erp.Api.Studio;
 
 namespace Erp.Api.Companion;
 
 /// <summary>Lo que necesita una herramienta del Acompañante: la persona (recargada), el proveedor de la app y la conversación.</summary>
-public sealed record CompanionContext(UserContext User, IServiceProvider Services, int ConversationId, int Turn, Guid Lease);
+/// <param name="ToolUseId">Spec 048: la llamada del modelo; una propuesta la guarda para devolverle su resultado.</param>
+public sealed record CompanionContext(UserContext User, IServiceProvider Services, int ConversationId, int Turn, Guid Lease, string? ToolUseId = null);
 
 /// <param name="Routes">Rutas del inventario que usa (todas de lectura); la capacidad es la de cada ruta.</param>
 /// <param name="Data">Devuelve registros: su salida se borra al terminar el turno (H2 CA4).</param>
@@ -27,6 +29,8 @@ public static class CompanionTools
     /// <summary>H3 CA2: catálogos que revisa «mis pendientes» y muestras por estado.</summary>
     public const int PendingEntities = 15;
     public const int PendingSamples = 5;
+    /// <summary>Spec 048: resultados de <c>buscar_en_el_sistema</c>.</summary>
+    public const int SearchMatches = 25;
 
     private const string Entities = "/api/model/entities";
     private const string Entity = "/api/model/entities/{name}";
@@ -41,6 +45,10 @@ public static class CompanionTools
         Tool("mis_catalogos", "Los catálogos y documentos que la persona puede ver o capturar (nombre interno, etiqueta, módulo y si tiene proceso).",
             Schema(), false, [("GET", Entities)],
             (r, c, i, ct) => r.GetAsync(c, new RouteCall("GET", Entities), ShapeEntities, ct)),
+        // Spec 048 (pedido del dueño en IMPLEMENT): la pantalla actual es solo una pista; para lo demás, buscar por tema.
+        Tool("buscar_en_el_sistema", $"Busca un tema en todo lo que la persona puede ver del sistema: catálogos, campos, estados, transiciones, reglas y automatizaciones (qué hacen y a qué catálogo y campos afectan). Para preguntas sobre algo que no está en pantalla («¿qué marca a un gato como vacunado?», «¿dónde se aprueban los pedidos?»). Hasta {SearchMatches} resultados; los detalles, con como_funciona.",
+            Schema(("buscar", "string", "Palabras a buscar (en las palabras de la persona)", true)), false, [("GET", Entities)],
+            (r, c, i, ct) => r.SearchModelAsync(c, i, ct)),
         Tool("como_funciona", "Cómo funciona un catálogo para la persona: sus campos (obligatorios, calculados con su fórmula, de solo lectura), su proceso (estados y transiciones con quién puede y su condición) y sus reglas con su mensaje.",
             Schema(("catalogo", "string", "Nombre interno del catálogo (de mis_catalogos)", true)), false, [("GET", Entity)],
             (r, c, i, ct) => r.GetAsync(c, new RouteCall("GET", Entity, V(("name", StudioTools.Req(i, "catalogo")))), ShapeEntity, ct)),
@@ -147,6 +155,9 @@ public static class CompanionTools
                 ["formula"] = f["formula"]?.DeepClone(), ["opciones"] = f["options"]?.DeepClone(), ["referenciaA"] = f["referenceEntity"]?.DeepClone(),
                 ["partidasDe"] = f["childEntity"]?.DeepClone(), ["acceso"] = f["access"]?.DeepClone(), ["editableEn"] = f["editableIn"]?.DeepClone(),
                 ["obligatorioPara"] = f["requiredForRoles"]?.DeepClone(), ["valorInicial"] = f["defaultValue"]?.DeepClone(),
+                // Spec 048 (H3 CA2): lo que no captura la persona y quién lo llena (de `filledBy`, ya filtrado por lo que ella ve).
+                ["loLlenaElSistema"] = f["editable"]?.GetValue<bool>() == false ? true : null,
+                ["loLlena"] = FilledByText(f),
             })).ToArray()),
             ["reglas"] = new JsonArray((e["rules"] as JsonArray ?? []).OfType<JsonObject>().Select(r => (JsonNode)Compact(new JsonObject
             {
@@ -173,6 +184,37 @@ public static class CompanionTools
                     })).ToArray()),
             };
         return shaped;
+    }
+
+    /// <summary>
+    /// Spec 048 (H3 CA2, H4 CA1): quién le asigna valor a un campo, en palabras («la automatización «Marcar al gato como
+    /// vacunado» de Vacuna aplicada, al crear un registro de Vacuna aplicada»). Null si nada del modelo lo asigna.
+    /// </summary>
+    internal static string? FilledByText(JsonObject field)
+    {
+        if (field["filledBy"] is not JsonArray { Count: > 0 } sources) return null;
+        string? S(JsonNode? n, string key) => n?[key]?.GetValue<string>();
+        return string.Join("; ", sources.OfType<JsonObject>().Select(s =>
+        {
+            var entity = S(s, "entityLabel") ?? S(s, "entity");
+            if (S(s, "kind") == FieldSources.Transition) return $"la transición «{S(s, "label")}» al ejecutarse";
+            var when = S(s, "on") switch
+            {
+                AutomationEvents.Create => $"al crear un registro de {entity}",
+                AutomationEvents.Update => $"al modificar un registro de {entity}",
+                AutomationEvents.EnterState => $"cuando un registro de {entity} entra a «{S(s, "stateLabel")}»",
+                AutomationEvents.Transition => $"al ejecutar «{S(s, "transitionLabel")}» en {entity}",
+                _ => null,
+            };
+            var how = S(s, "action") switch
+            {
+                AutomationActions.Rollup => " (suma los registros relacionados)",
+                AutomationActions.Cost => " (valuación del costo)",
+                "capture" => " (lo toma del registro que crea)",
+                _ => "",
+            };
+            return $"la automatización «{S(s, "label")}» de {entity}{(when is null ? "" : $", {when}")}{how}";
+        }));
     }
 
     /// <summary>La lista sin lo que no sirve para explicar (versión, acceso por campo): registros, total y cuántos hay por estado.</summary>
@@ -240,6 +282,67 @@ public sealed class CompanionToolRunner(RouteDispatcher routes, CompanionActions
         StudioToolRunner.Output(await ReadAsync(c, call, ct), shape);
 
     internal Task<ToolOutput> ProposeAsync(CompanionContext c, JsonObject i, CancellationToken ct) => actions.ProposeAsync(this, c, i, ct);
+
+    /// <summary>
+    /// Spec 048: busca un tema en el modelo que la persona ve (<c>GET /api/model/entities</c>: solo sus catálogos y campos
+    /// visibles). Cada palabra (de 3 letras o más) debe aparecer, sin importar mayúsculas ni acentos. De una automatización dice
+    /// qué catálogo y qué campos toca, solo con campos que la persona ve de catálogos que ve.
+    /// </summary>
+    internal async Task<ToolOutput> SearchModelAsync(CompanionContext c, JsonObject i, CancellationToken ct)
+    {
+        var words = StudioTools.Req(i, "buscar", 200).Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Where(w => w.Length >= 3).Take(8).ToList();
+        if (words.Count == 0) throw new ToolInputException("«buscar» necesita al menos una palabra de 3 letras o más.");
+        var defs = await ReadAsync(c, new RouteCall("GET", "/api/model/entities"), ct);
+        if (!defs.Ok) return StudioToolRunner.Output(defs, null);
+        var entities = (defs.Body as JsonArray ?? []).OfType<JsonObject>().ToDictionary(e => e["name"]!.GetValue<string>(), StringComparer.OrdinalIgnoreCase);
+        var compare = System.Globalization.CultureInfo.GetCultureInfo("es-MX").CompareInfo;
+        bool Matches(string text) => words.All(w => compare.IndexOf(text, w, System.Globalization.CompareOptions.IgnoreCase | System.Globalization.CompareOptions.IgnoreNonSpace) >= 0);
+        string? S(JsonNode? n, string key) => n?[key] is JsonValue v && v.TryGetValue<string>(out var x) ? x : null;
+        string FieldLabel(JsonObject e, string? name) =>
+            (e["fields"] as JsonArray ?? []).OfType<JsonObject>().FirstOrDefault(f => string.Equals(S(f, "name"), name, StringComparison.OrdinalIgnoreCase)) is { } f ? S(f, "label") ?? name! : "";
+
+        var found = new JsonArray();
+        void Add(JsonObject e, string what, string text, JsonNode? extra = null, string also = "")
+        {
+            if (found.Count >= CompanionTools.SearchMatches || !Matches($"{S(e, "label")} {S(e, "labelPlural")} {text} {also}")) return;
+            var item = new JsonObject { ["catalogo"] = S(e, "name"), ["etiquetaCatalogo"] = S(e, "label"), ["que"] = what, ["texto"] = text };
+            if (extra is not null) item["afecta"] = extra;
+            found.Add(item);
+        }
+        foreach (var e in entities.Values)
+        {
+            if (e["parentEntity"] is not null) continue;
+            Add(e, "catálogo", $"{S(e, "labelPlural")} {S(e, "description")}".Trim());
+            foreach (var f in (e["fields"] as JsonArray ?? []).OfType<JsonObject>()) Add(e, "campo", S(f, "label") ?? "");
+            foreach (var st in (e["workflow"]?["states"] as JsonArray ?? []).OfType<JsonObject>()) Add(e, "estado", S(st, "label") ?? "");
+            foreach (var t in (e["workflow"]?["transitions"] as JsonArray ?? []).OfType<JsonObject>().Where(t => t["system"]?.GetValue<bool>() != true))
+                Add(e, "transición", S(t, "label") ?? "");
+            foreach (var r in (e["rules"] as JsonArray ?? []).OfType<JsonObject>()) Add(e, "regla", S(r, "message") ?? "");
+            foreach (var a in (e["automations"] as JsonArray ?? []).OfType<JsonObject>())
+            {
+                // Lo que toca, solo con catálogos y campos visibles (los de un catálogo que no ve no se nombran).
+                var touches = new JsonArray();
+                foreach (var act in (a["actions"] as JsonArray ?? []).OfType<JsonObject>())
+                {
+                    var dest = S(act, "type") is "create" or "cost" || (S(act, "type") == "rollup" && act["target"] is null) ? S(act, "entity")
+                        : act["target"] is null ? (act["lines"] is null ? S(e, "name") : null)
+                        : (e["fields"] as JsonArray ?? []).OfType<JsonObject>().FirstOrDefault(f => string.Equals(S(f, "name"), S(act, "target"), StringComparison.OrdinalIgnoreCase))?["referenceEntity"]?.GetValue<string>();
+                    if (dest is null || !entities.TryGetValue(dest, out var target)) continue;
+                    var fields = new JsonArray((act["set"] as JsonArray ?? []).OfType<JsonObject>().Select(x => FieldLabel(target, S(x, "field")))
+                        .Append(S(act, "type") == "rollup" ? FieldLabel(target, S(act, "field")) : "").Where(l => l.Length > 0).Distinct()
+                        .Select(l => (JsonNode)JsonValue.Create(l)!).ToArray());
+                    touches.Add(new JsonObject { ["accion"] = S(act, "type"), ["catalogo"] = S(target, "label"), ["campos"] = fields });
+                }
+                // También se encuentra por lo que toca («vacunado» encuentra la automatización que marca Vacunado).
+                var also = string.Join(" ", touches.OfType<JsonObject>().SelectMany(x => new[] { S(x, "catalogo") }.Concat((x["campos"] as JsonArray ?? []).Select(f => f?.GetValue<string>()))));
+                Add(e, "automatización", $"{S(a, "label")} ({S(a, "on") switch { "create" => "al crear", "update" => "al modificar", "enterState" => "al entrar a un estado", "transition" => "al ejecutar una transición", _ => "" }})", touches, also);
+            }
+        }
+        var data = new JsonObject { ["resultados"] = found };
+        if (found.Count >= CompanionTools.SearchMatches) data["recortado"] = true;
+        return new("ok", data,
+            $"{found.Count} resultados para «{string.Join(" ", words)}»");
+    }
 
     /// <summary>
     /// H3 CA1: el permiso de la persona sobre el catálogo (de <c>/api/auth/me</c>), cómo funciona el proceso y, con un registro,

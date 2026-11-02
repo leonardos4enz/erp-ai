@@ -1,3 +1,4 @@
+using System.Data.Common;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -25,15 +26,19 @@ public static class CompanionActionStatus
 
 public sealed record CompanionConfirmBody(string? Hash, IReadOnlyList<string>? AcceptWarnings = null);
 
+/// <summary>Spec 048 (H1 CA2): «No» o «No, y dile qué cambiar» (el motivo vuelve al modelo como palabras de la persona).</summary>
+public sealed record CompanionDiscardBody(string? Reason = null);
+
 public sealed record CompanionActionDto(int Id, string Kind, string Entity, string EntityLabel, long? RecordId, JsonNode? Preview, string Hash,
-    string Status, string? Error, JsonNode? Result, DateTime CreatedAt, DateTime? DecidedAt);
+    string Status, string? Error, JsonNode? Result, DateTime CreatedAt, DateTime? DecidedAt, string? Reason = null);
 
 /// <summary>
 /// Spec 046 (H4, ADR-0010): las acciones que el Acompañante propone y la persona confirma. Proponer no escribe nada: lee el
 /// registro como la persona, arma la vista previa con etiquetas y guarda el cuerpo exacto con su huella. Confirmar lo ejecuta
 /// una vez, por la ruta de datos de siempre y con la identidad, la empresa y los permisos de quien confirma en ese momento.
 /// </summary>
-public sealed class CompanionActions(Db db, RouteDispatcher routes, CompanionOptions options, IServiceProvider services, ILogger<CompanionActions> log)
+public sealed class CompanionActions(Db db, RouteDispatcher routes, CompanionOptions options, IServiceProvider services, CompanionSignals signals,
+    ILogger<CompanionActions> log)
 {
     public const string Create = "create";
     public const string Update = "update";
@@ -150,17 +155,17 @@ public sealed class CompanionActions(Db db, RouteDispatcher routes, CompanionOpt
         // Revisión adversarial 046 (F-06): solo si el turno sigue siendo de este trabajador (no tras «Detener» ni tras la purga).
         await using (var cn = await db.OpenAsync(ct))
             inserted = await cn.ExecuteScalarAsync<int?>("""
-                INSERT meta.CompanionAction (ConversationId, UserId, CompanyId, Turn, Kind, EntityName, RecordId, BodyJson, PreviewJson, Hash, Status)
+                INSERT meta.CompanionAction (ConversationId, UserId, CompanyId, Turn, Kind, EntityName, RecordId, BodyJson, PreviewJson, Hash, Status, ToolUseId)
                 OUTPUT inserted.Id
-                SELECT @ConversationId, @UserId, @CompanyId, @Turn, @kind, @entity, @recordId, @bodyJson, @preview, @hash, 'proposed'
+                SELECT @ConversationId, @UserId, @CompanyId, @Turn, @kind, @entity, @recordId, @bodyJson, @preview, @hash, 'proposed', @ToolUseId
                  WHERE EXISTS (SELECT 1 FROM meta.CompanionConversation WITH (UPDLOCK) WHERE Id = @ConversationId AND LeaseToken = @Lease AND Status = 'running')
                 """, new { c.ConversationId, UserId = c.User.Id, CompanyId = c.User.Company?.Id, c.Turn, kind, entity = def.Body?["name"]?.GetValue<string>() ?? entity,
-                    recordId, bodyJson, preview = preview.ToJsonString(), hash, c.Lease });
+                    recordId, bodyJson, preview = preview.ToJsonString(), hash, c.Lease, c.ToolUseId });
         var id = inserted ?? throw new StudioLeaseLost();
         var data = new JsonObject
         {
             ["accion"] = id, ["estado"] = "esperando a la persona", ["vistaPrevia"] = preview,
-            ["nota"] = "No está hecho: la persona ve la vista previa en el panel y la confirma o la descarta. No digas que ya se hizo.",
+            ["nota"] = "No está hecho: la persona ve la vista previa en el panel y decide. Su respuesta te llegará como el resultado de esta llamada.",
         };
         return new("ok", data, $"propuesta {id}: {kind} en {entityLabel}");
     }
@@ -178,10 +183,28 @@ public sealed class CompanionActions(Db db, RouteDispatcher routes, CompanionOpt
         foreach (var (key, value) in values)
         {
             if (!fields.TryGetValue(key, out var f) || !Editable(f))
-                throw new ToolInputException($"No se puede proponer «{ToolOutput.Trim(key)}». Campos que la persona puede capturar: {string.Join(", ", editable)}.");
+                throw new ToolInputException($"No se puede proponer «{ToolOutput.Trim(key)}»{(f is null ? "" : $": {WhyNotEditable(f)}")}. Campos que la persona puede capturar: {string.Join(", ", editable)}.");
             result[f["name"]!.GetValue<string>()] = value?.DeepClone();
         }
         return result;
+    }
+
+    /// <summary>
+    /// Spec 048 (H4 CA1): por qué un campo que la persona ve no se captura y, si lo llena el sistema, quién (de <c>filledBy</c>
+    /// de la ruta del modelo: solo automatizaciones de catálogos que ella ve). Para que el modelo lo explique sin suponer.
+    /// </summary>
+    internal static string WhyNotEditable(JsonObject f)
+    {
+        var label = f["label"]?.GetValue<string>() ?? f["name"]?.GetValue<string>();
+        var type = f["type"]?.GetValue<string>();
+        if (f["formula"] is not null || type == FieldTypes.Formula) return $"«{label}» se calcula solo con su fórmula";
+        if (type == FieldTypes.Autonumber) return $"«{label}» es un folio que asigna el sistema";
+        if (type == FieldTypes.Lines) return $"«{label}» son partidas: no se proponen desde aquí";
+        if (type == FieldTypes.State) return $"«{label}» es el estado: cambia con una transición del proceso";
+        if (f["editable"]?.GetValue<bool>() == false)
+            return CompanionTools.FilledByText(f) is { } who ? $"«{label}» lo llena el sistema, no la persona: {who}" : $"«{label}» lo llena el sistema (no se captura)";
+        if (f["access"]?.GetValue<string>() == FieldAccessLevels.Read) return $"la persona solo puede ver «{label}», no capturarlo";
+        return $"«{label}» no se captura";
     }
 
     /// <summary>
@@ -225,9 +248,10 @@ public sealed class CompanionActions(Db db, RouteDispatcher routes, CompanionOpt
     // ---------- Confirmar y descartar (la persona) ----------
 
     private sealed record Row(int Id, int ConversationId, int UserId, int? CompanyId, string Kind, string EntityName, long? RecordId,
-        string BodyJson, string? PreviewJson, string Hash, string Status, string? ResultJson, string? Error, DateTime CreatedAt, DateTime? DecidedAt);
+        string BodyJson, string? PreviewJson, string Hash, string Status, string? ResultJson, string? Error, DateTime CreatedAt, DateTime? DecidedAt,
+        string? ToolUseId, string? Reason);
 
-    private const string Columns = "Id, ConversationId, UserId, CompanyId, Kind, EntityName, RecordId, BodyJson, PreviewJson, Hash, Status, ResultJson, Error, CreatedAt, DecidedAt";
+    private const string Columns = "Id, ConversationId, UserId, CompanyId, Kind, EntityName, RecordId, BodyJson, PreviewJson, Hash, Status, ResultJson, Error, CreatedAt, DecidedAt, ToolUseId, Reason";
 
     /// <summary>
     /// H4 CA2/CA3: dueña, pendiente, sin caducar, con la huella y en la empresa de la acción; <c>proposed → applying</c> bajo
@@ -255,7 +279,9 @@ public sealed class CompanionActions(Db db, RouteDispatcher routes, CompanionOpt
             if (row.CreatedAt < DateTime.UtcNow.AddHours(-options.ActionHours))
             {
                 await cn.ExecuteAsync("UPDATE meta.CompanionAction SET Status = 'expired', DecidedAt = SYSUTCDATETIME(), PreviewJson = NULL WHERE Id = @id", new { id }, tx);
+                var resumedExpired = await ResumeAsync(cn, tx, conversation);
                 await tx.CommitAsync(ct);
+                if (resumedExpired) signals.Pulse(conversation);
                 throw new Conflict(Decided(CompanionActionStatus.Expired));
             }
             if (!string.Equals(body?.Hash, row.Hash, StringComparison.Ordinal))
@@ -288,9 +314,12 @@ public sealed class CompanionActions(Db db, RouteDispatcher routes, CompanionOpt
             : result.Status is StatusCodes.Status428PreconditionRequired or StatusCodes.Status429TooManyRequests ? (CompanionActionStatus.Proposed, null)
             : (CompanionActionStatus.Failed, Detail(result));
         var resultJson = result.Ok ? new JsonObject { ["recordId"] = (result.Body?["id"] ?? JsonValue.Create(row.RecordId))?.DeepClone() }.ToJsonString() : null;
+        var resumed = false;
         await using (var cn = await db.OpenAsync(CancellationToken.None))
         await using (var tx = await cn.BeginTransactionAsync(CancellationToken.None))
         {
+            // Spec 048: el mismo orden de bloqueos que detener, borrar y descartar (conversación y luego acción).
+            await cn.ExecuteAsync("SELECT Status FROM meta.CompanionConversation WITH (UPDLOCK, HOLDLOCK) WHERE Id = @ConversationId", new { row.ConversationId }, tx);
             var updated = await cn.ExecuteAsync("""
                 UPDATE meta.CompanionAction
                    SET Status = @status, Error = @error, ResultJson = @resultJson,
@@ -305,8 +334,11 @@ public sealed class CompanionActions(Db db, RouteDispatcher routes, CompanionOpt
             if (status != CompanionActionStatus.Proposed)
                 await Audit.WriteAsync(cn, tx, http, AuditActions.CompanionAction, entity: row.EntityName, recordId: (result.Body?["id"] ?? JsonValue.Create(row.RecordId))?.ToString(),
                     after: new { action = id, conversation = row.ConversationId, kind = row.Kind, status, error = error is null ? null : StudioAgent.Cut(error, 300) });
+            // Spec 048 (H1 CA4, H2 CA3): el resultado y la reanudación del turno, en la misma transacción.
+            if (updated > 0 && status != CompanionActionStatus.Proposed) resumed = await ResumeAsync(cn, tx, row.ConversationId);
             await tx.CommitAsync(CancellationToken.None);
         }
+        if (resumed) signals.Pulse(row.ConversationId);
         if (result.Status == StatusCodes.Status428PreconditionRequired)
             throw new AppException(StatusCodes.Status428PreconditionRequired, result.Error ?? "La acción tiene avisos: revísalos y confirma para continuar.", result.Errors);
         var dto = await GetAsync(id, user.Id, CancellationToken.None) ?? throw new NotFound("La propuesta no existe.");
@@ -314,21 +346,97 @@ public sealed class CompanionActions(Db db, RouteDispatcher routes, CompanionOpt
         return (dto, result.Body);
     }
 
-    public async Task<CompanionActionDto> DiscardAsync(int id, HttpContext http, CancellationToken ct)
+    /// <summary>
+    /// H4 CA2 y spec 048 (H1 CA2): «No» o «No, y dile qué cambiar». El motivo es de la persona: vuelve al modelo en un bloque
+    /// <c>&lt;pedido&gt;</c>. Si era la última pendiente de una conversación que esperaba, el turno se vuelve a encolar.
+    /// </summary>
+    public async Task<CompanionActionDto> DiscardAsync(int id, CompanionDiscardBody? body, HttpContext http, CancellationToken ct)
     {
         var user = http.CurrentUser();
+        var reason = body?.Reason?.Trim() is { Length: > 0 } r ? r : null;
+        if (reason is not null && reason.Length > options.MaxPromptChars)
+            throw new ValidationFailed(new Dictionary<string, string[]> { ["reason"] = [$"El motivo admite hasta {options.MaxPromptChars} caracteres."] },
+                $"El motivo admite hasta {options.MaxPromptChars} caracteres.");
+        int conversation;
+        bool resumed;
         await using (var cn = await db.OpenAsync(ct))
         await using (var tx = await cn.BeginTransactionAsync(ct))
         {
+            // Spec 048: conversación y luego acción, como confirmar (046 F-02) y detener.
+            conversation = await cn.ExecuteScalarAsync<int?>("SELECT ConversationId FROM meta.CompanionAction WHERE Id = @id AND UserId = @UserId",
+                new { id, UserId = user.Id }, tx) ?? throw new NotFound("La propuesta no existe.");
+            await cn.ExecuteAsync("SELECT Status FROM meta.CompanionConversation WITH (UPDLOCK, HOLDLOCK) WHERE Id = @conversation", new { conversation }, tx);
             var row = await cn.QuerySingleOrDefaultAsync<Row>($"SELECT {Columns} FROM meta.CompanionAction WITH (UPDLOCK, ROWLOCK) WHERE Id = @id AND UserId = @UserId",
                           new { id, UserId = user.Id }, tx) ?? throw new NotFound("La propuesta no existe.");
             if (row.Status != CompanionActionStatus.Proposed) throw new Conflict(Decided(row.Status));
-            await cn.ExecuteAsync("UPDATE meta.CompanionAction SET Status = 'discarded', DecidedAt = SYSUTCDATETIME(), PreviewJson = NULL WHERE Id = @id", new { id }, tx);
+            // Revisión adversarial 048 (F-05): como confirmar, desde su empresa (decidir reanuda el turno de esa conversación).
+            if (row.CompanyId != user.Company?.Id) throw new Conflict("La propuesta es de otra empresa: cámbiate a ella para responderla.");
+            await cn.ExecuteAsync("UPDATE meta.CompanionAction SET Status = 'discarded', Reason = @reason, DecidedAt = SYSUTCDATETIME(), PreviewJson = NULL WHERE Id = @id",
+                new { id, reason }, tx);
             await Audit.WriteAsync(cn, tx, http, AuditActions.CompanionAction, entity: row.EntityName, recordId: row.RecordId?.ToString(),
-                after: new { action = id, conversation = row.ConversationId, kind = row.Kind, status = CompanionActionStatus.Discarded });
+                after: new { action = id, conversation = row.ConversationId, kind = row.Kind, status = CompanionActionStatus.Discarded, reasonLength = reason?.Length ?? 0 });
+            resumed = await ResumeAsync(cn, tx, conversation);
             await tx.CommitAsync(ct);
         }
+        if (resumed) signals.Pulse(conversation);
         return (await GetAsync(id, user.Id, ct))!;
+    }
+
+    /// <summary>
+    /// Spec 048 (H1 CA4): la conversación que esperaba a la persona vuelve a la cola cuando ya no tiene propuestas pendientes ni
+    /// aplicándose. Va en la transacción de la decisión (con la conversación bloqueada): se encola una sola vez.
+    /// </summary>
+    internal static async Task<bool> ResumeAsync(DbConnection cn, DbTransaction tx, int conversationId) =>
+        await cn.ExecuteAsync("""
+            UPDATE meta.CompanionConversation SET Status = 'queued', LastActivityAt = SYSUTCDATETIME()
+             WHERE Id = @conversationId AND Status = 'waiting'
+               AND NOT EXISTS (SELECT 1 FROM meta.CompanionAction WHERE ConversationId = @conversationId AND Status IN ('proposed', 'applying'))
+            """, new { conversationId }, tx) > 0;
+
+    /// <summary>
+    /// Spec 048 (H1 CA4): lo que vuelve al modelo como resultado de su <c>proponer_accion</c>. Lo arma el servidor con palabras
+    /// fijas dentro de los datos no confiables (el error de una regla lo escribió un modelador); solo el motivo de la persona va
+    /// como <c>&lt;pedido&gt;</c>. Null mientras la acción sigue pendiente.
+    /// </summary>
+    internal static string? Outcome(int id, string status, string entity, long? recordId, string? resultJson, string? error, string? reason, int maxChars)
+    {
+        var data = new JsonObject { ["accion"] = id, ["catalogo"] = entity };
+        switch (status)
+        {
+            case CompanionActionStatus.Applied:
+                data["resultado"] = "aplicada";
+                data["registro"] = (resultJson is null ? null : JsonNode.Parse(resultJson)?["recordId"]?.DeepClone()) ?? recordId;
+                data["nota"] = "La persona dijo que sí y el sistema lo aplicó: ya está hecho. Las automatizaciones del catálogo ya corrieron; si necesitas ver el resultado, consulta el registro.";
+                break;
+            case CompanionActionStatus.Discarded when error is not null:
+                data["resultado"] = "detenida";
+                data["nota"] = "La persona detuvo la conversación sin decidir: no se hizo nada.";
+                break;
+            case CompanionActionStatus.Discarded:
+                data["resultado"] = "rechazada";
+                data["nota"] = reason is null
+                    ? "La persona dijo que no: no se hizo nada. No la vuelvas a proponer igual; pregúntale qué quiere."
+                    : "La persona dijo que no: no se hizo nada. Justo después, en su pedido, te dice qué cambiar.";
+                break;
+            case CompanionActionStatus.Failed:
+                data["resultado"] = "no se aplicó";
+                data["error"] = error;
+                data["nota"] = "La persona dijo que sí, pero el sistema la rechazó: no se hizo nada. Explícale el motivo.";
+                break;
+            case CompanionActionStatus.Expired:
+                data["resultado"] = "caducó";
+                data["nota"] = "La persona no la decidió a tiempo: no se hizo nada.";
+                break;
+            case CompanionActionStatus.Unknown:
+                data["resultado"] = "sin confirmar si se aplicó";
+                data["error"] = error;
+                data["nota"] = "No se sabe si se aplicó (el servidor se detuvo mientras la ejecutaba). Consulta el registro antes de decir nada.";
+                break;
+            default:
+                return null;
+        }
+        var text = StudioPrompt.Untrusted(CompanionTools.Propose, data, maxChars);
+        return status == CompanionActionStatus.Discarded && error is null && reason is not null ? text + "\n" + CompanionPrompt.Request(reason, null) : text;
     }
 
     public async Task<CompanionActionDto?> GetAsync(int id, int userId, CancellationToken ct)
@@ -361,6 +469,16 @@ public sealed class CompanionActions(Db db, RouteDispatcher routes, CompanionOpt
                    Error = N'No sabemos si se aplicó: el servidor se detuvo mientras la ejecutaba. Revisa el registro antes de repetirla.'
              WHERE Status = 'applying' AND DecidedAt < DATEADD(second, -@seconds, SYSUTCDATETIME())
             """, new { seconds = options.ApplyingSeconds });
+        // Spec 048 (H2 CA3): las conversaciones que esperaban y ya no tienen nada pendiente (caducó, quedó sin confirmar, o el
+        // proceso cayó entre decidir y reanudar) siguen su turno con ese resultado.
+        var resumed = (await cn.QueryAsync<int>("""
+            UPDATE c SET Status = 'queued', LastActivityAt = SYSUTCDATETIME()
+            OUTPUT inserted.Id
+              FROM meta.CompanionConversation c WITH (UPDLOCK, ROWLOCK)
+             WHERE c.Status = 'waiting'
+               AND NOT EXISTS (SELECT 1 FROM meta.CompanionAction a WHERE a.ConversationId = c.Id AND a.Status IN ('proposed', 'applying'))
+            """)).ToList();
+        foreach (var id in resumed) signals.Pulse(id);
         return (expired, unknown);
     }
 
@@ -370,7 +488,7 @@ public sealed class CompanionActions(Db db, RouteDispatcher routes, CompanionOpt
         var label = preview?["catalogo"]?.GetValue<string>() ?? r.EntityName;
         return new(r.Id, r.Kind, r.EntityName, label, r.RecordId, preview, r.Hash, r.Status, r.Error,
             r.ResultJson is null ? null : JsonNode.Parse(r.ResultJson), DateTime.SpecifyKind(r.CreatedAt, DateTimeKind.Utc),
-            r.DecidedAt is { } d ? DateTime.SpecifyKind(d, DateTimeKind.Utc) : null);
+            r.DecidedAt is { } d ? DateTime.SpecifyKind(d, DateTimeKind.Utc) : null, r.Reason);
     }
 
     private static string Decided(string status) => status switch

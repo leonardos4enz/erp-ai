@@ -380,7 +380,7 @@ public static class ModelDiff
     }
 
     /// <summary>Solo lo declarado: el acceso por rol (spec 006) es salida, no metadato.</summary>
-    private static FieldDef Clean(FieldDef f) => f with { Access = null, EditableIn = null, IsArchived = false };
+    private static FieldDef Clean(FieldDef f) => f with { Access = null, EditableIn = null, FilledBy = null, IsArchived = false };
 
     private static void Sets(EntityDef d, EntityDef? t, List<Operation> sets)
     {

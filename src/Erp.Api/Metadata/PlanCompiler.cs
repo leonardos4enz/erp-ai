@@ -788,6 +788,7 @@ public static partial class PlanCompiler
             // Solo salida (spec 006): la seguridad por campo se declara con setSecurity.
             Access = null,
             EditableIn = null,
+            FilledBy = null, // spec 048: solo salida
             // El motor calcula estos tipos: nunca son obligatorios ni únicos por captura.
             Required = !computed && f.Required,
             Unique = !computed && f.Unique,

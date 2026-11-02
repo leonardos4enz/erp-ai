@@ -381,7 +381,9 @@ export const companionApi = {
   /** Con la huella de la vista previa; un 428 trae los avisos en `fieldErrors` y se confirma otra vez aceptándolos. */
   confirm: (id: number, hash: string, acceptWarnings?: string[]) =>
     api<{ action: CompanionAction; record?: unknown }>(`/companion/actions/${id}/confirm`, { method: 'POST', body: { hash, acceptWarnings } }),
-  discard: (id: number) => api<CompanionAction>(`/companion/actions/${id}/discard`, { method: 'POST' }),
+  /** Spec 048: «No» o «No, y dile qué cambiar» (`reason`). */
+  discard: (id: number, reason?: string) =>
+    api<CompanionAction>(`/companion/actions/${id}/discard`, { method: 'POST', body: reason ? { reason } : undefined }),
 };
 
 /** Spec 015: equipo (dueño de registros); la unidad es el nombre de una existente. */

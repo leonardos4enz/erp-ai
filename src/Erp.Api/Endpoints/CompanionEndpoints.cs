@@ -44,7 +44,11 @@ public static class CompanionEndpoints
             var (action, record) = await actions.ConfirmAsync(id, body, http, ct);
             return new { action, record };
         }).Requires(Capability.Records).Writes(Effect.Data).AppliesReviewed("hash");
-        g.MapPost("/actions/{id:int}/discard", (int id, HttpContext http, CompanionActions actions, CancellationToken ct) =>
-            actions.DiscardAsync(id, http, ct)).Requires(Capability.Authenticated).Writes(Effect.Session);
+        // Spec 048 (H1 CA2): «No» o «No, y dile qué cambiar» (`reason`, opcional); decidir la última pendiente sigue el turno.
+        g.MapPost("/actions/{id:int}/discard", async (int id, HttpContext http, CompanionActions actions, CancellationToken ct) =>
+        {
+            var body = http.Request.HasJsonContentType() ? await http.Request.ReadFromJsonAsync<CompanionDiscardBody>(ct) : null;
+            return await actions.DiscardAsync(id, body, http, ct);
+        }).Requires(Capability.Authenticated).Writes(Effect.Session);
     }
 }

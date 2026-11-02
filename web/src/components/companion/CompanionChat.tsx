@@ -3,7 +3,7 @@ import { RotateCcw, WifiOff } from 'lucide-react';
 import { ApiError } from '../../api/client';
 import { companionApi } from '../../api/endpoints';
 import type { CompanionAction, CompanionConversation, CompanionScreen, CompanionStatus } from '../../api/types';
-import { AVATAR_TEXT, DATA_TOOLS, TOOL_LABELS, avatarState, latestAction, type AvatarState } from '../../lib/companion';
+import { AVATAR_TEXT, DATA_TOOLS, TOOL_LABELS, askingAction, avatarState, latestAction, type AvatarState } from '../../lib/companion';
 import { groupTurns, isActive, lastUserText, liveLabel } from '../../lib/studio';
 import { LiveArea, Notice, TurnEnd, UserBubble, problemText, useNow } from '../../pages/studio/ChatView';
 import { Composer, type ComposerHandle } from '../../pages/studio/Composer';
@@ -38,7 +38,7 @@ export function CompanionChat({ id, status, screen, contextNote, entityLabel, on
   }), []);
   const chat = useAgentChat(id, chatApi, onListChanged, DATA_TOOLS);
   const { session: s, live, conn } = chat;
-  const pending = chat.pending && !s?.trail.some((x) => x.kind === 'user' && x.seq > chat.pending!.after) ? chat.pending : null;
+  const pending = chat.pending && !s?.trail.some((x) => (x.kind === 'user' || x.kind === 'answer') && x.seq > chat.pending!.after) ? chat.pending : null;
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
@@ -49,6 +49,9 @@ export function CompanionChat({ id, status, screen, contextNote, entityLabel, on
   const now = useNow(30_000);
 
   const active = !!s && isActive(s.status);
+  /** Spec 048: el turno se detuvo en una propuesta; escribir es decir que no con ese texto. */
+  const waiting = s?.status === 'waiting';
+  const asking = useMemo(() => askingAction(s?.actions ?? []), [s?.actions]);
   const turns = useMemo(() => (s ? groupTurns(s.trail, s.title) : []), [s]);
 
   // H5: un paso `action` llega por el flujo antes que su acción (que solo trae la lectura completa): se relee una vez por id.
@@ -115,9 +118,10 @@ export function CompanionChat({ id, status, screen, contextNote, entityLabel, on
   const onActionChanged = useCallback((a?: CompanionAction) => {
     if (a && a.status !== 'proposed') decided.current.set(a.id, a);
     if (a) chat.setSession((x) => ({ ...x, actions: x.actions.map((y) => (y.id === a.id ? a : y)) }));
-    void chat.full().catch(() => undefined);
+    // Spec 048 (H1 CA4): decidir la última pendiente reanuda el turno: se relee y, si sigue, se sigue en vivo.
+    chat.reconnect();
     onListChanged();
-  }, [chat.setSession, chat.full, onListChanged]);
+  }, [chat.setSession, chat.reconnect, onListChanged]);
 
   if (chat.loadError) {
     return (
@@ -150,8 +154,10 @@ export function CompanionChat({ id, status, screen, contextNote, entityLabel, on
                     if (seg.kind === 'tools') return <ToolGroup key={seg.steps[0].seq} steps={seg.steps} dataTools={DATA_TOOLS} labels={TOOL_LABELS} />;
                     if (seg.kind === 'action') {
                       const action = latestAction(s.actions.find((a) => a.id === seg.action), seg.action === null ? undefined : decided.current.get(seg.action));
-                      return <ActionCard key={seg.seq} action={action} entityLabel={entityLabel} onChanged={onActionChanged} />;
+                      return <ActionCard key={seg.seq} action={action} entityLabel={entityLabel} onChanged={onActionChanged}
+                        asking={action?.id === asking.id} position={action ? asking.position(action.id) : null} />;
                     }
+                    if (seg.kind === 'answer') return <UserBubble key={seg.seq} text={seg.text} at={seg.at} now={now} />;
                     if (seg.kind === 'notice') return <Notice key={seg.step.seq} step={seg.step} />;
                     return null;
                   })}
@@ -197,8 +203,10 @@ export function CompanionChat({ id, status, screen, contextNote, entityLabel, on
           sending={sending}
           blocked={!active && !s.canSend ? s.sendBlockedReason ?? 'No se pueden mandar más mensajes en esta conversación.' : null}
           maxChars={status.limits.maxPromptChars}
-          placeholder="Pregunta o pide algo…"
-          footer={contextNote}
+          placeholder={waiting ? 'Escribe qué cambiar (cuenta como «no»)…' : 'Pregunta o pide algo…'}
+          footer={waiting
+            ? <p className="cmp-waiting-note">El Acompañante espera tu respuesta a la propuesta. Lo que escribas cuenta como «no» y se lo dice.</p>
+            : contextNote}
         />
       </div>
     </div>

@@ -171,6 +171,7 @@ public sealed class CompanionAgent(Db db, CompanionOptions options, AssistantOpt
             }
 
             var results = new List<StudioBlock>();
+            var asked = false;
             foreach (var use in uses)
             {
                 if (++run.ToolCalls > options.MaxToolCalls)
@@ -179,16 +180,20 @@ public sealed class CompanionAgent(Db db, CompanionOptions options, AssistantOpt
                 if (run.User is null) return new(StudioStatus.Failed, "identity", "La persona ya no tiene acceso con la misma cuenta o empresa.");
                 await LiveAsync(run, new JsonObject { ["kind"] = "tool", ["tool"] = StudioAgent.Cut(use.Name, 60), ["input"] = LiveInput(use.Input) }, force: true);
                 var watch = Stopwatch.StartNew();
-                var output = await tools.RunAsync(new CompanionContext(run.User, services, claim.Id, claim.Turn, claim.LeaseToken), use.Name, use.Input, ct);
+                var output = await tools.RunAsync(new CompanionContext(run.User, services, claim.Id, claim.Turn, claim.LeaseToken, use.Id), use.Name, use.Input, ct);
                 watch.Stop();
                 // H4: una propuesta es un paso «action» con su id, para que el panel muestre la tarjeta de confirmación.
                 var kind = use.Name == CompanionTools.Propose && !output.IsError ? "action" : "tool";
+                asked |= kind == "action";
                 await StepAsync(run, kind, StudioAgent.Cut(use.Name, 60), StudioAgent.Cut(use.Input.GetRawText(), 8000), output.Data, output.Status, output.Summary, (int)watch.ElapsedMilliseconds);
                 var label = CompanionTools.Find(use.Name)?.Name ?? "desconocida";
                 results.Add(new StudioToolResult(use.Id, StudioPrompt.Untrusted(label, output.Data, options.MaxToolResultChars), output.IsError, label));
             }
             messages.Add(new(true, results));
             await AppendAsync(run, true, results, results.Any(IsData));
+            // Spec 048 (H1 CA1): como el permiso de una herramienta, una propuesta guardada detiene el turno hasta que la persona
+            // decida; su respuesta vuelve como el resultado de esta llamada (LoadAsync) cuando el turno se reanude.
+            if (asked) return new(CompanionService.Waiting, null, run.LastText is null ? null : StudioAgent.Cut(run.LastText, 4000));
         }
     }
 
@@ -294,7 +299,28 @@ public sealed class CompanionAgent(Db db, CompanionOptions options, AssistantOpt
                 new { run.Claim.Id })).ToList();
         }
         run.MessageSeq = rows.Count == 0 ? 0 : rows[^1].Seq;
-        return StudioTranscript.Normalize(rows.Select(r => new StudioMessage(r.FromUser, StudioTranscript.Deserialize(r.ContentJson))));
+        var outcomes = await OutcomesAsync(run.Claim.Id, ct);
+        return StudioTranscript.Normalize(rows.Select(r => new StudioMessage(r.FromUser, StudioTranscript.Deserialize(r.ContentJson)
+            .Select(b => b is StudioToolResult x && outcomes.TryGetValue(x.ToolUseId, out var text) ? new StudioToolResult(x.ToolUseId, text, false, x.Tool) : b).ToList())));
+    }
+
+    /// <summary>
+    /// Spec 048 (H1 CA4, CLARIFY 3): el resultado de cada propuesta ya decidida, por la llamada del modelo que la hizo. Se lee de
+    /// la acción al armar la conversación (no se copia al historial): vale en este turno y en los siguientes, y la purga de lo
+    /// leído no lo toca.
+    /// </summary>
+    private async Task<Dictionary<string, string>> OutcomesAsync(int conversationId, CancellationToken ct)
+    {
+        await using var cn = await db.OpenAsync(ct);
+        var rows = await cn.QueryAsync<(string ToolUseId, int Id, string Status, string EntityName, long? RecordId, string? ResultJson, string? Error, string? Reason)>("""
+            SELECT ToolUseId, Id, Status, EntityName, RecordId, ResultJson, Error, Reason FROM meta.CompanionAction
+             WHERE ConversationId = @conversationId AND ToolUseId IS NOT NULL
+            """, new { conversationId });
+        var result = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var a in rows)
+            if (CompanionActions.Outcome(a.Id, a.Status, a.EntityName, a.RecordId, a.ResultJson, a.Error, a.Reason, options.MaxToolResultChars) is { } text)
+                result[a.ToolUseId] = text;
+        return result;
     }
 
     private async Task AppendAsync(Run run, bool fromUser, IReadOnlyList<StudioBlock> blocks, bool hasData)
@@ -340,16 +366,21 @@ public sealed class CompanionAgent(Db db, CompanionOptions options, AssistantOpt
     {
         await using var cn = await db.OpenAsync(ct);
         await using var tx = await cn.BeginTransactionAsync(ct);
-        var n = await cn.ExecuteAsync("""
+        // Revisión adversarial 048 (F-01): «Detener» mientras el turno se detenía a esperar gana: queda detenida, sin reanudarse.
+        var status = await cn.ExecuteScalarAsync<string?>("""
             UPDATE meta.CompanionConversation
-               SET Status = @Status, ErrorCode = @ErrorCode, Summary = @Summary,
+               SET Status = CASE WHEN @Status = 'waiting' AND CancelRequested = 1 THEN 'cancelled' ELSE @Status END,
+                   ErrorCode = CASE WHEN @Status = 'waiting' AND CancelRequested = 1 THEN 'cancelled' ELSE @ErrorCode END, Summary = @Summary,
                    Steps = @Steps, ToolCalls = @ToolCalls, InputTokens = @Input, OutputTokens = @Output,
                    CostMicros = @Cost, ReservedMicros = 0, FinishedAt = SYSUTCDATETIME(), LastActivityAt = SYSUTCDATETIME(),
                    LeaseToken = NULL, LeaseUntil = NULL, LiveJson = NULL
+            OUTPUT inserted.Status
              WHERE Id = @Id AND LeaseToken = @LeaseToken AND Status = 'running'
             """, new { o.Status, o.ErrorCode, o.Summary, run.Steps, run.ToolCalls, run.Input, run.Output,
-                Cost = run.Cost + run.Reserved, run.Claim.Id, run.Claim.LeaseToken }, tx);
-        if (n == 0) throw new StudioLeaseLost();
+                Cost = run.Cost + run.Reserved, run.Claim.Id, run.Claim.LeaseToken }, tx) ?? throw new StudioLeaseLost();
+        // Spec 048: si la persona ya decidió todo mientras el turno terminaba (vio la tarjeta por el flujo), sigue de una vez.
+        if (status == CompanionService.Waiting) await CompanionActions.ResumeAsync(cn, tx, run.Claim.Id);
+        else if (o.Status == CompanionService.Waiting) await CompanionService.DiscardOnStopAsync(cn, tx, run.Claim.Id);
         // H2 CA4: lo leído de registros no se queda al terminar el turno, ni en los pasos ni en el historial.
         await CompanionService.PurgeDataAsync(cn, tx, run.Claim.Id);
         await Audit.WriteAsync(cn, tx, new DefaultHttpContext(), AuditActions.CompanionFinish, entity: "companion", recordId: run.Claim.Id.ToString(),

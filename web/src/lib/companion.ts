@@ -10,7 +10,7 @@ import { isActive } from './studio';
 export type AvatarState = 'idle' | 'thinking' | 'tool' | 'waiting' | 'done' | 'error';
 
 export const AVATAR_TEXT: Record<AvatarState, string> = {
-  idle: 'En reposo', thinking: 'Pensando…', tool: 'Consultando…', waiting: 'Esperando tu confirmación', done: 'Listo', error: 'Algo salió mal',
+  idle: 'En reposo', thinking: 'Pensando…', tool: 'Consultando…', waiting: 'Esperando tu respuesta', done: 'Listo', error: 'Algo salió mal',
 };
 
 /**
@@ -23,7 +23,8 @@ export function avatarState(c: Pick<CompanionConversation, 'status' | 'actions'>
   if (opts.sending || (c && isActive(c.status))) return live?.kind === 'tool' ? 'tool' : 'thinking';
   if (!c) return 'idle';
   if (c.status === 'failed' || c.status === 'interrupted') return 'error';
-  if (c.actions.some((a) => a.status === 'proposed')) return 'waiting';
+  // Spec 048: el turno se detuvo en una propuesta (o quedó una pendiente de antes).
+  if (c.status === 'waiting' || c.actions.some((a) => a.status === 'proposed')) return 'waiting';
   if (c.status === 'answered') return 'done';
   return 'idle';
 }
@@ -35,6 +36,7 @@ export const TOOL_LABELS: Readonly<Record<string, { done: string; live: string }
   mis_modulos: { done: 'Revisó tus módulos', live: 'Revisando tus módulos' },
   mis_catalogos: { done: 'Revisó tus catálogos', live: 'Revisando tus catálogos' },
   como_funciona: { done: 'Revisó cómo funciona un catálogo', live: 'Revisando cómo funciona' },
+  buscar_en_el_sistema: { done: 'Buscó en el sistema', live: 'Buscando en el sistema' },
   buscar_registros: { done: 'Buscó registros', live: 'Buscando registros' },
   ver_registro: { done: 'Abrió un registro', live: 'Abriendo un registro' },
   historial_registro: { done: 'Revisó el historial de un registro', live: 'Revisando el historial' },
@@ -95,6 +97,21 @@ export function latestAction(server: CompanionAction | undefined, decided: Compa
   if (!server) return decided;
   if (decided && decided.id === server.id && (server.status === 'proposed' || server.status === 'applying') && decided.status !== 'proposed') return decided;
   return server;
+}
+
+/**
+ * Spec 048 (H6 CA1): las propuestas se preguntan una por una, como los permisos de Claude Code: la que se pregunta es la
+ * primera pendiente; las demás esperan su turno. `position` es «Propuesta 1 de 3» cuando hay más de una pendiente.
+ */
+export function askingAction(actions: CompanionAction[]): { id: number | null; position: (id: number) => string | null } {
+  const pending = actions.filter((a) => a.status === 'proposed').sort((a, b) => a.id - b.id);
+  return {
+    id: pending[0]?.id ?? null,
+    position: (id) => {
+      const i = pending.findIndex((a) => a.id === id);
+      return pending.length > 1 && i >= 0 ? `Propuesta ${i + 1} de ${pending.length}` : null;
+    },
+  };
 }
 
 /** Un valor de la vista previa como texto (nunca como marcado). */

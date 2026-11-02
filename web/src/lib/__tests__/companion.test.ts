@@ -3,7 +3,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ApiError } from '../../api/client';
 import type { CompanionAction, CompanionConversation, StudioStep } from '../../api/types';
-import { ACTION_STATUS, TOOL_LABELS, actionView, avatarState, latestAction, screenContext, showValue, suggestions, warningsOf } from '../companion';
+import { ACTION_STATUS, AVATAR_TEXT, TOOL_LABELS, actionView, askingAction, avatarState, latestAction, screenContext, showValue, suggestions, warningsOf } from '../companion';
 import { groupTurns, liveLabel } from '../studio';
 
 /** Spec 047: lógica sin DOM del panel del Acompañante. */
@@ -122,5 +122,37 @@ describe('Acompañante (047)', () => {
     expect(t.user.text).toBe('Cambia el teléfono');
     expect(t.segments.map((s) => s.kind)).toEqual(['tools', 'action', 'text']);
     expect(t.segments[1]).toMatchObject({ kind: 'action', action: 3 });
+  });
+});
+
+describe('Acompañante 2 (048)', () => {
+  it('H6 CA3: un turno que espera tu respuesta pone al avatar esperando', () => {
+    expect(avatarState(conv({ status: 'waiting' }), null)).toBe('waiting');
+    expect(AVATAR_TEXT.waiting).toBe('Esperando tu respuesta');
+  });
+
+  it('H6 CA1: las propuestas se preguntan una por una (la primera pendiente)', () => {
+    const list = [action({ id: 9 }), action({ id: 4, status: 'applied' }), action({ id: 7 })];
+    const ask = askingAction(list);
+    expect(ask.id).toBe(7);
+    expect(ask.position(7)).toBe('Propuesta 1 de 2');
+    expect(ask.position(9)).toBe('Propuesta 2 de 2');
+    expect(ask.position(4)).toBeNull();
+    expect(askingAction([action({ id: 2 })]).position(2)).toBeNull();
+    expect(askingAction([]).id).toBeNull();
+  });
+
+  it('H1 CA3: lo que la persona escribió mientras esperaba es un segmento propio del turno', () => {
+    const at = '2026-11-02T10:00:00Z';
+    const trail: StudioStep[] = [
+      { seq: 1, kind: 'user', status: 'ok', summary: 'Registra a mi gato', durationMs: 0, at, turn: 1, output: { text: 'Registra a mi gato' } },
+      { seq: 2, kind: 'action', tool: 'proponer_accion', status: 'ok', summary: 'p', durationMs: 5, at, turn: 1, output: { accion: 3 } },
+      { seq: 3, kind: 'answer', status: 'ok', summary: 'Llámalo Michi', durationMs: 0, at, turn: 1, output: { text: 'Llámalo Michi' } },
+      { seq: 4, kind: 'text', status: 'ok', summary: '', durationMs: 0, at, turn: 1, output: { text: 'Va.' } },
+    ];
+    const [t] = groupTurns(trail, 'x');
+    expect(t.user.text).toBe('Registra a mi gato');
+    expect(t.segments.map((s) => s.kind)).toEqual(['action', 'answer', 'text']);
+    expect(t.segments[1]).toMatchObject({ kind: 'answer', text: 'Llámalo Michi' });
   });
 });

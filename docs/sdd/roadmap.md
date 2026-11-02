@@ -53,8 +53,8 @@ en orden, no en paralelo: casi todas tocan el núcleo del motor (`PlanCompiler`,
 | 045 Endurecimiento 7 (auditoría 8) | Implementado ([spec](specs/045-endurecimiento-7/spec.md)) |
 | 046 Acompañante (motor) | Implementado ([spec](specs/046-acompanante/spec.md)) |
 | 047 Acompañante: panel lateral con avatar | Implementado ([spec](specs/047-acompanante-panel/spec.md)) |
-| 048 Acompañante 2: permiso en la conversación y de dónde sale cada campo | Siguiente (decisión del dueño, 2026-11-02: antes de la auditoría 9) |
-| Auditoría 9 (045–048) | Tras la 048 |
+| 048 Acompañante 2: permiso en la conversación y de dónde sale cada campo | Implementado ([spec](specs/048-acompanante-permiso/spec.md)) |
+| Auditoría 9 (045–048) | **Siguiente** |
 
 ## Diagnóstico
 | Brecha señalada | Situación actual | Spec |
@@ -405,7 +405,7 @@ ya marcados) y sus hallazgos se vuelven una spec de endurecimiento.
 | 2026-10-27, auditoría 6 (origen de la 034), al cerrar la 033 | 031–033 | 7 defectos (1 alto: quien administra usuarios cambiaba la contraseña o desactivaba al superusuario) y huecos del catálogo de Studio antes del MCP; R-009-1 y R-032-6 confirmados |
 | 2026-10-31, auditoría 7, al cerrar la 039 (servidor MCP, flujo SSE y multi-turno de Studio, reportes a dos saltos) | 034–039 | 12 defectos (1 medio: el registro dinámico del MCP se agota —con direcciones IPv6 sin cuenta, o para siempre con una cuenta, porque los clientes que tuvieron conexión no se barren— y bloquea conexiones nuevas; 11 bajos: tope de pendientes por dirección detrás de un proxy, cola de Studio que vence sesiones en un solo lote, `RenewSeconds` sin relación con `LeaseSeconds`, salidas de `datos` sin purgar si el servidor no vuelve, conversación que cambia de empresa, tope de uniones de la 039 que no existe, «#id» en lugar de «(sin acceso)», canario sin reportes a dos saltos, entre otros) y 3 observaciones. Sin fugas ni escaladas verificadas; los 25 riesgos marcados siguen abiertos. Propone la **040 — Endurecimiento 6**; el dueño la puso antes de los reportes personales (2026-10-31), que pasan a la 041, Ventas a la 042 y MCP 2 a la 043 |
 | 2026-11-01, auditoría 8, al cerrar la 044 (registro dinámico endurecido, reportes y tableros personales con reparto, Ventas, copia aislada por conexión MCP con su barrido, escrituras con clave y propuestas por MCP) | 040–044 | 11 defectos (1 alto: explorar o reportar sobre las partidas de un documento salta un campo de partidas oculto —el motor las oculta en el registro, OData, la bitácora y las fórmulas, pero los reportes solo piden leer el documento—, desde la 007 y al alcance de cualquier usuario desde la 041; 1 medio: el vendedor crea un cliente sin límite de crédito, que no puede fijar, y confirma a crédito sin tope; 9 bajos: «Público en general» editable por todo vendedor, borrar el pedido de una cotización aceptada, un campo único que revela registros fuera de alcance, exportar reportes sin bitácora, compartidos sin tope, tres en las claves y la copia del MCP y una carrera del barrido del registro) y 3 observaciones ([detalle](#045--endurecimiento-7-auditoría-8-propuesta)). Las correcciones de la 040 se sostienen; el oráculo por campo oculto de R-043-6 no se reproduce en ningún camino. Propone la **045 — Endurecimiento 7**; el dueño decide su lugar |
-| **Siguiente: auditoría 9**, adelantada al cerrar la 046 (el Acompañante agrega un punto de entrada —`/api/companion`—, un trabajo asíncrono —su cola y su barrido— y delegación: un agente que escribe con los permisos de la persona cuando ella confirma, ADR-0010). Se recomendaba antes de la 047; el dueño decidió (2026-11-01) cerrar primero la 047 y (2026-11-02) también la 048, que cambia el motor del Acompañante, así que **cubre 045–048** | 045–048 | Pendiente |
+| **Siguiente: auditoría 9** (tras cerrar la 048), adelantada al cerrar la 046 (el Acompañante agrega un punto de entrada —`/api/companion`—, un trabajo asíncrono —su cola y su barrido— y delegación: un agente que escribe con los permisos de la persona cuando ella confirma, ADR-0010). Se recomendaba antes de la 047; el dueño decidió (2026-11-01) cerrar primero la 047 y (2026-11-02) también la 048, que cambia el motor del Acompañante, así que **cubre 045–048** | 045–048 | Pendiente |
 
 La auditoría 5 (adelantada, sobre la 029) confirmó que las 139 rutas conservan una capacidad igual o más estricta y
 encontró que la regla «lo vivo con el alcance de quien lo ve» de la 029 no llegaba a la importación, a las transiciones ni
@@ -695,7 +695,9 @@ En este orden, por decisión del dueño (2026-10-25):
     chat de Studio con el mismo código (`useAgentChat`, compositor, texto en vivo, herramientas con nombres para personas),
     tarjetas de confirmación (vista previa del servidor aparte de la explicación del modelo, huella, avisos con 428, descartar y
     sus estados) y el contexto de la pantalla actual en cada mensaje. Sin rutas nuevas.
-    **048 — Acompañante 2: permiso en la conversación** (prueba del dueño, 2026-11-02: con Gatos el Acompañante no supo que
+    ~~**048 — Acompañante 2: permiso en la conversación**~~ Implementado ([spec](specs/048-acompanante-permiso/spec.md),
+    [verify](specs/048-acompanante-permiso/verify.md); en IMPLEMENT el dueño sumó `buscar_en_el_sistema` y el avatar solo con la
+    cara) (prueba del dueño, 2026-11-02: con Gatos el Acompañante no supo que
     la propuesta ya se había aplicado y dijo que «Vacunado» era una casilla normal, aunque no es editable y la llena la
     automatización «Marcar al gato como vacunado» al crear una *Vacuna aplicada*). Decisiones del dueño: (1) la confirmación
     funciona como los permisos de Claude: el turno se detiene en la propuesta («esperando tu respuesta»), la persona responde
@@ -707,7 +709,7 @@ En este orden, por decisión del dueño (2026-10-25):
     los asignan. (3) El rechazo de un campo no editable al proponer dice de dónde sale. (4) Prompt: creer el resultado del
     sistema y explicar de dónde sale un campo en vez de suponer. Cada punto con su prueba de integración contra el código de
     hoy. Toca el motor de la 046 y la tarjeta de la 047. Pendiente, si se pide: herramienta «¿qué pasa si…?» (qué
-    automatizaciones se disparan al crear, editar o ejecutar algo). Pendiente también: guías paso a paso que señalan el control en pantalla, modo instructor con recorridos,
+    automatizaciones se disparan al crear, editar o ejecutar algo) y `filledBy` como ayuda en el formulario («lo llena…»). Pendiente también: guías paso a paso que señalan el control en pantalla, modo instructor con recorridos,
     eliminar registros por el Acompañante, unificar el bucle de Studio y el del Acompañante (R-046-1).
 15. **Pólizas en moneda extranjera** (pendiente de la 020).
 16. **Revaluación de existencias** (pendiente de la 020).

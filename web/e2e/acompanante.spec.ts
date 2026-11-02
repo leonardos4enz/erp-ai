@@ -129,6 +129,8 @@ async function openPanel(page: Page) {
 
 /** Empieza una conversación desde la bienvenida (o la nueva conversación) con Enter. */
 async function start(page: Page, text: string) {
+  // Spec 048: una conversación que espera respuesta cuenta como activa; la de una prueba anterior se detiene.
+  if (ana) await stopActive();
   await openPanel(page);
   // La de la cabecera (en el historial hay otra igual, más abajo).
   await panel(page).getByRole('button', { name: 'Nueva conversación', exact: true }).first().click();
@@ -346,7 +348,7 @@ test('H5 CA1 · H3 CA1: vista previa aparte de la explicación, como texto, y el
   await expect(says).toContainText('Según el Acompañante');
   await expect(says).toContainText(HOSTIL);
   expect(await page.evaluate(() => (window as unknown as { __xss?: number }).__xss)).toBeUndefined();
-  await expect(panel(page).getByRole('heading', { name: /Esperando tu confirmación/ })).toBeVisible();
+  await expect(panel(page).getByRole('heading', { name: /Esperando tu respuesta/ })).toBeVisible();
   // Nada cambió todavía.
   expect((await nota(id)).Telefono).toBe('555');
 });
@@ -366,14 +368,18 @@ test('H5 CA2 · CA3: confirmar manda la huella y aplica una vez (doble clic); la
   const confirms: number[] = [];
   page.on('response', (r) => { if (/\/api\/companion\/actions\/\d+\/confirm$/.test(r.url())) confirms.push(r.status()); });
   const hashSent = page.waitForRequest((r) => /\/confirm$/.test(r.url()));
-  await c.getByRole('button', { name: 'Confirmar y aplicar' }).dblclick();
+  await c.getByRole('button', { name: 'Sí, adelante' }).dblclick();
   const body = (await hashSent).postDataJSON() as { hash: string };
   expect(body.hash).toMatch(/^[0-9a-f]{64}$/);
   await expect(c.getByText('Aplicada', { exact: true })).toBeVisible();
-  await expect(c.getByRole('button', { name: 'Confirmar y aplicar' })).toHaveCount(0);
+  await expect(c.getByRole('button', { name: 'Sí, adelante' })).toHaveCount(0);
   await expect(c).toBeFocused();
   expect(confirms).toEqual([200]);
   expect((await nota(id)).Telefono).toBe('200');
+  // Spec 048 (H1 CA4): el turno sigue solo y el modelo recibe «aplicada» como resultado de su propuesta.
+  await expect(log(page).getByText('Listo para que confirmes.')).toBeVisible();
+  const resumed = received.todos().find((r) => r.tag === 'confirmar' && r.turn === 1);
+  expect(resumed?.last).toContain('aplicada');
   // Regresión (revisión exploratoria 047, F-02): con ese registro abierto, «Ver el registro» no hacía nada y la pantalla
   // seguía con el teléfono de antes.
   await expect(page.getByLabel('Teléfono')).toHaveValue('100');
@@ -381,6 +387,52 @@ test('H5 CA2 · CA3: confirmar manda la huella y aplica una vez (doble clic); la
   await expect(page).toHaveURL(new RegExp(`/c/AcE2eNota/${id}$`));
   await expect(page.getByLabel('Teléfono')).toHaveValue('200');
   await expect(card(page, `Propuesta: Editar Nota Acompañante n.º ${id}`).getByText('Aplicada', { exact: true })).toBeVisible();
+});
+
+test('H1 CA2 · H6 CA1 (048): «No, y dile qué cambiar» le llega al Acompañante y el turno sigue', async ({ page }) => {
+  await login(page);
+  const id = await newNota({ Nombre: 'Motivo', Telefono: '1', Monto: 1 });
+  scripts['motivo'] = steps(
+    { blocks: [tool('proponer_accion', { tipo: 'editar', catalogo: 'AcE2eNota', id, valores: { Telefono: '2' }, explicacion: 'x' })] },
+    { blocks: [say('Entendido, no lo cambio.')] },
+  );
+  await start(page, '[guion:motivo] Cambia el teléfono');
+  await idle(page);
+  const c = card(page, `Propuesta: Editar Nota Acompañante n.º ${id}`);
+  await expect(c.getByText('¿Lo hago?')).toBeVisible();
+  received.marca();
+  await c.getByRole('button', { name: 'No, y dile qué cambiar' }).click();
+  const why = c.getByRole('textbox', { name: '¿Qué debe cambiar?' });
+  await expect(why).toBeFocused();
+  await why.fill('Mejor ponle el 3');
+  const res = await tras(page.waitForResponse((r) => /\/discard$/.test(r.url())), () => why.press('Enter'));
+  expect(res.request().postDataJSON()).toEqual({ reason: 'Mejor ponle el 3' });
+  await expect(c.getByText('Descartada', { exact: true })).toBeVisible();
+  await expect(c.getByText('Le dijiste: «Mejor ponle el 3»')).toBeVisible();
+  await expect(log(page).getByText('Entendido, no lo cambio.')).toBeVisible();
+  expect((await received.siguiente((r) => r.tag === 'motivo')).last).toContain('Mejor ponle el 3');
+  expect((await nota(id)).Telefono).toBe('1');
+});
+
+test('H1 CA3 · H6 CA2 · CA3 (048): esperando, el avatar lo dice y escribir es decir que no con ese texto', async ({ page }) => {
+  await login(page);
+  const id = await newNota({ Nombre: 'Escrito', Telefono: '1', Monto: 1 });
+  scripts['escrito'] = steps(
+    { blocks: [tool('proponer_accion', { tipo: 'editar', catalogo: 'AcE2eNota', id, valores: { Telefono: '2' }, explicacion: 'x' })] },
+    { blocks: [say('Va, primero te explico.')] },
+  );
+  await start(page, '[guion:escrito] Cambia el teléfono');
+  await idle(page);
+  await expect(panel(page).getByRole('heading', { name: /Esperando tu respuesta/ })).toBeVisible();
+  await expect(panel(page).getByText('Lo que escribas cuenta como «no» y se lo dice.')).toBeVisible();
+  received.marca();
+  await followUp(page, 'Espera, ¿qué hace este catálogo?');
+  await expect(log(page).getByText('Espera, ¿qué hace este catálogo?')).toBeVisible();
+  await expect(log(page).getByText('Va, primero te explico.')).toBeVisible();
+  const c = card(page, `Propuesta: Editar Nota Acompañante n.º ${id}`);
+  await expect(c.getByText('Descartada', { exact: true })).toBeVisible();
+  expect((await received.siguiente((r) => r.tag === 'escrito')).last).toContain('rechazada');
+  expect((await nota(id)).Telefono).toBe('1');
 });
 
 test('H5 CA2: los avisos piden confirmar otra vez (428) y la transición se aplica', async ({ page }) => {
@@ -395,11 +447,11 @@ test('H5 CA2: los avisos piden confirmar otra vez (428) y la transición se apli
   const c = card(page, `Propuesta: Aprobar: Nota Acompañante n.º ${id}`);
   await expect(c.getByRole('definition').filter({ hasText: 'Aprobada' })).toContainText('Borrador');
   await expect(c.getByText('Revisada')).toBeVisible();
-  const first = await tras(page.waitForResponse((r) => /\/confirm$/.test(r.url())), () => c.getByRole('button', { name: 'Confirmar y aplicar' }).click());
+  const first = await tras(page.waitForResponse((r) => /\/confirm$/.test(r.url())), () => c.getByRole('button', { name: 'Sí, adelante' }).click());
   expect(first.status()).toBe(428);
   await expect(c.getByRole('alert')).toContainText(AVISO);
   expect((await nota(id))._workflow).toMatchObject({ state: 'Borrador' });
-  const second = await tras(page.waitForResponse((r) => /\/confirm$/.test(r.url())), () => c.getByRole('button', { name: 'Confirmar con los avisos' }).click());
+  const second = await tras(page.waitForResponse((r) => /\/confirm$/.test(r.url())), () => c.getByRole('button', { name: 'Sí, con los avisos' }).click());
   expect(second.status()).toBe(200);
   expect(((second.request().postDataJSON()) as { acceptWarnings: string[] }).acceptWarnings).toEqual([AVISO]);
   await expect(c.getByText('Aplicada', { exact: true })).toBeVisible();
@@ -423,7 +475,13 @@ test('H5 CA2 · CA3: un rechazo se muestra en la tarjeta y descartar la cierra',
   const put = await ana.put(`/api/data/AcE2eNota/${id}`, { data: { Nombre: 'Cambiada', Telefono: '9', Monto: 1, _rowVersion: cur._rowVersion } });
   expect(put.status(), await put.text()).toBe(200);
   const first = cards.nth(0);
-  const res = await tras(page.waitForResponse((r) => /\/confirm$/.test(r.url())), () => first.getByRole('button', { name: 'Confirmar y aplicar' }).click());
+  // Spec 048 (H6 CA1): una por una; la segunda espera su turno.
+  await expect(first.getByText('Propuesta 1 de 2')).toBeVisible();
+  // Revisión exploratoria 048 (F-01): «Propuesta 1 de 2» en la cabecera aplastaba el título a una columna.
+  expect((await first.locator('.cmp-action-title').boundingBox())!.width).toBeGreaterThan(100);
+  await expect(cards.nth(1).getByText('En espera: te la pregunto cuando decidas la anterior.')).toBeVisible();
+  await expect(cards.nth(1).getByRole('button', { name: 'Sí, adelante' })).toHaveCount(0);
+  const res = await tras(page.waitForResponse((r) => /\/confirm$/.test(r.url())), () => first.getByRole('button', { name: 'Sí, adelante' }).click());
   expect(res.status()).toBe(409);
   await expect(first.getByRole('alert')).toBeVisible();
   await expect(first.getByText('No se aplicó', { exact: true })).toBeVisible();
@@ -432,9 +490,9 @@ test('H5 CA2 · CA3: un rechazo se muestra en la tarjeta y descartar la cierra',
   expect((await nota(id)).Telefono).toBe('9');
   // Descartar la otra.
   const second = cards.nth(1);
-  await second.getByRole('button', { name: 'Descartar' }).click();
+  await second.getByRole('button', { name: 'No', exact: true }).click();
   await expect(second.getByText('Descartada', { exact: true })).toBeVisible();
-  await expect(second.getByRole('button', { name: 'Confirmar y aplicar' })).toHaveCount(0);
+  await expect(second.getByRole('button', { name: 'Sí, adelante' })).toHaveCount(0);
   expect((await nota(id)).Nombre).toBe('Cambiada');
 });
 
@@ -452,14 +510,14 @@ test('Regresión (revisión adversarial 047, F-01 · F-02): sin respuesta al con
   // F-02: la relectura del estado del panel falla: antes reemplazaba la conversación por «No se pudo cargar el Acompañante».
   await page.route(/\/api\/companion\/actions\/\d+\/confirm$/, (route) => route.abort());
   await page.route(/\/api\/companion$/, (route) => route.fulfill({ status: 503, contentType: 'application/problem+json', body: JSON.stringify({ title: 'No disponible', status: 503 }) }));
-  await c.getByRole('button', { name: 'Confirmar y aplicar' }).click();
+  await c.getByRole('button', { name: 'Sí, adelante' }).click();
   await expect(c.getByRole('alert')).toContainText('no sabemos si se aplicó');
   await expect(log(page)).toBeVisible();
   await expect(panel(page).getByText('No se pudo cargar el Acompañante')).toHaveCount(0);
   expect((await nota(id)).Telefono).toBe('10');
   await page.unroute(/\/api\/companion\/actions\/\d+\/confirm$/);
   await page.unroute(/\/api\/companion$/);
-  await c.getByRole('button', { name: 'Confirmar y aplicar' }).click();
+  await c.getByRole('button', { name: 'Sí, adelante' }).click();
   await expect(c.getByText('Aplicada', { exact: true })).toBeVisible();
   expect((await nota(id)).Telefono).toBe('20');
 });
@@ -489,7 +547,7 @@ test('H5 CA3: aplicándose, caducó y «sin confirmar si se aplicó» se dicen e
     await page.reload();
     const c = card(page, `Propuesta: Editar Nota Acompañante n.º ${id}`);
     await expect(c.getByText(label, { exact: true })).toBeVisible();
-    await expect(c.getByRole('button', { name: 'Confirmar y aplicar' })).toHaveCount(0);
+    await expect(c.getByRole('button', { name: 'Sí, adelante' })).toHaveCount(0);
     if (extra) await expect(c.getByText(extra)).toBeVisible();
     if (status === 'unknown') await expect(c.getByRole('link', { name: 'Revisar el registro' })).toBeVisible();
     await page.unroute(/\/api\/companion\/conversations\/\d+(\?.*)?$/);

@@ -828,7 +828,7 @@ export type StudioPlanStatus = 'proposed' | 'applied' | 'discarded';
 export interface StudioStep {
   /** Spec 036: `user` es un mensaje de la persona (`output.text`); `turn`, el turno de la conversación. Spec 046: `action`, una
    *  propuesta del Acompañante (`output.accion`, su id). */
-  seq: number; kind: 'user' | 'text' | 'tool' | 'deliver' | 'action' | 'limit' | 'error'; tool?: string | null; status: 'ok' | 'error' | 'denied';
+  seq: number; kind: 'user' | 'answer' | 'text' | 'tool' | 'deliver' | 'action' | 'limit' | 'error'; tool?: string | null; status: 'ok' | 'error' | 'denied';
   summary: string; input?: unknown; output?: unknown; durationMs: number; at: string; turn?: number;
 }
 export interface StudioTest { description: string; ok: boolean; detail?: string | null }
@@ -920,7 +920,8 @@ export interface CompanionLimits { maxPromptChars: number; maxTurns: number; max
 export interface CompanionStatus {
   available: boolean; reason?: string | null; limits: CompanionLimits; conversationsToday: number; costTodayUsd: number; activeId?: number | null;
 }
-export type CompanionConversationStatus = 'queued' | 'running' | 'answered' | 'failed' | 'cancelled' | 'interrupted';
+/** Spec 048: `waiting` = el turno se detuvo en una propuesta y espera tu respuesta. */
+export type CompanionConversationStatus = 'queued' | 'running' | 'waiting' | 'answered' | 'failed' | 'cancelled' | 'interrupted';
 /** Lo que la persona está viendo (el servidor lo revalida con su alcance). */
 export interface CompanionScreen { entity: string; id?: number | null }
 export interface CompanionSummary {
@@ -939,6 +940,8 @@ export interface CompanionPreview {
 export interface CompanionAction {
   id: number; kind: CompanionActionKind; entity: string; entityLabel: string; recordId?: number | null; preview?: CompanionPreview | null;
   hash: string; status: CompanionActionStatus; error?: string | null; result?: { recordId?: number | null } | null; createdAt: string; decidedAt?: string | null;
+  /** Spec 048: lo que la persona le dijo al decir que no. */
+  reason?: string | null;
 }
 export interface CompanionConversation {
   id: number; title: string; status: CompanionConversationStatus; error?: string | null; turns: number; steps: number; costUsd: number;

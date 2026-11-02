@@ -40,7 +40,6 @@ const POSE: Record<AvatarState, Pose> = {
   error: { ...SAD, fdy: 3.4, frot: -3, sag: 0.035, brP: 6400, blush: 0 },
 };
 const NUM_KEYS = (Object.keys(BASE) as (keyof Pose)[]).filter((k): k is NumKey => k !== 'L');
-const STATES = Object.keys(POSE) as AvatarState[];
 
 const lerp = (a: number, b: number, k: number) => a + (b - a) * k;
 const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
@@ -120,7 +119,7 @@ class Eyes {
   private read = { x: -0.62, line: 0 }; private arcA = -1.6; private arcDir = 1;
   private cache = new Map<Element, Record<string, string>>();
 
-  constructor(readonly svg: SVGSVGElement, private head: SVGGElement, private blushG: SVGGElement, private eyes: EyeEls[], private accs: SVGGElement[]) {
+  constructor(readonly svg: SVGSVGElement, private head: SVGGElement, private blushG: SVGGElement, private eyes: EyeEls[]) {
     this.visible = !io;
   }
 
@@ -152,7 +151,6 @@ class Eyes {
     this.nextHop = Infinity;
     this.read = { x: -0.62, line: 0 };
     this.svg.setAttribute('data-state', state);
-    for (const a of this.accs) a.classList.toggle('on', a.dataset.s === state);
     if (engine.reduce) return;
     switch (state) {
       case 'waiting': this.hop(2, 6); this.nextHop = t + rand(2400, 3200); break; // pide atención, como «atencion»
@@ -329,30 +327,9 @@ class Eyes {
 const SQUIRCLE = 'M50 3C84 3 97 16 97 50C97 84 84 97 50 97C16 97 3 84 3 50C3 16 16 3 50 3Z';
 let uid = 0;
 
-/** Accesorios en una caja local de 32×32, arriba a la derecha de la cara (los de la flota que corresponden a cada estado). */
-function Accessory({ s }: { s: AvatarState }) {
-  switch (s) {
-    case 'thinking': // libreta que se escribe («planificando»)
-      return (<><rect x="6" y="3" width="22" height="27" rx="2" /><path className="thin" d="M3 8h5M3 14h5M3 20h5M3 26h5" />
-        <path className="ln ln1" d="M11 10h13" /><path className="ln ln2" d="M11 16h13" /><path className="ln ln3" d="M11 22h8" /></>);
-    case 'tool': // llave («arreglo»)
-      return <g className="wr"><path d="M27.9 9A6 6 0 1 1 23 4.1" /><path className="thick" d="M17.8 14.2L6 26" /></g>;
-    case 'waiting': // globo con «!» («atencion»)
-      return (<g className="pop"><path d="M5 3h22a3 3 0 0 1 3 3v13a3 3 0 0 1-3 3H14l-6 5.5V22H5a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3z" />
-        <path className="thick" d="M16 7.5v7" /><circle className="fill" cx="16" cy="18.2" r="1.5" /></g>);
-    case 'done': // palomita que se dibuja
-      return <path className="chk" d="M5 17l7 7L28 7" />;
-    case 'error': // nube con gotas («fallo»)
-      return (<><path className="cloud" d="M9 21a5 5 0 0 1 .8-9.9 7 7 0 0 1 13.5 1.6A4.2 4.2 0 0 1 24 21z" />
-        <path className="drop d1" d="M12 24.5v3" /><path className="drop d2" d="M17 24.5v3" /><path className="drop d3" d="M22 24.5v3" /></>);
-    default:
-      return null;
-  }
-}
-
 /**
- * H3: la cara del Acompañante. Decorativa (`aria-hidden`): quien la usa anuncia el estado en texto. `size` < 48 usa la caja
- * ajustada y no muestra accesorios.
+ * H3: la cara del Acompañante. Decorativa (`aria-hidden`): quien la usa anuncia el estado en texto. Spec 048 (pedido del
+ * dueño): solo la cara, sin los accesorios de la flota sobre la cabeza; el estado lo dicen los ojos y el texto.
  */
 export function CompanionAvatar({ state, size = 40 }: { state: AvatarState; size?: number }) {
   const idRef = useRef<string>('');
@@ -368,8 +345,7 @@ export function CompanionAvatar({ state, size = 40 }: { state: AvatarState; size
     const e = new Eyes(root, q<SVGGElement>('.cmp-av-head'), q<SVGGElement>('.cmp-av-blush'),
       [...root.querySelectorAll<SVGGElement>('.cmp-av-eye')].map((g) => ({
         side: Number(g.dataset.side), g, lid: g.querySelector('.cmp-av-lid')!, pill: g.querySelector('.cmp-av-pill')!, line: g.querySelector('.cmp-av-line')!,
-      })),
-      [...root.querySelectorAll<SVGGElement>('.cmp-av-acc')]);
+      })));
     eyes.current = e;
     engine.items.add(e);
     bind();
@@ -405,7 +381,7 @@ export function CompanionAvatar({ state, size = 40 }: { state: AvatarState; size
   );
 
   return (
-    <svg ref={svg} className="cmp-av" width={size} height={size} viewBox={small ? '-1 -1 102 102' : '-20 -26 140 140'}
+    <svg ref={svg} className="cmp-av" width={size} height={size} viewBox={small ? '-1 -1 102 102' : '-8 -10 116 116'}
       aria-hidden="true" focusable="false" data-state={state} data-small={small || undefined}>
       <defs>
         <linearGradient id={`${id}-hl`} x1="0" y1="0" x2="0" y2="1">
@@ -435,11 +411,6 @@ export function CompanionAvatar({ state, size = 40 }: { state: AvatarState; size
         </g>
         <g>{eye(-1)}{eye(1)}</g>
       </g>
-      {!small && (
-        <g className="cmp-av-accs" transform="translate(88 -24)">
-          {STATES.map((s) => <g key={s} className="cmp-av-acc" data-s={s}><Accessory s={s} /></g>)}
-        </g>
-      )}
     </svg>
   );
 }

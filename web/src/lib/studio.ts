@@ -99,7 +99,9 @@ export type Segment =
   | { kind: 'deliver'; seq: number; step: StudioStep; delivery: Delivery }
   | { kind: 'notice'; step: StudioStep }
   /** Spec 047: una acción que el Acompañante propuso (`output.accion`); la tarjeta se arma con la acción de la conversación. */
-  | { kind: 'action'; seq: number; step: StudioStep; action: number | null };
+  | { kind: 'action'; seq: number; step: StudioStep; action: number | null }
+  /** Spec 048: lo que la persona escribió mientras el turno esperaba (su «no» con ese texto). */
+  | { kind: 'answer'; seq: number; text: string; at: string | null };
 
 export interface Turn { turn: number; user: { seq: number | null; text: string; at: string | null }; segments: Segment[]; steps: StudioStep[] }
 
@@ -153,6 +155,9 @@ export function groupTurns(trail: StudioStep[], prompt: string): Turn[] {
       t.segments.push({ kind: 'text', seq: step.seq, text: typeof text === 'string' ? text : step.summary });
     } else if (step.kind === 'deliver') {
       t.segments.push({ kind: 'deliver', seq: step.seq, step, delivery: deliveryOf(step) });
+    } else if (step.kind === 'answer') {
+      const text = (step.output as { text?: unknown } | undefined)?.text;
+      t.segments.push({ kind: 'answer', seq: step.seq, text: typeof text === 'string' ? text : step.summary, at: step.at ?? null });
     } else if (step.kind === 'action') {
       const id = (step.output as { accion?: unknown } | undefined)?.accion;
       t.segments.push({ kind: 'action', seq: step.seq, step, action: typeof id === 'number' ? id : null });

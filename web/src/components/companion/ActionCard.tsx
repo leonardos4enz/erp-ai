@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { ArrowRight, ArrowRightLeft, CircleAlert, ExternalLink, FilePen, FilePlus, MessageSquareQuote, ShieldCheck, X } from 'lucide-react';
+import { ArrowRight, ArrowRightLeft, CircleAlert, ExternalLink, FilePen, FilePlus, MessageSquareQuote, MessageSquareReply, Send, ShieldCheck, X } from 'lucide-react';
 import { ApiError } from '../../api/client';
 import { companionApi } from '../../api/endpoints';
 import type { CompanionAction } from '../../api/types';
@@ -15,8 +15,12 @@ const KIND_ICON = { create: FilePlus, update: FilePen, transition: ArrowRightLef
  * antes → después; transición, desde → hacia) y se pinta como texto; lo que dijo el modelo va aparte, marcado como suyo
  * (046 F-03, R-046-2). Confirmar manda la huella de lo que se ve; un 428 muestra los avisos y pide confirmar otra vez.
  */
-export function ActionCard({ action, entityLabel, onChanged }: {
+export function ActionCard({ action, entityLabel, onChanged, asking = true, position = null }: {
   action: CompanionAction | undefined; entityLabel: (entity: string, fallback: string) => string;
+  /** Spec 048 (H6 CA1): es la propuesta que se pregunta ahora (las demás pendientes esperan su turno). */
+  asking?: boolean;
+  /** «Propuesta 1 de 3» cuando hay varias pendientes. */
+  position?: string | null;
   /** La acción cambió (o puede haber cambiado): el panel relee la conversación. */
   onChanged: (a?: CompanionAction) => void;
 }) {
@@ -24,7 +28,11 @@ export function ActionCard({ action, entityLabel, onChanged }: {
   const [busy, setBusy] = useState<'confirm' | 'discard' | null>(null);
   const [warnings, setWarnings] = useState<string[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** Spec 048: «No, y dile qué cambiar» abre un campo para el motivo. */
+  const [why, setWhy] = useState<string | null>(null);
+  const whyRef = useRef<HTMLTextAreaElement>(null);
   const card = useRef<HTMLElement>(null);
+  useEffect(() => { if (why === '') whyRef.current?.focus(); }, [why === '']);
   /** Tras decidir, los botones desaparecen: el foco pasa a la tarjeta (no a body, guardia de la 030). */
   const refocus = useRef(false);
   const transition = useRef<string | null>(null);
@@ -75,12 +83,13 @@ export function ActionCard({ action, entityLabel, onChanged }: {
     } finally { setBusy(null); }
   }
 
-  async function discard() {
+  async function discard(reason?: string) {
     setBusy('discard');
     setError(null);
     try {
-      const d = await companionApi.discard(a.id);
+      const d = await companionApi.discard(a.id, reason?.trim() || undefined);
       setWarnings(null);
+      setWhy(null);
       refocus.current = true;
       onChanged(d);
     } catch (e) {
@@ -97,7 +106,8 @@ export function ActionCard({ action, entityLabel, onChanged }: {
         <p className="cmp-action-title">{v.title}</p>
         <Badge tone={v.status.tone}>{v.status.label}</Badge>
       </div>
-      {(p || v.message || error || warnings) && (
+      {position && a.status === 'proposed' && <p className="cmp-action-pos">{position}</p>}
+      {(p || v.message || error || warnings || (a.status === 'discarded' && a.reason)) && (
         <div className="cmp-action-body">
           {p?.tipo === 'transition' && (
             <dl className="cmp-changes" aria-label="Cambio de estado">
@@ -130,6 +140,9 @@ export function ActionCard({ action, entityLabel, onChanged }: {
               <p>{p.segunElAcompanante}</p>
             </blockquote>
           )}
+          {a.status === 'discarded' && a.reason && (
+            <p className="cmp-action-reason"><MessageSquareReply size={14} aria-hidden /> <span>Le dijiste: «{a.reason}»</span></p>
+          )}
           {v.message && <p className="cmp-action-msg"><CircleAlert size={14} aria-hidden /> <span>{v.message}</span></p>}
           {warnings && (
             <div className="alert alert-warning" role="alert">
@@ -148,14 +161,38 @@ export function ActionCard({ action, entityLabel, onChanged }: {
           )}
         </div>
       )}
-      {(v.canDecide || v.recordLink) && (
+      {v.canDecide && !asking && (
+        <div className="cmp-action-foot">
+          <p className="cmp-action-note">En espera: te la pregunto cuando decidas la anterior.</p>
+        </div>
+      )}
+      {v.canDecide && asking && why !== null && (
+        // Spec 048 (H1 CA2): el motivo le llega al Acompañante como tus palabras y el turno sigue.
+        <form className="cmp-action-why" onSubmit={(e) => { e.preventDefault(); void discard(why); }}>
+          <label htmlFor={`cmp-why-${a.id}`}>¿Qué debe cambiar?</label>
+          <textarea id={`cmp-why-${a.id}`} ref={whyRef} rows={2} value={why} maxLength={2000}
+            placeholder="Por ejemplo: llámalo Michi, no Garfield"
+            onChange={(e) => setWhy(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setWhy(null); card.current?.focus({ preventScroll: true }); }
+              if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); if (why.trim()) void discard(why); }
+            }} />
+          <div className="cmp-action-why-foot">
+            <Button size="sm" type="button" onClick={() => { setWhy(null); card.current?.focus({ preventScroll: true }); }} disabled={busy !== null}>Cancelar</Button>
+            <Button size="sm" variant="primary" type="submit" icon={Send} disabled={!why.trim() || busy === 'confirm'} loading={busy === 'discard'}>Enviar</Button>
+          </div>
+        </form>
+      )}
+      {((v.canDecide && asking && why === null) || (!v.canDecide && v.recordLink)) && (
         <div className="cmp-action-foot">
           {v.canDecide ? (
             <>
-              <p className="cmp-action-note">Nada cambia hasta que confirmes. Se aplica con tus permisos.</p>
-              <Button size="sm" icon={X} onClick={() => void discard()} disabled={busy === 'confirm'} loading={busy === 'discard'}>Descartar</Button>
+              {/* Spec 048 (H6 CA1): como los permisos de Claude Code: una pregunta y tres respuestas. */}
+              <p className="cmp-action-ask">¿Lo hago? <span className="cmp-action-note">Nada cambia si no dices que sí. Se aplica con tus permisos.</span></p>
+              <Button size="sm" icon={MessageSquareReply} onClick={() => setWhy('')} disabled={busy !== null}>No, y dile qué cambiar</Button>
+              <Button size="sm" icon={X} onClick={() => void discard()} disabled={busy === 'confirm'} loading={busy === 'discard'}>No</Button>
               <Button size="sm" variant="primary" icon={ShieldCheck} onClick={() => void confirm()} disabled={busy === 'discard'} loading={busy === 'confirm'}>
-                {warnings ? 'Confirmar con los avisos' : 'Confirmar y aplicar'}
+                {warnings ? 'Sí, con los avisos' : 'Sí, adelante'}
               </Button>
             </>
           ) : (

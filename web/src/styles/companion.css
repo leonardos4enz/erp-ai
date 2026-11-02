@@ -20,41 +20,10 @@
 .cmp-av-head { transition: filter 0.9s ease; }
 .cmp-av[data-state="idle"] .cmp-av-head { filter: saturate(0.55) brightness(1.06); }
 
-.cmp-av-acc { opacity: 0; transform: translate(0, 5px) scale(0.5); transform-box: fill-box; transform-origin: 30% 80%;
-  transition: opacity 0.22s ease, transform 0.55s cubic-bezier(0.3, 1.7, 0.5, 1); }
-.cmp-av-acc.on { opacity: 1; transform: none; }
-.cmp-av-acc * { fill: none; stroke: var(--cmp-fc); stroke-width: 2.3; stroke-linecap: round; stroke-linejoin: round;
-  transition: stroke 0.7s ease; transform-box: fill-box; transform-origin: center; }
-.cmp-av-acc g { stroke: none; }
-.cmp-av-acc .thin { stroke-width: 1.4; opacity: 0.7; }
-.cmp-av-acc .thick { stroke-width: 3.2; }
-.cmp-av-acc .fill { fill: var(--cmp-fc); stroke: none; }
 .cmp-av[data-paused] * { animation-play-state: paused !important; }
 
-/* Accesorios animados: solo el visible. */
-.cmp-av-acc:not(.on) * { animation: none !important; }
-.cmp-av .ln { stroke-dasharray: 14; stroke-dashoffset: 14; animation: cmp-write 3.2s ease-in-out infinite; }
-.cmp-av .ln2 { animation-delay: 0.5s; }
-.cmp-av .ln3 { animation-delay: 1s; }
-@keyframes cmp-write { 0% { stroke-dashoffset: 14; } 30%, 80% { stroke-dashoffset: 0; opacity: 1; } 100% { stroke-dashoffset: 0; opacity: 0; } }
-.cmp-av .wr { transform-origin: 30% 70%; animation: cmp-wrench 1.5s ease-in-out infinite alternate; }
-@keyframes cmp-wrench { from { transform: rotate(-16deg); } to { transform: rotate(18deg); } }
-.cmp-av .pop { transform-origin: 30% 100%; animation: cmp-pop 2.8s cubic-bezier(0.3, 1.8, 0.5, 1) infinite; }
-@keyframes cmp-pop { 0%, 60%, 100% { transform: scale(1) rotate(0); } 66% { transform: scale(1.18) rotate(-6deg); } 74% { transform: scale(1) rotate(4deg); } }
-.cmp-av .chk { stroke-width: 3; stroke-dasharray: 34; stroke-dashoffset: 34; animation: cmp-draw 0.7s ease-out 0.15s forwards; }
-@keyframes cmp-draw { to { stroke-dashoffset: 0; } }
-.cmp-av .cloud { animation: cmp-drift 3.6s ease-in-out infinite alternate; }
-@keyframes cmp-drift { from { transform: translateX(-1.5px); } to { transform: translateX(1.5px); } }
-.cmp-av .drop { stroke-width: 1.6; opacity: 0; animation: cmp-drop 1.4s ease-in infinite; }
-.cmp-av .d2 { animation-delay: 0.45s; }
-.cmp-av .d3 { animation-delay: 0.9s; }
-@keyframes cmp-drop { 0% { transform: translateY(-2px); opacity: 0; } 25% { opacity: 0.9; } 100% { transform: translateY(5px); opacity: 0; } }
-
+/* Spec 048 (pedido del dueño): solo la cara; sin indicadores sobre la cabeza. */
 @media (prefers-reduced-motion: reduce) {
-  .cmp-av-acc, .cmp-av-acc * { animation: none !important; transition: opacity 0.2s linear !important; }
-  .cmp-av-acc:not(.on) { transform: none; }
-  .cmp-av .ln, .cmp-av .chk { stroke-dashoffset: 0; }
-  .cmp-av .drop { opacity: 0.7; }
   .cmp-av-head { transition: none; }
 }
 
@@ -153,6 +122,19 @@
 .cmp-action-note { flex-basis: 100%; margin: 0; font-size: var(--text-xs); color: var(--text-subtle); }
 .cmp-action-msg { display: flex; align-items: flex-start; gap: 6px; margin: 0; font-size: var(--text-sm); color: var(--text-muted); overflow-wrap: anywhere; }
 .cmp-action-msg > svg { flex-shrink: 0; margin-top: 2px; }
+/* Spec 048: la tarjeta pregunta («¿Lo hago?») como los permisos de Claude Code; el motivo del «no» se escribe en ella. */
+.cmp-action-ask { flex-basis: 100%; display: flex; flex-direction: column; gap: 2px; margin: 0 0 var(--space-1); font-size: var(--text-sm); font-weight: 600; color: var(--text); }
+.cmp-action-ask .cmp-action-note { font-weight: 400; }
+/* Revisión exploratoria 048 (F-01): en su propia línea, bajo el título (en la cabecera aplastaba el título a una columna). */
+.cmp-action-pos { margin: calc(-1 * var(--space-2)) 0 0; padding: 0 var(--space-3) var(--space-2) calc(var(--space-3) + 16px + var(--space-2)); font-size: var(--text-xs); color: var(--text-subtle); }
+.cmp-action-reason { display: flex; align-items: flex-start; gap: 6px; margin: 0; font-size: var(--text-sm); color: var(--text-muted); overflow-wrap: anywhere; }
+.cmp-action-reason > svg { flex-shrink: 0; margin-top: 2px; }
+.cmp-action-why { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-2) var(--space-3); border-top: 1px solid var(--border); background: var(--surface-2); }
+.cmp-action-why label { font-size: var(--text-sm); font-weight: 500; }
+.cmp-action-why textarea { width: 100%; resize: vertical; min-height: 56px; padding: var(--space-2); border: 1px solid var(--border-strong); border-radius: var(--radius-md); background: var(--surface); color: var(--text); font: inherit; font-size: var(--text-sm); }
+.cmp-action-why textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.cmp-action-why-foot { display: flex; justify-content: flex-end; gap: var(--space-2); }
+.cmp-waiting-note { margin: 0; font-size: var(--text-xs); color: var(--text-subtle); }
 
 /* ---------- Pantallas angostas: el panel flota sobre el contenido (H1 CA1) ---------- */
 .cmp-backdrop { display: none; }
