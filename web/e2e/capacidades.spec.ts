@@ -126,6 +126,8 @@ test('H6 CA2 (UI): si el modelo cambió, el diálogo avisa y vuelve a calcular l
   test.skip(mods.find((m) => m.id === 'compras')!.installed, 'Compras ya está instalado (otro archivo corrió antes)');
   let previews = 0;
   page.on('request', (r) => { if (r.url().endsWith('/api/admin/modules/compras/preview')) previews++; });
+  // Regresión (CI de `d422553`, R-030-5): al recalcular la vista previa tras el 409, «Instalar módulo» se deshabilitaba con el
+  // foco encima y la guardia veía el foco en body (intermitente en el runner; reproducida en local con `--veces=3 --lento`).
   await page.goto('/admin/modules');
   await page.getByRole('button', { name: 'Instalar Compras' }).click();
   const dialog = page.getByRole('dialog');

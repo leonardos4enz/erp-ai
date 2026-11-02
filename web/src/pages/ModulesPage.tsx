@@ -125,7 +125,9 @@ function ModuleDialog({ module: m, mode, onClose, onDone }: { module: ModuleInfo
       footer={
         <>
           <Button onClick={onClose} disabled={busy}>Cancelar</Button>
-          <Button variant="primary" icon={upgrade ? ArrowUpCircle : Download} loading={busy} disabled={!preview?.valid || loading} onClick={apply}>
+          {/* CI de la 046 (R-030-5): tras un 409 la vista previa se vuelve a calcular; con `disabled` el botón enfocado soltaba
+              el foco a body mientras cargaba. Queda `loading` (enfocable, ignora clics) con la vista previa anterior a la vista. */}
+          <Button variant="primary" icon={upgrade ? ArrowUpCircle : Download} loading={busy || (loading && !!preview)} disabled={!preview?.valid || (loading && !preview)} onClick={apply}>
             {upgrade ? 'Actualizar módulo' : 'Instalar módulo'}
           </Button>
         </>

@@ -5,7 +5,7 @@
 - cierre: 2026-11-01 23:58
 - unitarias: 764 (+7)
 - e2e: 468 (+0; `canario.spec.ts` recorre la ruta nueva de confirmar)
-- corridas completas: 1 (11 min 21 s; 462 en verde, 1 roja por la guardia del canario, 5 sin correr tras ella)
+- corridas completas: 2 (11 min 21 s; 462 en verde, 1 roja por la guardia del canario, 5 sin correr tras ella); la segunda completa fue CI en `main` (`d422553`), en rojo por una intermitente ajena a la 046 (`capacidades › H6 CA2 (UI)`), corregida en el commit siguiente (ver §2)
 - corridas parciales: 4 (`canario.spec.ts --veces=3`, 42 s; `CompanionTests` ×3, 45 s cada una; regresiones contra las correcciones revertidas)
 - contra el código anterior: 1 (las cuatro `Regresion_F0x` con las correcciones revertidas a mano: el código anterior no está publicado)
 - hallazgos: 0/3/6 (revisión adversarial F-01…F-08 y la guardia de la bitácora)
@@ -40,6 +40,14 @@
 La guardia del canario hizo su trabajo: toda ruta que escribe datos y que el lector puede llamar debe recorrerse. El canario E2E
 la llama con acciones ajenas o inexistentes (404 sin datos); el canario con acciones reales está en integración. La segunda
 corrida completa es la de CI. Sin pantalla nueva: no hay capturas que cambien (la pantalla es de la 047).
+
+**CI de `d422553`** ([corrida 40](https://github.com/leonardos4enz/erp-ai/actions/runs/41396746839)): unitarias, build, Vitest e
+integración en verde; la E2E falló en `capacidades.spec.ts › H6 CA2 (UI)` («foco en body tras el rechazo de
+`POST /api/admin/modules/compras/install` → 409») y pasó al repetirse (`reintentar-ci.mjs`: intermitente). No es código de la
+046: tras el 409 el diálogo de módulos (029 F-01) recalcula la vista previa y deshabilitaba «Instalar módulo» con el foco
+encima. Reproducida en local con el código de `d422553` (`--veces=3 --lento`, falla en la primera vuelta); corregida al abrir la
+047 (el botón queda `loading`, enfocable, mientras recalcula) y en verde 3 de 3 con `--lento`. Anotada en
+[R-030-5](../../riesgos.md#030).
 
 ## 3. Revisión adversarial
 Subagente sin el contexto de la sesión. Recibió el diff completo y la tabla STRIDE del plan. Revisó escalada al confirmar (ruta,
