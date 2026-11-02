@@ -581,6 +581,13 @@ test('H2 CA2: tampoco las rutas que no son GET y devuelven datos (tomadas del in
         for (const format of ['csv', 'xlsx'])
           await check(`exportar lo explorado (${format}) ${JSON.stringify(definition)}`, await l.post('/api/my-reports/explore/export', { data: { definition, format } }));
     },
+    // Spec 046: confirmar una acción del Acompañante despacha la ruta de datos como quien confirma; una que no es suya da 404
+    // sin cuerpo con datos. El canario con acciones reales (propuestas por el modelo simulado) está en integración
+    // (`CompanionTests › H2_CA1…`, `› H4_CA1_no_se_propone_un_campo_oculto…`).
+    'POST /api/companion/actions/{id:int}/confirm': async () => {
+      for (const id of [1, 2, 999999])
+        await check(`confirmar acción ${id}`, await l.post(`/api/companion/actions/${id}/confirm`, { data: { hash: '0'.repeat(64) } }));
+    },
     ...Object.fromEntries(['POST', 'PUT', 'PATCH', 'DELETE', 'MERGE'].map((method) => [`${method} /odata/{**rest}`, async () =>
       check(`OData ${method}`, await l.fetch('/odata/CnDoc', { method, data: { Nombre: canary } }))])),
   };

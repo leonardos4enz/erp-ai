@@ -1,0 +1,388 @@
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using Dapper;
+using Erp.Api.Infrastructure;
+using Erp.Api.Metadata;
+using Erp.Api.Security;
+using Erp.Api.Studio;
+
+namespace Erp.Api.Companion;
+
+public static class CompanionActionStatus
+{
+    public const string Proposed = "proposed";
+    /// <summary>Confirmada y despachándose: si el proceso cae aquí, el barrido la pasa a <see cref="Unknown"/>.</summary>
+    public const string Applying = "applying";
+    public const string Applied = "applied";
+    public const string Failed = "failed";
+    public const string Discarded = "discarded";
+    public const string Expired = "expired";
+    /// <summary>Fallas parciales: no sabemos si se aplicó. Nunca se repite sola (ADR-0010).</summary>
+    public const string Unknown = "unknown";
+}
+
+public sealed record CompanionConfirmBody(string? Hash, IReadOnlyList<string>? AcceptWarnings = null);
+
+public sealed record CompanionActionDto(int Id, string Kind, string Entity, string EntityLabel, long? RecordId, JsonNode? Preview, string Hash,
+    string Status, string? Error, JsonNode? Result, DateTime CreatedAt, DateTime? DecidedAt);
+
+/// <summary>
+/// Spec 046 (H4, ADR-0010): las acciones que el Acompañante propone y la persona confirma. Proponer no escribe nada: lee el
+/// registro como la persona, arma la vista previa con etiquetas y guarda el cuerpo exacto con su huella. Confirmar lo ejecuta
+/// una vez, por la ruta de datos de siempre y con la identidad, la empresa y los permisos de quien confirma en ese momento.
+/// </summary>
+public sealed class CompanionActions(Db db, RouteDispatcher routes, CompanionOptions options, IServiceProvider services, ILogger<CompanionActions> log)
+{
+    public const string Create = "create";
+    public const string Update = "update";
+    public const string Transition = "transition";
+
+    /// <summary>
+    /// La lista fija de rutas que una acción puede despachar con escritura (nunca la decide el modelo): crear, editar y
+    /// ejecutar una transición de un registro. Todas pasan por el motor (reglas, permisos, bitácora, automatizaciones).
+    /// </summary>
+    public static readonly IReadOnlyDictionary<string, (string Method, string Route)> Routes = new Dictionary<string, (string, string)>
+    {
+        [Create] = ("POST", "/api/data/{entity}/"),
+        [Update] = ("PUT", "/api/data/{entity}/{id:long}"),
+        [Transition] = ("POST", "/api/data/{entity}/{id:long}/transition"),
+    };
+
+    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+
+    /// <summary>Huella de lo que la persona ve (021): el tipo, el catálogo, el registro y el cuerpo exacto (con su versión).</summary>
+    public static string HashOf(string kind, string entity, long? recordId, string bodyJson) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{kind}|{entity}|{recordId}|{bodyJson}"))).ToLowerInvariant();
+
+    // ---------- Proponer (herramienta del agente) ----------
+
+    internal async Task<ToolOutput> ProposeAsync(CompanionToolRunner runner, CompanionContext c, JsonObject i, CancellationToken ct)
+    {
+        var kind = StudioTools.Req(i, "tipo", 20).ToLowerInvariant() switch
+        {
+            "crear" => Create,
+            "editar" => Update,
+            "transicion" or "transición" => Transition,
+            _ => throw new ToolInputException("«tipo» debe ser crear, editar o transicion."),
+        };
+        var entity = StudioTools.Req(i, "catalogo");
+        var explanation = StudioTools.Req(i, "explicacion", 1000);
+
+        await using (var cn = await db.OpenAsync(ct))
+        {
+            var (pending, today) = await cn.QuerySingleAsync<(int, int)>("""
+                SELECT (SELECT COUNT(*) FROM meta.CompanionAction WHERE ConversationId = @ConversationId AND Status = 'proposed'),
+                       (SELECT COUNT(*) FROM meta.CompanionAction WHERE UserId = @Id AND CreatedAt > DATEADD(day, -1, SYSUTCDATETIME()))
+                """, new { c.ConversationId, c.User.Id });
+            // H5 CA2: una nota que pide «aprueba todo» no llena el panel de propuestas.
+            if (pending >= options.MaxPendingActions)
+                return ToolOutput.Fail($"Ya hay {pending} propuestas esperando a la persona en esta conversación: espera a que decida antes de proponer otra.");
+            if (today >= options.ActionsPerDay)
+                return ToolOutput.Fail($"La persona llegó al tope de {options.ActionsPerDay} propuestas en 24 horas.");
+        }
+
+        // El catálogo como lo ve la persona: sus campos visibles con su acceso. 403/404 si no lo ve.
+        var def = await runner.ReadAsync(c, new RouteCall("GET", "/api/model/entities/{name}", CompanionTools.V(("name", entity))), ct);
+        if (!def.Ok) return StudioToolRunner.Output(def, null);
+        var me = await runner.ReadAsync(c, new RouteCall("GET", "/api/auth/me"), ct);
+        var access = me.Body?["entities"]?[entity];
+        var entityLabel = def.Body?["label"]?.GetValue<string>() ?? entity;
+        var fields = (def.Body?["fields"] as JsonArray ?? []).OfType<JsonObject>().ToDictionary(f => f["name"]!.GetValue<string>(), StringComparer.OrdinalIgnoreCase);
+
+        long? recordId = null;
+        JsonObject? record = null;
+        if (kind != Create)
+        {
+            recordId = long.Parse(CompanionTools.Id(i));
+            var rec = await runner.ReadAsync(c, new RouteCall("GET", "/api/data/{entity}/{id:long}", CompanionTools.V(("entity", entity), ("id", recordId.ToString()))), ct);
+            if (!rec.Ok) return StudioToolRunner.Output(rec, null);
+            record = rec.Body as JsonObject;
+        }
+
+        JsonObject body;
+        // Revisión adversarial 046 (F-03): lo que escribió el modelo va aparte y marcado como suyo; lo demás lo arma el servidor.
+        var preview = new JsonObject { ["tipo"] = kind, ["catalogo"] = entityLabel, ["registro"] = recordId, ["segunElAcompanante"] = explanation };
+        switch (kind)
+        {
+            case Create:
+                if (access?["create"]?.GetValue<bool>() != true) return ToolOutput.Fail("La persona no puede crear registros en este catálogo.", "denied");
+                body = Values(i, fields, required: true);
+                if (await ReferencesAsync(runner, c, body, fields, ct) is { } bad) return bad;
+                preview["cambios"] = Changes(body, fields, null);
+                break;
+            case Update:
+                if (record?["_access"]?["update"]?.GetValue<bool>() != true)
+                    return ToolOutput.Fail(record?["_access"]?["reason"]?.GetValue<string>() ?? "La persona no puede modificar este registro.", "denied");
+                body = Values(i, fields, required: true);
+                if (await ReferencesAsync(runner, c, body, fields, ct) is { } bad2) return bad2;
+                preview["cambios"] = Changes(body, fields, record);
+                body["_rowVersion"] = record["_rowVersion"]?.DeepClone();
+                break;
+            default:
+                var name = StudioTools.Req(i, "transicion", 100);
+                var t = (record?["_workflow"]?["transitions"] as JsonArray ?? []).OfType<JsonObject>()
+                    .FirstOrDefault(x => string.Equals(x["name"]?.GetValue<string>(), name, StringComparison.OrdinalIgnoreCase));
+                if (t is null) return ToolOutput.Fail($"Desde el estado actual no existe la transición «{ToolOutput.Trim(name)}». Revisa ver_registro.");
+                if (t["allowed"]?.GetValue<bool>() != true)
+                    return ToolOutput.Fail($"La persona no puede ejecutar «{t["label"]}» ahora: {t["reason"]?.GetValue<string>() ?? "no está permitido."}", "denied");
+                var values = i["valores"] is null ? null : Values(i, fields, required: false);
+                if (values is not null && await ReferencesAsync(runner, c, values, fields, ct) is { } bad3) return bad3;
+                body = new JsonObject
+                {
+                    ["transition"] = t["name"]!.GetValue<string>(), ["comment"] = StudioTools.Opt(i, "comentario", 1000),
+                    ["values"] = values, ["_rowVersion"] = record!["_rowVersion"]?.DeepClone(),
+                };
+                var states = (def.Body?["workflow"]?["states"] as JsonArray ?? []).OfType<JsonObject>();
+                preview["transicion"] = t["label"]?.DeepClone();
+                preview["desde"] = record["_workflow"]?["stateLabel"]?.DeepClone();
+                preview["hacia"] = states.FirstOrDefault(s => string.Equals(s["name"]?.GetValue<string>(), t["to"]?.GetValue<string>(), StringComparison.OrdinalIgnoreCase))?["label"]?.DeepClone()
+                                   ?? t["to"]?.DeepClone();
+                preview["comentario"] = body["comment"]?.DeepClone();
+                if (values is not null) preview["cambios"] = Changes(values, fields, record);
+                break;
+        }
+
+        var bodyJson = body.ToJsonString();
+        var hash = HashOf(kind, entity, recordId, bodyJson);
+        int? inserted;
+        // Revisión adversarial 046 (F-06): solo si el turno sigue siendo de este trabajador (no tras «Detener» ni tras la purga).
+        await using (var cn = await db.OpenAsync(ct))
+            inserted = await cn.ExecuteScalarAsync<int?>("""
+                INSERT meta.CompanionAction (ConversationId, UserId, CompanyId, Turn, Kind, EntityName, RecordId, BodyJson, PreviewJson, Hash, Status)
+                OUTPUT inserted.Id
+                SELECT @ConversationId, @UserId, @CompanyId, @Turn, @kind, @entity, @recordId, @bodyJson, @preview, @hash, 'proposed'
+                 WHERE EXISTS (SELECT 1 FROM meta.CompanionConversation WITH (UPDLOCK) WHERE Id = @ConversationId AND LeaseToken = @Lease AND Status = 'running')
+                """, new { c.ConversationId, UserId = c.User.Id, CompanyId = c.User.Company?.Id, c.Turn, kind, entity = def.Body?["name"]?.GetValue<string>() ?? entity,
+                    recordId, bodyJson, preview = preview.ToJsonString(), hash, c.Lease });
+        var id = inserted ?? throw new StudioLeaseLost();
+        var data = new JsonObject
+        {
+            ["accion"] = id, ["estado"] = "esperando a la persona", ["vistaPrevia"] = preview,
+            ["nota"] = "No está hecho: la persona ve la vista previa en el panel y la confirma o la descarta. No digas que ya se hizo.",
+        };
+        return new("ok", data, $"propuesta {id}: {kind} en {entityLabel}");
+    }
+
+    /// <summary>
+    /// Los valores que propone el modelo, solo sobre campos que la persona ve y puede capturar (no ocultos, de solo lectura,
+    /// calculados ni partidas): uno que no cumple se rechaza con la lista de los que sí.
+    /// </summary>
+    private static JsonObject Values(JsonObject i, Dictionary<string, JsonObject> fields, bool required)
+    {
+        if (i["valores"] is not JsonObject values || values.Count == 0)
+            return required ? throw new ToolInputException("Falta «valores» (por nombre interno de campo).") : [];
+        var editable = fields.Values.Where(Editable).Select(f => f["name"]!.GetValue<string>()).ToList();
+        var result = new JsonObject();
+        foreach (var (key, value) in values)
+        {
+            if (!fields.TryGetValue(key, out var f) || !Editable(f))
+                throw new ToolInputException($"No se puede proponer «{ToolOutput.Trim(key)}». Campos que la persona puede capturar: {string.Join(", ", editable)}.");
+            result[f["name"]!.GetValue<string>()] = value?.DeepClone();
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Revisión adversarial 046 (F-03): una referencia propuesta se muestra con la etiqueta que la persona ve de ese registro (no
+    /// con el número que escribió el modelo); si no lo ve o no existe, no hay propuesta. La etiqueta queda en la vista previa.
+    /// </summary>
+    private static async Task<ToolOutput?> ReferencesAsync(CompanionToolRunner runner, CompanionContext c, JsonObject values,
+        Dictionary<string, JsonObject> fields, CancellationToken ct)
+    {
+        foreach (var (key, value) in values.ToList())
+        {
+            if (fields[key]["type"]?.GetValue<string>() != FieldTypes.Reference || value is null) continue;
+            var target = fields[key]["referenceEntity"]?.GetValue<string>();
+            if (target is null || value.GetValueKind() != JsonValueKind.Number || !value.AsValue().TryGetValue<long>(out var rid) || rid <= 0)
+                return ToolOutput.Fail($"«{key}» debe ser el número de un registro de {target}.");
+            var def = await runner.ReadAsync(c, new RouteCall("GET", "/api/model/entities/{name}", CompanionTools.V(("name", target))), ct);
+            var rec = def.Ok ? await runner.ReadAsync(c, new RouteCall("GET", "/api/data/{entity}/{id:long}", CompanionTools.V(("entity", target), ("id", rid.ToString()))), ct) : def;
+            if (!rec.Ok) return ToolOutput.Fail($"La persona no tiene acceso al registro {rid} de «{fields[key]["label"]}» (o no existe).", "denied");
+            var display = def.Body?["displayField"]?.GetValue<string>();
+            var label = display is null ? null : rec.Body?[display]?.ToString();
+            fields[key] = (JsonObject)fields[key].DeepClone();
+            fields[key]["__shown"] = $"{(string.IsNullOrWhiteSpace(label) ? "registro" : label)} (n.º {rid})";
+        }
+        return null;
+    }
+
+    private static bool Editable(JsonObject f) =>
+        f["access"]?.GetValue<string>() is not (FieldAccessLevels.Read or FieldAccessLevels.Hidden)
+        && f["formula"] is null && f["editable"]?.GetValue<bool>() != false
+        && f["type"]?.GetValue<string>() is not (FieldTypes.Lines or FieldTypes.Formula or FieldTypes.Autonumber or FieldTypes.Parent or FieldTypes.State);
+
+    /// <summary>Antes → después por campo, con su etiqueta; lo de antes es como lo ve la persona (las referencias, por su etiqueta).</summary>
+    private static JsonArray Changes(JsonObject values, Dictionary<string, JsonObject> fields, JsonObject? record) =>
+        new(values.Select(p => (JsonNode)new JsonObject
+        {
+            ["campo"] = fields[p.Key]["label"]?.DeepClone(),
+            ["antes"] = record is null ? null : (record[p.Key + "__label"] ?? record[p.Key])?.DeepClone(),
+            ["despues"] = fields[p.Key]["__shown"]?.DeepClone() ?? p.Value?.DeepClone(),
+        }).ToArray());
+
+    // ---------- Confirmar y descartar (la persona) ----------
+
+    private sealed record Row(int Id, int ConversationId, int UserId, int? CompanyId, string Kind, string EntityName, long? RecordId,
+        string BodyJson, string? PreviewJson, string Hash, string Status, string? ResultJson, string? Error, DateTime CreatedAt, DateTime? DecidedAt);
+
+    private const string Columns = "Id, ConversationId, UserId, CompanyId, Kind, EntityName, RecordId, BodyJson, PreviewJson, Hash, Status, ResultJson, Error, CreatedAt, DecidedAt";
+
+    /// <summary>
+    /// H4 CA2/CA3: dueña, pendiente, sin caducar, con la huella y en la empresa de la acción; <c>proposed → applying</c> bajo
+    /// bloqueo y en su transacción (diez a la vez: una pasa). Después se despacha la ruta, sin cancelar si la persona cierra la
+    /// pestaña, y se guarda el resultado. Un aviso por aceptar (428) la deja pendiente con sus mensajes.
+    /// </summary>
+    public async Task<(CompanionActionDto Action, JsonNode? Record)> ConfirmAsync(int id, CompanionConfirmBody? body, HttpContext http, CancellationToken ct)
+    {
+        var user = http.CurrentUser();
+        if (user.IsService) throw new Forbidden();
+        Row row;
+        await using (var cn = await db.OpenAsync(ct))
+        await using (var tx = await cn.BeginTransactionAsync(ct))
+        {
+            // Revisión adversarial 046 (F-02): primero la conversación, como al borrarla (mismo orden de bloqueos): o el borrado ya
+            // pasó y aquí no se encuentra, o espera a que esta acción quede «aplicándose» y entonces responde 409.
+            var conversation = await cn.ExecuteScalarAsync<int?>("SELECT ConversationId FROM meta.CompanionAction WHERE Id = @id AND UserId = @UserId",
+                new { id, UserId = user.Id }, tx) ?? throw new NotFound("La propuesta no existe.");
+            if (await cn.ExecuteScalarAsync<string?>("SELECT Status FROM meta.CompanionConversation WITH (UPDLOCK, HOLDLOCK) WHERE Id = @conversation",
+                    new { conversation }, tx) is null or CompanionService.Deleted)
+                throw new NotFound("La propuesta no existe.");
+            row = await cn.QuerySingleOrDefaultAsync<Row>($"SELECT {Columns} FROM meta.CompanionAction WITH (UPDLOCK, ROWLOCK) WHERE Id = @id AND UserId = @UserId",
+                      new { id, UserId = user.Id }, tx) ?? throw new NotFound("La propuesta no existe.");
+            if (row.Status != CompanionActionStatus.Proposed) throw new Conflict(Decided(row.Status));
+            if (row.CreatedAt < DateTime.UtcNow.AddHours(-options.ActionHours))
+            {
+                await cn.ExecuteAsync("UPDATE meta.CompanionAction SET Status = 'expired', DecidedAt = SYSUTCDATETIME(), PreviewJson = NULL WHERE Id = @id", new { id }, tx);
+                await tx.CommitAsync(ct);
+                throw new Conflict(Decided(CompanionActionStatus.Expired));
+            }
+            if (!string.Equals(body?.Hash, row.Hash, StringComparison.Ordinal))
+                throw new Conflict("La propuesta no es la que revisaste: vuelve a abrirla antes de confirmar.");
+            if (row.CompanyId != user.Company?.Id)
+                throw new Conflict("La propuesta es de otra empresa: cámbiate a ella para confirmarla.");
+            await cn.ExecuteAsync("UPDATE meta.CompanionAction SET Status = 'applying', DecidedAt = SYSUTCDATETIME() WHERE Id = @id", new { id }, tx);
+            await tx.CommitAsync(ct);
+        }
+
+        var (method, route) = Routes[row.Kind];
+        var payload = JsonNode.Parse(row.BodyJson)!.AsObject();
+        if (row.Kind == Transition && body?.AcceptWarnings is { Count: > 0 } accepted)
+            payload["acceptWarnings"] = new JsonArray(accepted.Take(50).Select(w => (JsonNode)JsonValue.Create(w)!).ToArray());
+        var values = new Dictionary<string, string?> { ["entity"] = row.EntityName };
+        if (row.RecordId is { } rid) values["id"] = rid.ToString();
+        RouteResult result;
+        try
+        {
+            result = await routes.SendAsync(services, user, new RouteCall(method, route, values, Body: payload), allowWrites: true, CancellationToken.None,
+                BearerCredential.Of(http.User), origin: Audit.CompanionOrigin);
+        }
+        catch (Exception ex)
+        {
+            log.LogError(ex, "No se pudo ejecutar la acción {Id} del Acompañante", id);
+            result = new RouteResult(500, null, "Ocurrió un error inesperado.");
+        }
+
+        var (status, error) = result.Ok ? (CompanionActionStatus.Applied, (string?)null)
+            : result.Status is StatusCodes.Status428PreconditionRequired or StatusCodes.Status429TooManyRequests ? (CompanionActionStatus.Proposed, null)
+            : (CompanionActionStatus.Failed, Detail(result));
+        var resultJson = result.Ok ? new JsonObject { ["recordId"] = (result.Body?["id"] ?? JsonValue.Create(row.RecordId))?.DeepClone() }.ToJsonString() : null;
+        await using (var cn = await db.OpenAsync(CancellationToken.None))
+        await using (var tx = await cn.BeginTransactionAsync(CancellationToken.None))
+        {
+            var updated = await cn.ExecuteAsync("""
+                UPDATE meta.CompanionAction
+                   SET Status = @status, Error = @error, ResultJson = @resultJson,
+                       DecidedAt = CASE WHEN @status = 'proposed' THEN NULL ELSE DecidedAt END,
+                       -- La vista previa tenía valores del registro: al decidirse ya no hace falta (H2 CA4).
+                       PreviewJson = CASE WHEN @status = 'proposed' THEN PreviewJson ELSE NULL END
+                 -- Si el despacho tardó más que Companion:ApplyingSeconds, el barrido ya la marcó «sin confirmar»: el resultado real gana.
+                 WHERE Id = @id AND Status IN ('applying', 'unknown')
+                """, new { id, status, error = error is null ? null : StudioAgent.Cut(error, 1000), resultJson }, tx);
+            // F-05: si otra cosa la cambió mientras se aplicaba, queda en el log (con el barrido corregido no debería pasar).
+            if (updated == 0) log.LogWarning("La acción {Id} del Acompañante cambió de estado mientras se aplicaba ({Status})", id, status);
+            if (status != CompanionActionStatus.Proposed)
+                await Audit.WriteAsync(cn, tx, http, AuditActions.CompanionAction, entity: row.EntityName, recordId: (result.Body?["id"] ?? JsonValue.Create(row.RecordId))?.ToString(),
+                    after: new { action = id, conversation = row.ConversationId, kind = row.Kind, status, error = error is null ? null : StudioAgent.Cut(error, 300) });
+            await tx.CommitAsync(CancellationToken.None);
+        }
+        if (result.Status == StatusCodes.Status428PreconditionRequired)
+            throw new AppException(StatusCodes.Status428PreconditionRequired, result.Error ?? "La acción tiene avisos: revísalos y confirma para continuar.", result.Errors);
+        var dto = await GetAsync(id, user.Id, CancellationToken.None) ?? throw new NotFound("La propuesta no existe.");
+        if (!result.Ok) throw new AppException(result.Status is >= 400 and < 500 ? result.Status : 400, error ?? "La acción no se pudo aplicar.", result.Errors);
+        return (dto, result.Body);
+    }
+
+    public async Task<CompanionActionDto> DiscardAsync(int id, HttpContext http, CancellationToken ct)
+    {
+        var user = http.CurrentUser();
+        await using (var cn = await db.OpenAsync(ct))
+        await using (var tx = await cn.BeginTransactionAsync(ct))
+        {
+            var row = await cn.QuerySingleOrDefaultAsync<Row>($"SELECT {Columns} FROM meta.CompanionAction WITH (UPDLOCK, ROWLOCK) WHERE Id = @id AND UserId = @UserId",
+                          new { id, UserId = user.Id }, tx) ?? throw new NotFound("La propuesta no existe.");
+            if (row.Status != CompanionActionStatus.Proposed) throw new Conflict(Decided(row.Status));
+            await cn.ExecuteAsync("UPDATE meta.CompanionAction SET Status = 'discarded', DecidedAt = SYSUTCDATETIME(), PreviewJson = NULL WHERE Id = @id", new { id }, tx);
+            await Audit.WriteAsync(cn, tx, http, AuditActions.CompanionAction, entity: row.EntityName, recordId: row.RecordId?.ToString(),
+                after: new { action = id, conversation = row.ConversationId, kind = row.Kind, status = CompanionActionStatus.Discarded });
+            await tx.CommitAsync(ct);
+        }
+        return (await GetAsync(id, user.Id, ct))!;
+    }
+
+    public async Task<CompanionActionDto?> GetAsync(int id, int userId, CancellationToken ct)
+    {
+        await using var cn = await db.OpenAsync(ct);
+        var row = await cn.QuerySingleOrDefaultAsync<Row>($"SELECT {Columns} FROM meta.CompanionAction WHERE Id = @id AND UserId = @userId", new { id, userId });
+        return row is null ? null : ToDto(row);
+    }
+
+    public async Task<IReadOnlyList<CompanionActionDto>> ListAsync(int conversationId, int userId, CancellationToken ct)
+    {
+        await using var cn = await db.OpenAsync(ct);
+        return (await cn.QueryAsync<Row>($"SELECT {Columns} FROM meta.CompanionAction WHERE ConversationId = @conversationId AND UserId = @userId ORDER BY Id",
+            new { conversationId, userId })).Select(ToDto).ToList();
+    }
+
+    /// <summary>
+    /// Barrido: las propuestas viejas caducan y las que se quedaron «aplicándose» (el proceso cayó entre despachar y guardar)
+    /// pasan a «sin confirmar si se aplicó» sin volver a ejecutarse.
+    /// </summary>
+    public async Task<(int Expired, int Unknown)> SweepAsync(CancellationToken ct)
+    {
+        await using var cn = await db.OpenAsync(ct);
+        var expired = await cn.ExecuteAsync("""
+            UPDATE meta.CompanionAction SET Status = 'expired', DecidedAt = SYSUTCDATETIME(), PreviewJson = NULL
+             WHERE Status = 'proposed' AND CreatedAt < DATEADD(hour, -@hours, SYSUTCDATETIME())
+            """, new { hours = options.ActionHours });
+        var unknown = await cn.ExecuteAsync("""
+            UPDATE meta.CompanionAction SET Status = 'unknown', PreviewJson = NULL,
+                   Error = N'No sabemos si se aplicó: el servidor se detuvo mientras la ejecutaba. Revisa el registro antes de repetirla.'
+             WHERE Status = 'applying' AND DecidedAt < DATEADD(second, -@seconds, SYSUTCDATETIME())
+            """, new { seconds = options.ApplyingSeconds });
+        return (expired, unknown);
+    }
+
+    private static CompanionActionDto ToDto(Row r)
+    {
+        var preview = r.PreviewJson is null ? null : JsonNode.Parse(r.PreviewJson);
+        var label = preview?["catalogo"]?.GetValue<string>() ?? r.EntityName;
+        return new(r.Id, r.Kind, r.EntityName, label, r.RecordId, preview, r.Hash, r.Status, r.Error,
+            r.ResultJson is null ? null : JsonNode.Parse(r.ResultJson), DateTime.SpecifyKind(r.CreatedAt, DateTimeKind.Utc),
+            r.DecidedAt is { } d ? DateTime.SpecifyKind(d, DateTimeKind.Utc) : null);
+    }
+
+    private static string Decided(string status) => status switch
+    {
+        CompanionActionStatus.Applied => "Esta propuesta ya se aplicó.",
+        CompanionActionStatus.Applying => "Esta propuesta se está aplicando.",
+        CompanionActionStatus.Discarded => "Esta propuesta se descartó.",
+        CompanionActionStatus.Expired => "Esta propuesta caducó: pídele al Acompañante una nueva.",
+        CompanionActionStatus.Failed => "Esta propuesta ya se intentó y no se aplicó.",
+        _ => "Esta propuesta ya no está pendiente.",
+    };
+
+    private static string Detail(RouteResult r) =>
+        r.Errors is { Count: > 0 } ? $"{r.Error} {string.Join(" ", r.Errors.SelectMany(e => e.Value))}" : r.Error ?? "La acción no se pudo aplicar.";
+}

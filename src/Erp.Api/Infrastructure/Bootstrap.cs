@@ -896,6 +896,93 @@ public static class Bootstrap
         IF COL_LENGTH('meta.StudioSession', 'McpGrantId') IS NULL ALTER TABLE meta.StudioSession ADD McpGrantId int NULL;
         IF COL_LENGTH('meta.StudioSession', 'McpClient') IS NULL ALTER TABLE meta.StudioSession ADD McpClient nvarchar(100) NULL;
 
+        -- Spec 046: el Acompañante. Conversaciones de cualquier persona (un trabajador con lease por turno, como Studio), su
+        -- historial exacto, sus pasos visibles y las acciones que propone y que la persona confirma (ADR-0010). Tablas propias:
+        -- ninguna consulta de Studio las ve. Borrar una conversación borra lo suyo; la bitácora se queda.
+        IF OBJECT_ID('meta.CompanionConversation') IS NULL
+        CREATE TABLE meta.CompanionConversation (
+            Id int IDENTITY PRIMARY KEY,
+            UserId int NOT NULL REFERENCES meta.[User](Id),
+            CompanyId int NULL,
+            SecurityStamp uniqueidentifier NOT NULL,
+            Title nvarchar(200) NOT NULL,
+            Status nvarchar(12) NOT NULL,
+            CancelRequested bit NOT NULL DEFAULT 0,
+            LeaseToken uniqueidentifier NULL,
+            LeaseUntil datetime2(3) NULL,
+            Turns int NOT NULL DEFAULT 1,
+            Steps int NOT NULL DEFAULT 0,
+            ToolCalls int NOT NULL DEFAULT 0,
+            InputTokens bigint NOT NULL DEFAULT 0,
+            OutputTokens bigint NOT NULL DEFAULT 0,
+            CostMicros bigint NOT NULL DEFAULT 0,
+            ReservedMicros bigint NOT NULL DEFAULT 0,
+            Model nvarchar(100) NOT NULL,
+            ErrorCode nvarchar(30) NULL,
+            Summary nvarchar(4000) NULL,
+            LiveJson nvarchar(max) NULL,
+            CreatedAt datetime2(3) NOT NULL DEFAULT SYSUTCDATETIME(),
+            TurnStartedAt datetime2(3) NULL,
+            FinishedAt datetime2(3) NULL,
+            LastActivityAt datetime2(3) NOT NULL DEFAULT SYSUTCDATETIME()
+        );
+        IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_CompanionConversation_User')
+            CREATE INDEX IX_CompanionConversation_User ON meta.CompanionConversation (UserId, LastActivityAt DESC);
+        IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_CompanionConversation_Status')
+            CREATE INDEX IX_CompanionConversation_Status ON meta.CompanionConversation (Status);
+        IF OBJECT_ID('meta.CompanionMessage') IS NULL
+        CREATE TABLE meta.CompanionMessage (
+            Id bigint IDENTITY PRIMARY KEY,
+            ConversationId int NOT NULL REFERENCES meta.CompanionConversation(Id) ON DELETE CASCADE,
+            Seq int NOT NULL,
+            FromUser bit NOT NULL,
+            ContentJson nvarchar(max) NOT NULL,
+            HasData bit NOT NULL DEFAULT 0,
+            CreatedAt datetime2(3) NOT NULL DEFAULT SYSUTCDATETIME(),
+            CONSTRAINT UX_CompanionMessage_Seq UNIQUE (ConversationId, Seq)
+        );
+        IF OBJECT_ID('meta.CompanionStep') IS NULL
+        CREATE TABLE meta.CompanionStep (
+            Id bigint IDENTITY PRIMARY KEY,
+            ConversationId int NOT NULL REFERENCES meta.CompanionConversation(Id) ON DELETE CASCADE,
+            Seq int NOT NULL,
+            Turn int NOT NULL,
+            Kind nvarchar(10) NOT NULL,
+            Tool nvarchar(60) NULL,
+            InputJson nvarchar(max) NULL,
+            OutputJson nvarchar(max) NULL,
+            Status nvarchar(10) NOT NULL,
+            Summary nvarchar(400) NOT NULL,
+            DurationMs int NOT NULL DEFAULT 0,
+            CreatedAt datetime2(3) NOT NULL DEFAULT SYSUTCDATETIME(),
+            CONSTRAINT UX_CompanionStep_Seq UNIQUE (ConversationId, Seq)
+        );
+        IF OBJECT_ID('meta.CompanionAction') IS NULL
+        CREATE TABLE meta.CompanionAction (
+            Id int IDENTITY PRIMARY KEY,
+            ConversationId int NOT NULL REFERENCES meta.CompanionConversation(Id) ON DELETE CASCADE,
+            UserId int NOT NULL,
+            CompanyId int NULL,
+            Turn int NOT NULL,
+            Kind nvarchar(12) NOT NULL,
+            EntityName nvarchar(100) NOT NULL,
+            RecordId bigint NULL,
+            BodyJson nvarchar(max) NOT NULL,
+            PreviewJson nvarchar(max) NULL,
+            Hash char(64) NOT NULL,
+            Status nvarchar(10) NOT NULL,
+            ResultJson nvarchar(max) NULL,
+            Error nvarchar(1000) NULL,
+            CreatedAt datetime2(3) NOT NULL DEFAULT SYSUTCDATETIME(),
+            DecidedAt datetime2(3) NULL
+        );
+        IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_CompanionAction_User')
+            CREATE INDEX IX_CompanionAction_User ON meta.CompanionAction (UserId, Status, CreatedAt);
+        IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_CompanionAction_Conversation')
+            CREATE INDEX IX_CompanionAction_Conversation ON meta.CompanionAction (ConversationId, Status);
+        -- Spec 046 (H4 CA4): de dónde vino un cambio (null = la pantalla o la API; 'acompañante' = una acción confirmada).
+        IF COL_LENGTH('meta.AuditLog', 'Origin') IS NULL ALTER TABLE meta.AuditLog ADD Origin nvarchar(20) NULL;
+
         -- Constitución II.4: la auditoría es de solo inserción, incluso para la propia aplicación.
         IF OBJECT_ID('meta.TR_AuditLog_Immutable') IS NULL
             EXEC('CREATE TRIGGER meta.TR_AuditLog_Immutable ON meta.AuditLog INSTEAD OF UPDATE, DELETE AS

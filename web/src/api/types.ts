@@ -913,3 +913,32 @@ export interface McpConnection {
   id: number; client: string; redirectHost: string; scopes: string[]; createdAt: string; lastUsedAt?: string | null; sandbox?: McpSandboxInfo | null;
 }
 export interface McpConnections { serverUrl: string; connections: McpConnection[] }
+
+// ---------- Spec 046: Acompañante (contrato del motor; la pantalla es de la 047) ----------
+export interface CompanionLimits { maxPromptChars: number; maxTurns: number; maxPendingActions: number; conversationsPerDay: number; costPerDayUsd: number }
+export interface CompanionStatus {
+  available: boolean; reason?: string | null; limits: CompanionLimits; conversationsToday: number; costTodayUsd: number; activeId?: number | null;
+}
+export type CompanionConversationStatus = 'queued' | 'running' | 'answered' | 'failed' | 'cancelled' | 'interrupted';
+/** Lo que la persona está viendo (el servidor lo revalida con su alcance). */
+export interface CompanionScreen { entity: string; id?: number | null }
+export interface CompanionSummary {
+  id: number; title: string; status: CompanionConversationStatus; turns: number; createdAt: string; updatedAt: string; pendingActions: number;
+}
+export type CompanionActionKind = 'create' | 'update' | 'transition';
+export type CompanionActionStatus = 'proposed' | 'applying' | 'applied' | 'failed' | 'discarded' | 'expired' | 'unknown';
+export interface CompanionChange { campo: string; antes?: unknown; despues?: unknown }
+/** La vista previa la arma el servidor con etiquetas; existe mientras la acción está pendiente. */
+export interface CompanionPreview {
+  tipo: CompanionActionKind; catalogo: string; registro?: number | null; explicacion: string; cambios?: CompanionChange[];
+  transicion?: string; desde?: string; hacia?: string; comentario?: string | null;
+}
+export interface CompanionAction {
+  id: number; kind: CompanionActionKind; entity: string; entityLabel: string; recordId?: number | null; preview?: CompanionPreview | null;
+  hash: string; status: CompanionActionStatus; error?: string | null; result?: { recordId?: number | null } | null; createdAt: string; decidedAt?: string | null;
+}
+export interface CompanionConversation {
+  id: number; title: string; status: CompanionConversationStatus; error?: string | null; turns: number; steps: number; costUsd: number;
+  createdAt: string; updatedAt: string; canSend: boolean; sendBlockedReason?: string | null; trail: StudioStep[]; actions: CompanionAction[];
+}
+export interface CompanionStreamSession { status: CompanionConversationStatus; turns: number; steps: number; pendingActions: number; error?: string | null }

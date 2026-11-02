@@ -97,11 +97,26 @@ public static class AuditActions
     /// también en vista previa): el campo y cuántas filas, nunca el valor. Deja rastro de quien prueba valores.
     /// </summary>
     public const string UniqueConflict = "data.unique";
+    /// <summary>
+    /// Spec 046: el Acompañante. Mensaje (conversación, turno, longitud; nunca el texto), cierre de turno (estado, pasos, costo,
+    /// modelo), acción confirmada o descartada (acción, catálogo, resultado) y conversación borrada por la persona.
+    /// </summary>
+    public const string CompanionMessage = "companion.message";
+    public const string CompanionFinish = "companion.finish";
+    public const string CompanionAction = "companion.action";
+    public const string CompanionDelete = "companion.delete";
 }
 
 public static class Audit
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+
+    /// <summary>
+    /// Spec 046 (H4 CA4): el origen de la petición (<c>HttpContext.Items</c>), que lo pone solo el servidor: el despachador al
+    /// ejecutar una acción confirmada del Acompañante. Nunca viene del cliente.
+    /// </summary>
+    public const string OriginKey = "erp.audit.origin";
+    public const string CompanionOrigin = "acompañante";
 
     /// <summary>Escribe en la bitácora dentro de la misma transacción del cambio: si el cambio se revierte, la bitácora también.</summary>
     public static Task WriteAsync(DbConnection cn, DbTransaction? tx, HttpContext http, string action,
@@ -110,10 +125,11 @@ public static class Audit
     {
         var user = http.Items[UserContextExtensions.ItemKey] as UserContext;
         return cn.ExecuteAsync("""
-            INSERT meta.AuditLog (UserId, Username, Action, EntityName, RecordId, BeforeJson, AfterJson, IpAddress)
-            VALUES (@UserId, @Username, @Action, @Entity, @RecordId, @Before, @After, @Ip)
+            INSERT meta.AuditLog (UserId, Username, Action, EntityName, RecordId, BeforeJson, AfterJson, IpAddress, Origin)
+            VALUES (@UserId, @Username, @Action, @Entity, @RecordId, @Before, @After, @Ip, @Origin)
             """, new
         {
+            Origin = http.Items[OriginKey] as string,
             UserId = userId ?? user?.Id,
             Username = username ?? user?.Username,
             Action = action,

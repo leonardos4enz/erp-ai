@@ -9,7 +9,7 @@ sin compuerta, si es costosa sin límite o si aplica lo revisado sin huella. `we
 Capacidades: **anónima** (lista blanca) · **sesión** (lo propio del usuario) · **registros** (el motor exige permiso del
 catálogo, alcance por registro y seguridad por campo) · **modelador** · **usuarios** · **auditoría** · **superusuario**.
 
-Total: 182 rutas.
+Total: 192 rutas.
 
 | Método | Ruta | Capacidad | Efecto | Compuerta | Costosa | Huella |
 |---|---|---|---|---|---|---|
@@ -95,6 +95,16 @@ Total: 182 rutas.
 | POST | `/api/auth/login` | anónima | sesión |  | contraseña con PBKDF2 (login) |  |
 | POST | `/api/auth/logout` | sesión | sesión |  |  |  |
 | GET | `/api/auth/me` | sesión |  |  |  |  |
+| GET | `/api/companion/` | sesión |  |  |  |  |
+| POST | `/api/companion/actions/{id:int}/confirm` | registros | datos |  |  | hash |
+| POST | `/api/companion/actions/{id:int}/discard` | sesión | sesión |  |  |  |
+| GET | `/api/companion/conversations` | sesión |  |  |  |  |
+| POST | `/api/companion/conversations` | sesión | sesión |  | un agente que llama al modelo de lenguaje por pasos (Companion:ConversationsPerDay, Companion:CostPerDayUsd y una conversación activa por persona) |  |
+| DELETE | `/api/companion/conversations/{id:int}` | sesión | sesión |  |  |  |
+| GET | `/api/companion/conversations/{id:int}` | sesión |  |  |  |  |
+| POST | `/api/companion/conversations/{id:int}/cancel` | sesión | sesión |  |  |  |
+| POST | `/api/companion/conversations/{id:int}/messages` | sesión | sesión |  | otro turno del agente, que llama al modelo de lenguaje por pasos (Companion:MaxTurns, los topes de la conversación, Companion:CostPerDayUsd y una conversación activa por persona) |  |
+| GET | `/api/companion/conversations/{id:int}/stream` | sesión |  |  | una conexión abierta (SSE) que sigue la conversación (Companion:MaxStreamsPerUser y Companion:StreamSeconds) |  |
 | GET | `/api/dashboards/` | registros |  |  |  |  |
 | GET | `/api/dashboards/{name}` | registros |  |  | corre un reporte por tarjeta (aggregate) |  |
 | GET | `/api/data/{entity}/` | registros |  |  |  |  |

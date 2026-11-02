@@ -50,6 +50,9 @@ en orden, no en paralelo: casi todas tocan el núcleo del motor (`PlanCompiler`,
 | 042 Tableros personales y compartir | Implementado ([spec](specs/042-tableros-personales/spec.md)) |
 | 043 Módulo de Ventas | Implementado ([spec](specs/043-modulo-ventas/spec.md)) |
 | 044 MCP 2: copia aislada y propuestas por MCP | Implementado ([spec](specs/044-mcp-2/spec.md)) |
+| 045 Endurecimiento 7 (auditoría 8) | Implementado ([spec](specs/045-endurecimiento-7/spec.md)) |
+| 046 Acompañante (motor) | Implementado ([spec](specs/046-acompanante/spec.md)) |
+| 047 Acompañante: panel lateral con avatar | Siguiente, tras la auditoría 9 |
 
 ## Diagnóstico
 | Brecha señalada | Situación actual | Spec |
@@ -400,7 +403,7 @@ ya marcados) y sus hallazgos se vuelven una spec de endurecimiento.
 | 2026-10-27, auditoría 6 (origen de la 034), al cerrar la 033 | 031–033 | 7 defectos (1 alto: quien administra usuarios cambiaba la contraseña o desactivaba al superusuario) y huecos del catálogo de Studio antes del MCP; R-009-1 y R-032-6 confirmados |
 | 2026-10-31, auditoría 7, al cerrar la 039 (servidor MCP, flujo SSE y multi-turno de Studio, reportes a dos saltos) | 034–039 | 12 defectos (1 medio: el registro dinámico del MCP se agota —con direcciones IPv6 sin cuenta, o para siempre con una cuenta, porque los clientes que tuvieron conexión no se barren— y bloquea conexiones nuevas; 11 bajos: tope de pendientes por dirección detrás de un proxy, cola de Studio que vence sesiones en un solo lote, `RenewSeconds` sin relación con `LeaseSeconds`, salidas de `datos` sin purgar si el servidor no vuelve, conversación que cambia de empresa, tope de uniones de la 039 que no existe, «#id» en lugar de «(sin acceso)», canario sin reportes a dos saltos, entre otros) y 3 observaciones. Sin fugas ni escaladas verificadas; los 25 riesgos marcados siguen abiertos. Propone la **040 — Endurecimiento 6**; el dueño la puso antes de los reportes personales (2026-10-31), que pasan a la 041, Ventas a la 042 y MCP 2 a la 043 |
 | 2026-11-01, auditoría 8, al cerrar la 044 (registro dinámico endurecido, reportes y tableros personales con reparto, Ventas, copia aislada por conexión MCP con su barrido, escrituras con clave y propuestas por MCP) | 040–044 | 11 defectos (1 alto: explorar o reportar sobre las partidas de un documento salta un campo de partidas oculto —el motor las oculta en el registro, OData, la bitácora y las fórmulas, pero los reportes solo piden leer el documento—, desde la 007 y al alcance de cualquier usuario desde la 041; 1 medio: el vendedor crea un cliente sin límite de crédito, que no puede fijar, y confirma a crédito sin tope; 9 bajos: «Público en general» editable por todo vendedor, borrar el pedido de una cotización aceptada, un campo único que revela registros fuera de alcance, exportar reportes sin bitácora, compartidos sin tope, tres en las claves y la copia del MCP y una carrera del barrido del registro) y 3 observaciones ([detalle](#045--endurecimiento-7-auditoría-8-propuesta)). Las correcciones de la 040 se sostienen; el oráculo por campo oculto de R-043-6 no se reproduce en ningún camino. Propone la **045 — Endurecimiento 7**; el dueño decide su lugar |
-| **Siguiente: auditoría 9**, a las 5 specs (045–049) o antes si una agrega un punto de entrada, un trabajo asíncrono o delegación | 045–049 | Pendiente |
+| **Siguiente: auditoría 9, adelantada** al cerrar la 046 (el Acompañante agrega un punto de entrada —`/api/companion`—, un trabajo asíncrono —su cola y su barrido— y delegación: un agente que escribe con los permisos de la persona cuando ella confirma, ADR-0010). Recomendada antes de la 047 | 045–046 | Pendiente |
 
 La auditoría 5 (adelantada, sobre la 029) confirmó que las 139 rutas conservan una capacidad igual o más estricta y
 encontró que la regla «lo vivo con el alcance de quien lo ve» de la 029 no llegaba a la importación, a las transiciones ni
@@ -674,6 +677,20 @@ En este orden, por decisión del dueño (2026-10-25):
     `data.export` (D-05, D-06); 100 compartidos por lista (D-07); claves y *leases* del MCP (D-08–D-10); barrido del registro
     (D-11). Pendiente, si se pide: `deletableWhen` en el editor visual (R-045-2), HMAC de la huella de definiciones (O-01,
     R-045-3) y **O-03**: una prueba de integración con registros y renovaciones del MCP a la vez (posible interbloqueo).
+    ~~**046 — Acompañante (motor)**~~ Implementado ([spec](specs/046-acompanante/spec.md),
+    [verify](specs/046-acompanante/verify.md); pedido del dueño, 2026-11-01; se dividió en CLARIFY: seguridad con UI nueva y dos
+    pantallas). Un agente para cualquier persona: lee con sus permisos (rutas de lectura por el despachador, sin preguntar) y
+    toda escritura es una acción propuesta —crear, editar o transición— que ella confirma una por una, con huella y la versión
+    del registro, por la ruta de datos de siempre ([ADR-0010](../adr/0010-acompanante-acciones-confirmadas.md), enmienda a la
+    constitución II.8); bitácora con origen «acompañante»; «por qué no puedo», «mis pendientes» y contexto de la pantalla;
+    conversaciones por persona con historial, purga de lo leído por turno y retención de 90 días; topes propios por persona y
+    día. **Auditoría 9 adelantada** (punto de entrada, trabajo asíncrono y delegación), recomendada antes de la 047.
+    **047 — Acompañante: panel lateral** (la otra mitad, CLARIFY 1 de la 046): panel derecho contraíble en toda la app (estilo el
+    chat de Cursor) con el avatar `<fleet-eyes>` portado a React/SVG con CSS de la SPA (CSP `style-src 'self'`; estados del chat;
+    `prefers-reduced-motion`; claro/oscuro), historial de conversaciones para retomar, los efectos del chat de Studio («pensando»,
+    herramientas, flujo SSE) reutilizando sus componentes, tarjetas de confirmación con la vista previa y el contexto de la
+    pantalla actual. Pendiente, si se pide: guías paso a paso que señalan el control en pantalla, modo instructor con recorridos,
+    eliminar registros por el Acompañante, unificar el bucle de Studio y el del Acompañante (R-046-1).
 15. **Pólizas en moneda extranjera** (pendiente de la 020).
 16. **Revaluación de existencias** (pendiente de la 020).
 17. **Reversa de pólizas con otra póliza** (pendiente de la 020).

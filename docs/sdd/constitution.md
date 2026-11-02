@@ -28,7 +28,9 @@
 7. **Secretos fuera del código.** Cadenas de conexión y API keys (p. ej. Anthropic, [ADR-0003](../adr/0003-asistente-ia-anthropic.md)) vía
    variables de entorno / user-secrets / vault, o cifradas en la base con Data Protection. Nunca en el repositorio.
 8. **IA sin acceso directo.** El LLM nunca ejecuta SQL ni llama endpoints de datos con
-   privilegios propios. Solo propone Planes de Cambios que un humano autorizado confirma.
+   privilegios propios. Solo propone: Planes de Cambios que un humano autorizado confirma, o (Acompañante,
+   [ADR-0010](../adr/0010-acompanante-acciones-confirmadas.md)) acciones sobre registros que la propia persona confirma
+   una por una y que se ejecutan con su identidad y sus permisos del momento.
    El contenido generado por el LLM se trata como entrada no confiable.
 9. **No destructivo por defecto.** Los campos y entidades se archivan, no se borran.
 

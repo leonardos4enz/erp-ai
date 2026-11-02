@@ -97,6 +97,16 @@ public static class ErpApp
         services.AddSingleton<Erp.Api.Studio.StudioSignals>(); // spec 036
         services.AddScoped<Erp.Api.Studio.StudioStream>();
         services.AddHostedService<Erp.Api.Studio.StudioDispatcher>();
+        // Spec 046: el Acompañante. Mismo motor conversacional que Studio (proveedor, historial, señales, flujo); lee como la
+        // persona y solo escribe lo que ella confirma (ADR-0010).
+        services.AddSingleton(Erp.Api.Companion.CompanionOptions.From(config));
+        services.AddSingleton<Erp.Api.Companion.CompanionSignals>();
+        services.AddScoped<Erp.Api.Companion.CompanionActions>();
+        services.AddScoped<Erp.Api.Companion.CompanionToolRunner>();
+        services.AddScoped<Erp.Api.Companion.CompanionAgent>();
+        services.AddScoped<Erp.Api.Companion.CompanionService>();
+        services.AddScoped<Erp.Api.Companion.CompanionStream>();
+        services.AddHostedService<Erp.Api.Companion.CompanionDispatcher>();
         // Spec 038: servidor MCP por persona (OAuth authorization code + PKCE; las herramientas son las de Studio).
         services.AddSingleton(Erp.Api.Mcp.McpOptions.From(config));
         services.AddSingleton<Erp.Api.Mcp.McpLimits>();
@@ -239,6 +249,7 @@ public static class ErpApp
         app.MapCompanies();
         app.MapAssistant();
         app.MapStudio(); // spec 033
+        app.MapCompanion(); // spec 046
         app.MapOAuthToken(); // spec 018
         app.MapMcp(); // spec 038
         app.MapOData();

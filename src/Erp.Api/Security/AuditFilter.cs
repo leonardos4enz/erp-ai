@@ -23,7 +23,7 @@ public static class AuditFilter
     /// Spec 034: acciones que nombran un registro sin llevar sus valores (el PDF: catálogo, registro y plantilla). Se filtran
     /// como las de registro; su antes/después no se recorta (no son campos).
     /// </summary>
-    public static readonly IReadOnlyList<string> ReferenceActions = [AuditActions.PrintPdf];
+    public static readonly IReadOnlyList<string> ReferenceActions = [AuditActions.PrintPdf, AuditActions.CompanionAction]; // spec 046: acción confirmada o descartada sobre un registro
 
     /// <summary>
     /// Acciones sobre un catálogo (sin registro): se ven si se puede leer el catálogo. Spec 034: también la configuración que
@@ -54,6 +54,7 @@ public static class AuditFilter
         AuditActions.StudioMessage, AuditActions.McpConnect, AuditActions.McpRevoke, AuditActions.McpReuse,
         AuditActions.McpProposal, AuditActions.McpSandbox, // spec 044
         AuditActions.PersonalDashboardChange, // spec 042: no es de un catálogo (sus tarjetas pueden ser de varios)
+        AuditActions.CompanionMessage, AuditActions.CompanionFinish, AuditActions.CompanionDelete, // spec 046
     ];
 
     public static bool IsRecordAction(string action) =>

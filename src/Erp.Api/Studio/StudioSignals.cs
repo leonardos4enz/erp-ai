@@ -7,7 +7,7 @@ namespace Erp.Api.Studio;
 /// base: en otra instancia el flujo relee cada <c>Studio:StreamPollMs</c>) y cortan al instante el turno que la persona
 /// detiene si corre aquí (si no, el trabajador lo lee al renovar el lease). Cuenta los flujos abiertos por persona.
 /// </summary>
-public sealed class StudioSignals
+public class StudioSignals
 {
     private readonly ConcurrentDictionary<int, TaskCompletionSource> _waits = new();
     private readonly ConcurrentDictionary<int, (Guid Lease, Action Stop)> _runs = new();

@@ -58,8 +58,12 @@ public sealed partial class RouteDispatcher(EndpointDataSource endpoints, Dispat
     /// Spec 034 (R-033-5): de quién se cuentan los límites. Por omisión <paramref name="user"/>; en la copia aislada, la
     /// persona (no el administrador de la copia, que es el mismo id en todas).
     /// </param>
+    /// <param name="origin">
+    /// Spec 046 (H4 CA4): el origen que queda en la bitácora de lo que escriba la ruta (<see cref="Audit.CompanionOrigin"/> al
+    /// ejecutar una acción confirmada del Acompañante).
+    /// </param>
     public async Task<RouteResult> SendAsync(IServiceProvider services, UserContext user, RouteCall call, bool allowWrites, CancellationToken ct,
-        BearerCredential? credential = null, int? caller = null)
+        BearerCredential? credential = null, int? caller = null, string? origin = null)
     {
         var endpoint = Find(call.Method, call.Route)
             ?? throw new InvalidOperationException($"La herramienta usa una ruta que no existe: {call.Method} {call.Route}.");
@@ -76,6 +80,7 @@ public sealed partial class RouteDispatcher(EndpointDataSource endpoints, Dispat
         await using var scope = services.CreateAsyncScope();
         var http = new DefaultHttpContext { RequestServices = scope.ServiceProvider };
         http.Items[UserContextExtensions.ItemKey] = user;
+        if (origin is not null) http.Items[Audit.OriginKey] = origin;
         var claims = new List<Claim> { new(ClaimTypes.NameIdentifier, user.Id.ToString()), new(ClaimTypes.Name, user.Username) };
         if (credential?.Scopes is { } scopes) claims.Add(new Claim(Integrations.OAuthScopes.Claim, scopes));
         http.User = new ClaimsPrincipal(new ClaimsIdentity(claims, credential?.Scheme ?? Scheme));
