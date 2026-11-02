@@ -447,7 +447,7 @@ public static class ModelDiff
             DefaultValue = !StrEq(d.DefaultValue, t.DefaultValue) ? d.DefaultValue ?? "" : null,
             Formula = d.Type == FieldTypes.Formula && d.Formula != t.Formula ? d.Formula : null,
             Editable = d.Editable != t.Editable ? d.Editable : null,
-            LookupFilter = d.Type == FieldTypes.Reference && !JsonEq(d.LookupFilter, t.LookupFilter) ? d.LookupFilter ?? new LookupFilter("", "") : null,
+            LookupFilter = d.Type == FieldTypes.Reference && !JsonEq(d.LookupFilter, t.LookupFilter) ? d.LookupFilter ?? new LookupFilter() : null,
         };
         return op is { Label: null, Required: null, ShowInList: null, Options: null, RequiredForRoles: null, DisplayOrder: null,
             DefaultValue: null, Formula: null, Editable: null, LookupFilter: null } ? null : op;

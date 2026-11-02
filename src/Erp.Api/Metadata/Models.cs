@@ -101,8 +101,29 @@ public sealed record FieldDef
     public bool ClientLocked => ReadOnly || !Editable;
 }
 
-/// <summary>Spec 005: <c>Field</c> es un campo del catálogo referenciado; <c>Source</c>, un campo del mismo registro o <c>CampoPadre.Campo</c>.</summary>
-public sealed record LookupFilter(string Field, string Source);
+/// <summary>
+/// Spec 005: <c>Field</c> es un campo del catálogo referenciado; <c>Source</c>, un campo del mismo registro o <c>CampoPadre.Campo</c>.
+/// Spec 052: además (o en su lugar), <c>Conditions</c>, hasta 10 unidas por Y; la forma corta equivale a una condición <c>eq</c>.
+/// </summary>
+public sealed record LookupFilter(string? Field = null, string? Source = null)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<LookupCondition>? Conditions { get; init; }
+}
+
+/// <summary>
+/// Spec 052: <c>Field</c> (del catálogo referenciado) <c>Op</c> (los de <see cref="FilterOps"/>) y una constante (<c>Value</c>, como en
+/// <see cref="ViewFilter"/>) o un origen (<c>Source</c>: ruta de hasta tres saltos desde el registro que se captura).
+/// </summary>
+public sealed record LookupCondition
+{
+    public required string Field { get; init; }
+    public required string Op { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Source { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public JsonElement? Value { get; init; }
+}
 
 public sealed record WorkflowState
 {
@@ -932,7 +953,7 @@ public sealed record UpdateFieldOp : Operation
     public string? DefaultValue { get; init; }
     public string? Formula { get; init; }
     public bool? Editable { get; init; }
-    /// <summary>Spec 005: un filtro con <c>Field</c> vacío lo elimina.</summary>
+    /// <summary>Spec 005: un filtro con <c>Field</c> vacío (y, spec 052, sin condiciones) lo elimina.</summary>
     public LookupFilter? LookupFilter { get; init; }
 }
 

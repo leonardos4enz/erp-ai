@@ -1,7 +1,7 @@
 {
   "id": "compras",
   "name": "Compras",
-  "version": "1.12.0",
+  "version": "1.13.0",
   "icon": "shopping-cart",
   "description": "Requisiciones, órdenes de compra con autorización por montos y recepción de mercancía con cantidades recibidas y pendientes. Incluye proveedores, productos y catálogos base.",
   "plan": {
@@ -663,6 +663,14 @@
               { "roles": ["Solicitante"], "where": "CURRENTUSER() IN Departamento.Responsables", "access": "read" },
               { "roles": ["Comprador", "Gerente de compras", "Director"], "scope": "all" }
             ] } }
+      ] } },
+    { "version": "1.13.0",
+      "description": "Filtros de búsqueda compuestos (spec 052): la orden solo ofrece (y el servidor solo acepta al guardar) proveedores activos, y cada partida, productos activos.",
+      "plan": { "description": "Compras 1.13.0: filtros del buscador de proveedor y producto", "operations": [
+        { "op": "updateField", "entity": "OrdenCompra", "field": "Proveedor",
+          "lookupFilter": { "conditions": [ { "field": "Activo", "op": "eq", "value": true } ] } },
+        { "op": "updateField", "entity": "OrdenCompraPartida", "field": "Producto",
+          "lookupFilter": { "conditions": [ { "field": "Activo", "op": "eq", "value": true } ] } }
       ] } }
   ],
   "roles": [    { "name": "Solicitante", "description": "Crea y envía requisiciones de compra.", "canManageModel": false, "canManageUsers": false, "canViewAudit": false,

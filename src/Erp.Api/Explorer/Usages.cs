@@ -167,8 +167,12 @@ public sealed class UsageIndex
             if (f.LookupFilter is { } lf && _model.TryGetValue(f.ReferenceEntity ?? "", out var lookupTarget))
             {
                 var site = S(UsageKinds.Lookup, $"Filtro del buscador de {f.Label}");
-                Name(site, lookupTarget, lf.Field);
-                Name(site, e, lf.Source);
+                // Spec 052: cada condición nombra un campo del destino y, si compara con el registro, su origen (una ruta).
+                foreach (var c in Data.LookupFilters.Of(lf))
+                {
+                    Name(site, lookupTarget, c.Field);
+                    Name(site, e, c.Source);
+                }
             }
         }
 

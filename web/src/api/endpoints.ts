@@ -76,6 +76,11 @@ export const dataApi = {
   list: (entity: string, q: ListQuery, signal?: AbortSignal) =>
     api<RowList>(`/data/${enc(entity)}`, { query: { ...q, filters: filtersParam(q.filters) }, signal }),
   get: (entity: string, id: number | string) => api<Row>(`/data/${enc(entity)}/${enc(String(id))}`),
+  /** Spec 052: el buscador de un campo (`Campo` o `Partidas.Campo`) con su filtro resuelto en el servidor con el borrador. */
+  lookupFor: (entity: string, field: string, body: { search: string; id?: number | string; values: Record<string, unknown>; line?: number }, signal?: AbortSignal) =>
+    api<LookupItem[]>(`/data/${enc(entity)}/lookup/${enc(field)}`, {
+      method: 'POST', body: { ...body, id: body.id != null ? Number(body.id) : undefined }, signal,
+    }),
   lookup: (entity: string, search: string, signal?: AbortSignal, filter?: { field: string; value: unknown }) =>
     api<LookupItem[]>(`/data/${enc(entity)}/lookup`, {
       query: { search, filterField: filter?.field, filterValue: filter ? String(filter.value ?? '') : undefined }, signal,

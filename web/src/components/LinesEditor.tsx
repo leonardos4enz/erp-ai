@@ -1,6 +1,6 @@
 import { ListPlus, Plus, Trash2 } from 'lucide-react';
 import { fieldError, type ApiError } from '../api/client';
-import type { EntityDef, FieldDef } from '../api/types';
+import type { EntityDef, FieldDef, LookupItem } from '../api/types';
 import { formatFormula, isEditableField, isNumericField, isRequiredFor } from '../lib/entity';
 import { lineErrorKey, lineFields, lookupFilterFor, type LineDraft, type Values } from '../lib/draft';
 import { FieldControl } from './FieldInput';
@@ -14,6 +14,8 @@ export interface LinesEditorProps {
   readOnly: boolean;
   /** Documento dueño de las partidas: para filtros como `Recepcion.OrdenCompra`. */
   parent?: { def: EntityDef; values: Values };
+  /** Spec 052: buscador de la celda `campo` de la partida `index` con el borrador completo. */
+  lookupFor?: (field: string, index: number) => (search: string, signal: AbortSignal) => Promise<LookupItem[]>;
   serverError: ApiError | null;
   clientErrors: Record<string, string>;
   onAdd: () => void;
@@ -21,8 +23,13 @@ export interface LinesEditorProps {
   onChange: (index: number, field: string, value: unknown, label?: string | null) => void;
 }
 
+/** Spec 052: el buscador con filtro pide al servidor; sin quien pregunte, no hay filtro que aplicar en la celda. */
+function withRequest(info: { waiting?: string; key: string } | undefined, request?: (search: string, signal: AbortSignal) => Promise<LookupItem[]>) {
+  return info && request ? { ...info, request } : undefined;
+}
+
 /** Partidas de un documento: tabla editable con una fila por renglón. */
-export function LinesEditor({ field, child, lines, roles, readOnly, parent, serverError, clientErrors, onAdd, onRemove, onChange }: LinesEditorProps) {
+export function LinesEditor({ field, child, lines, roles, readOnly, parent, lookupFor, serverError, clientErrors, onAdd, onRemove, onChange }: LinesEditorProps) {
   const columns = lineFields(child).filter((f) => f.showInList !== false);
   const totalsOnly = (f: FieldDef) => f.type === 'formula' || f.type === 'autonumber';
 
@@ -86,7 +93,7 @@ export function LinesEditor({ field, child, lines, roles, readOnly, parent, serv
                           describedBy={err ? `${id}-err` : undefined}
                           ariaLabel={name}
                           isNew={l.id == null}
-                          filter={lookupFilterFor(c, { def: child, values: l.values }, parent)}
+                          filter={withRequest(lookupFilterFor(c, { def: child, values: l.values }, parent), lookupFor?.(c.name, i))}
                           compact
                         />
                         {err && <span id={`${id}-err`} className="field-error cell-error" role="alert">{err}</span>}

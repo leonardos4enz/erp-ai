@@ -340,6 +340,9 @@ public sealed partial class RecordService
         var warnings = new List<RuleWarning>(); // spec 023: no detienen al motor; quedan en la auditoría
         if (linesField is null) RuleErrors(root, header, env, "", errors, warnings);
         else RuleErrors(target, lineScopes[linesField][lineIndex], env, "", errors, warnings);
+        // Spec 052: el filtro del buscador de las referencias que asigna (el motor, sin alcance de persona; F-06).
+        CheckLookupFilters(draft, root, c.Model, loader, c.User, null, errors, linesField, linesField is null ? null : id,
+            set.Select(x => x.Field.Name).ToList());
         if (errors.Count > 0) throw new ValidationFailed(errors);
         await CheckLedgerAsync(c.Cn, c.Tx, root, c.Model, draft, draft.CompanyId, LedgerSnapshot(root, before), rootId, c.Ct);
 

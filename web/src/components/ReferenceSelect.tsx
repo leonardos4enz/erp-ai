@@ -21,8 +21,11 @@ export interface ReferenceSelectProps {
   compact?: boolean;
   /** Fuente alternativa de opciones (p. ej. usuarios). Por defecto: GET /data/{entity}/lookup. */
   lookup?: (search: string, signal: AbortSignal) => Promise<LookupItem[]>;
-  /** Spec 005: solo ofrece registros con `field` = `value` (p. ej. partidas de la orden elegida). */
-  filter?: { field: string; value: unknown; sourceLabel: string };
+  /**
+   * Spec 052: buscador con filtro, resuelto en el servidor con el borrador (`request`). `waiting`: el origen que falta (no se
+   * pregunta); `key`: firma de los valores de los que depende (al cambiar, se vuelve a pedir).
+   */
+  filter?: { waiting?: string; key: string; request: (search: string, signal: AbortSignal) => Promise<LookupItem[]> };
   /** Spec 050: ids que no se ofrecen (los ya elegidos en un campo de varios valores). */
   exclude?: number[];
   /** Texto de ayuda del buscador vacío (por defecto «Buscar…»). */
@@ -64,21 +67,20 @@ export function ReferenceSelect({ entity, value, label, onChange, id, invalid, d
   const wrapRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
 
-  const filterValue = filter?.value ?? null;
-  const waitingSource = !!filter && (filterValue === null || filterValue === '');
+  const waitingSource = !!filter?.waiting;
 
   useEffect(() => {
     if (!open) return;
     if (waitingSource) { setItems([]); setLoading(false); return; }
     const ctrl = new AbortController();
     setLoading(true);
-    (lookup ? lookup(debounced, ctrl.signal) : dataApi.lookup(entity, debounced, ctrl.signal, filter ? { field: filter.field, value: filterValue } : undefined))
+    (filter ? filter.request(debounced, ctrl.signal) : lookup ? lookup(debounced, ctrl.signal) : dataApi.lookup(entity, debounced, ctrl.signal))
       .then((r) => { setItems(exclude?.length ? r.filter((x) => !exclude.includes(x.id)) : r); setActive(0); })
       .catch(() => { if (!ctrl.signal.aborted) setItems([]); })
       .finally(() => { if (!ctrl.signal.aborted) setLoading(false); });
     return () => ctrl.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entity, debounced, open, filter?.field, filterValue]);
+  }, [entity, debounced, open, !!filter, filter?.key, filter?.waiting]);
 
   // Sigue al campo si la página, la tabla de partidas o la ventana se desplazan o cambian de tamaño.
   useLayoutEffect(() => {
@@ -152,7 +154,7 @@ export function ReferenceSelect({ entity, value, label, onChange, id, invalid, d
         <ul className="combo-list combo-list-floating" id={listId} role="listbox" ref={listRef} style={pos}>
           {loading && <li className="combo-empty"><Spinner size={14} /></li>}
           {!loading && items.length === 0 && (
-            <li className="combo-empty">{waitingSource ? `Elige primero ${filter!.sourceLabel.toLowerCase()}` : 'Sin resultados'}</li>
+            <li className="combo-empty">{waitingSource ? `Elige primero ${filter!.waiting!.toLowerCase()}` : 'Sin resultados'}</li>
           )}
           {!loading && items.map((it, i) => (
             <li

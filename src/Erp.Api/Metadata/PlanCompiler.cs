@@ -211,7 +211,7 @@ public static partial class PlanCompiler
             Check(f.Formula, $"fórmula de {f.Name}");
             if (shared && f.Formula is not null && Expressions.ExprAnalyzer.UsedFunctions(f.Formula).FirstOrDefault(Expressions.ExprAnalyzer.CompanyFunctions.Contains) is { } fn)
                 msgs.Add($"{e.Name} › fórmula de {f.Name}: {fn}() solo se usa en fórmulas de catálogos por empresa (en uno compartido el resultado dependería de quién guarda).");
-            if (f.LookupFilter is { } lf) msgs.AddRange(ValidateLookupFilter(e, f, lf, model));
+            if (f.LookupFilter is { } lf) msgs.AddRange(Data.LookupFilters.Validate(e, f, lf, model)); // spec 052
             if (f.Type == FieldTypes.Lines)
             {
                 if (!model.TryGetValue(f.ChildEntity ?? "", out var child) || child.IsArchived)
@@ -235,24 +235,6 @@ public static partial class PlanCompiler
         }
         Check(e.Security?.DeletableWhen, "seguridad (deletableWhen)"); // spec 045 (D-04)
         foreach (var m in msgs) yield return m;
-    }
-
-    /// <summary>El filtro del buscador: campo del catálogo referenciado = campo propio o del documento padre.</summary>
-    private static IEnumerable<string> ValidateLookupFilter(EntityDef e, FieldDef f, LookupFilter lf, IReadOnlyDictionary<string, EntityDef> model)
-    {
-        var where = $"{e.Name}.{f.Name} (filtro del buscador)";
-        if (f.Type != FieldTypes.Reference) { yield return $"{where}: solo las referencias admiten filtro."; yield break; }
-        if (!model.TryGetValue(f.ReferenceEntity ?? "", out var target)) yield break; // se reporta en la validación del campo
-        var tf = target.FindField(lf.Field ?? "");
-        if (tf is null || tf.IsArchived || FieldTypes.IsVirtual(tf.Type))
-            yield return $"{where}: '{lf.Field}' no es un campo de {target.Name}.";
-        var parts = (lf.Source ?? "").Split('.');
-        var head = e.FindField(parts[0]);
-        if (parts.Length > 2 || head is null || head.IsArchived || FieldTypes.IsVirtual(head.Type))
-            yield return $"{where}: '{lf.Source}' no es un campo de {e.Name}.";
-        else if (parts.Length == 2 && (head.Type != FieldTypes.Parent || !model.TryGetValue(head.ReferenceEntity ?? "", out var parent) ||
-                                       parent.FindField(parts[1]) is not { IsArchived: false } pf || FieldTypes.IsVirtual(pf.Type)))
-            yield return $"{where}: '{lf.Source}' debe ser un campo del documento padre (p. ej. {(e.ParentField?.Name ?? "Documento")}.Campo).";
     }
 
     private sealed record OpResult(EntityDef Entity, string Description, IReadOnlyList<string> Sql);
@@ -417,13 +399,18 @@ public static partial class PlanCompiler
             DefaultValue = op.DefaultValue is null ? f.DefaultValue : op.DefaultValue.Trim() is { Length: > 0 } d ? d : null,
             Formula = op.Formula?.Trim() ?? f.Formula,
             Editable = f.ReadOnly || f.Type == FieldTypes.Lines || (op.Editable ?? f.Editable),
-            LookupFilter = op.LookupFilter is null ? f.LookupFilter : string.IsNullOrWhiteSpace(op.LookupFilter.Field) ? null : op.LookupFilter,
+            LookupFilter = op.LookupFilter is null ? f.LookupFilter : Data.LookupFilters.IsEmpty(op.LookupFilter) ? null : op.LookupFilter,
         };
         ValidateLock(ctx, updated);
         if (ctx.ErrorCount > start) return null;
         var detail = updated.Editable != f.Editable
             ? updated.Editable ? " (vuelve a ser editable por el usuario)" : " (ahora lo asigna el sistema)"
             : "";
+        // Spec 052: la vista previa dice cómo queda el filtro del buscador.
+        if (op.LookupFilter is not null)
+            detail += updated.LookupFilter is { } lf
+                ? $" (filtro del buscador: {Data.LookupFilters.Of(lf).Count} {(Data.LookupFilters.Of(lf).Count == 1 ? "condición" : "condiciones")})"
+                : " (sin filtro del buscador)";
         return new(ReplaceField(e, updated), $"Actualizar campo '{updated.Label}' de '{e.Label}'{detail}", []);
     }
 

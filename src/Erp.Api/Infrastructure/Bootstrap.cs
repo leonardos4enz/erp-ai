@@ -231,6 +231,8 @@ public static class Bootstrap
         -- Spec 005
         IF COL_LENGTH('meta.Entity', 'AutomationsJson') IS NULL ALTER TABLE meta.Entity ADD AutomationsJson nvarchar(max) NULL;
         IF COL_LENGTH('meta.Field', 'LookupFilterJson') IS NULL ALTER TABLE meta.Field ADD LookupFilterJson nvarchar(400) NULL;
+        -- Spec 052: filtros compuestos (hasta 10 condiciones con rutas).
+        IF COL_LENGTH('meta.Field', 'LookupFilterJson') < 8000 ALTER TABLE meta.Field ALTER COLUMN LookupFilterJson nvarchar(4000) NULL;
         -- Spec 006
         IF COL_LENGTH('meta.Entity', 'SecurityJson') IS NULL ALTER TABLE meta.Entity ADD SecurityJson nvarchar(max) NULL;
         IF COL_LENGTH('meta.[User]', 'Unit') IS NULL ALTER TABLE meta.[User] ADD Unit nvarchar(100) NULL;

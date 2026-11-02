@@ -21,6 +21,9 @@ public sealed class DocDraft
     public int? CompanyId { get; init; }
     public Values Header { get; init; } = new();
     public Dictionary<string, List<LineDraft>> Lines { get; } = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>Spec 052: copia del encabezado y de las partidas (por Id) como se leyeron; null en un alta. Dice qué cambió.</summary>
+    public Values? Original { get; set; }
+    public Dictionary<(string Field, long Id), Values>? OriginalLines { get; set; }
 }
 
 public sealed class LineDraft

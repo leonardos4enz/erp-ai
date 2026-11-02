@@ -7,6 +7,13 @@ export type FieldType =
 
 export type FormulaResultType = 'decimal' | 'integer' | 'text' | 'boolean' | 'date';
 
+/** Spec 052: operadores del filtro del buscador (los de los filtros de vistas, 007 y 050). */
+export type LookupOp = 'eq' | 'ne' | 'gt' | 'gte' | 'lt' | 'lte' | 'contains' | 'in' | 'blank' | 'notBlank';
+/** Spec 052: campo del catálogo referenciado · operador · constante (`value`) u origen (`source`, ruta desde el registro). */
+export interface LookupCondition { field: string; op: LookupOp; value?: unknown; source?: string }
+/** Spec 005 (`field` = `source`) y 052 (`conditions`, unidas por Y). */
+export interface LookupFilter { field?: string; source?: string; conditions?: LookupCondition[] }
+
 export interface FieldDef {
   name: string;
   label: string;
@@ -36,8 +43,8 @@ export interface FieldDef {
   readOnly?: boolean;
   /** false: lo asigna el sistema (al crear o en transiciones), nunca el usuario. */
   editable?: boolean;
-  /** Spec 005: el buscador solo ofrece registros con `field` = valor de `source` (campo propio o `CampoPadre.Campo`). */
-  lookupFilter?: { field: string; source: string } | null;
+  /** Spec 005 y 052: el buscador (y el servidor al guardar) solo acepta registros que cumplen el filtro. */
+  lookupFilter?: LookupFilter | null;
   /** Spec 006, solo salida: acceso del usuario actual por rol. */
   access?: FieldAccessLevel;
   /** Spec 006, solo salida: estados en que se captura ([] = solo en las transiciones que lo piden). */
@@ -525,7 +532,7 @@ export type Operation =
   | { op: 'updateEntity'; entity: string; label?: string; labelPlural?: string; icon?: string; description?: string; displayField?: string; group?: string; perCompany?: boolean }
   | { op: 'archiveEntity'; entity: string }
   | { op: 'addField'; entity: string; field: FieldDef }
-  | { op: 'updateField'; entity: string; field: string; label?: string; required?: boolean; showInList?: boolean; options?: string[]; requiredForRoles?: string[]; displayOrder?: number; defaultValue?: string; formula?: string; editable?: boolean; lookupFilter?: { field: string; source: string } }
+  | { op: 'updateField'; entity: string; field: string; label?: string; required?: boolean; showInList?: boolean; options?: string[]; requiredForRoles?: string[]; displayOrder?: number; defaultValue?: string; formula?: string; editable?: boolean; lookupFilter?: LookupFilter }
   | { op: 'archiveField'; entity: string; field: string }
   | { op: 'restoreEntity'; entity: string }
   | { op: 'restoreField'; entity: string; field: string }

@@ -315,6 +315,17 @@ export function EntityFormPage() {
     }
   }
 
+  /** Spec 052: el buscador de una referencia con filtro pregunta al servidor con el borrador (el filtro no viaja). */
+  function lookupFor(f: FieldDef) {
+    const info = def ? lookupFilterFor(f, { def, values: draft.values }) : undefined;
+    if (!def || !info) return undefined;
+    return {
+      ...info,
+      request: (search: string, signal: AbortSignal) =>
+        dataApi.lookupFor(def.name, f.name, { search, id, values: buildPayload(def, children, draftRef.current, isNew) }, signal),
+    };
+  }
+
   function renderField(f: FieldDef, wide = false) {
     const fid = `f-${f.name}`;
     // Spec 013 (F-02): en un formulario de solo lectura no hay obligatorios ni pistas de edición; el aviso general explica.
@@ -334,7 +345,7 @@ export function EntityFormPage() {
         error={clientErrors[f.name] ?? fieldError(error, f.name)}
         hint={roleHint}
         isNew={isNew}
-        filter={def ? lookupFilterFor(f, { def, values: draft.values }) : undefined}
+        filter={lookupFor(f)}
         className={wide ? 'span-2' : undefined}
       />
     );
@@ -517,6 +528,8 @@ export function EntityFormPage() {
               roles={roles}
               readOnly={readOnly || saving || lf.access === 'read' || !!lf.lockedByState}
               parent={{ def, values: draft.values }}
+              lookupFor={(name, i) => (search, signal) =>
+                dataApi.lookupFor(def.name, `${lf.name}.${name}`, { search, id, values: buildPayload(def, children, draftRef.current, isNew), line: i }, signal)}
               serverError={error}
               clientErrors={clientErrors}
               onAdd={() => addLine(lf)}

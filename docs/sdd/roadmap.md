@@ -58,7 +58,8 @@ en orden, no en paralelo: casi todas tocan el núcleo del motor (`PlanCompiler`,
 | 049 Endurecimiento 8 (auditoría 9) | Implementado ([spec](specs/049-endurecimiento-8/spec.md)) |
 | 050 Campos de varios valores | Implementado ([spec](specs/050-campos-varios-valores/spec.md)) |
 | 051 «Pertenece a» en expresiones y en la seguridad por registro | Implementado ([spec](specs/051-pertenece-a/spec.md)) |
-| 052 Filtros de búsqueda compuestos | **Siguiente** ([propuesta](#052--filtros-de-búsqueda-compuestos-propuesta)) |
+| 052 Filtros de búsqueda compuestos | Implementado ([spec](specs/052-filtros-busqueda/spec.md)) |
+| 053 Matriz de autorización: núcleo | **Siguiente** ([propuesta](#053--matriz-de-autorización-núcleo-propuesta)) |
 
 ## Diagnóstico
 | Brecha señalada | Situación actual | Spec |
@@ -882,17 +883,15 @@ requisición; el responsable de un departamento consulta sus requisiciones). **F
 `COUNT` de un campo de varios valores, reemplazar la lista entera desde una asignación y rutas a valores simples en permisos por
 registro.
 
-### 052 — Filtros de búsqueda compuestos (propuesta)
-De la 051 (división en su CLARIFY). Hoy `lookupFilter` es `{ field, source }` (una condición: un campo del catálogo destino igual a
-uno del registro) y **solo lo aplica el cliente** (`/lookup` recibe `filterField`/`filterValue` de la petición; guardar no lo
-revisa).
-- **Varias condiciones, constantes y «pertenece a»** (p. ej. «no es prospecto, tiene la categoría *compras generales* y está
-  activo», «el proveedor surte la categoría de la partida»), declaradas en el campo y resueltas en el servidor con el borrador.
-- **Aplicadas también al guardar** (API, formulario, importación, Acompañante, MCP, automatizaciones): elegir un registro que no
-  cumple el filtro es 400; conservar el que ya tenía, como en la 006.
-- **Editor en el modelador** (renglones como el constructor de condiciones) y el buscador del formulario sin enviar el filtro.
-- **Riesgo:** el filtro no debe volverse un oráculo de campos ocultos ni de registros fuera de alcance; concurrencia entre el
-  filtro y el cambio del registro elegido.
+### ~~052 — Filtros de búsqueda compuestos~~ Implementado ([spec](specs/052-filtros-busqueda/spec.md), [verify](specs/052-filtros-busqueda/verify.md))
+`lookupFilter.conditions`: hasta 10 condiciones «campo del destino · operador · constante u origen» unidas por Y (los operadores de
+los filtros de vistas, con «contiene» y «es uno de» para varios valores; origen de hasta tres saltos, con el documento en memoria
+en una partida). El buscador las resuelve en el servidor con el borrador (`POST /api/data/{e}/lookup/{campo}`) y el guardado las
+exige por todos los caminos (formulario, API, importación, transición, automatizaciones; se conserva lo que tenía si no cambió ni
+su origen). Una condición con origen que lee un campo que la persona no ve no se usa con ella. Editor en renglones en el
+modelador. Compras 1.13.0 lo ejerce (proveedor y producto activos). **Fuera** (pendientes): condiciones con O, filtro en campos de
+varios valores y de persona, el diálogo de transición con filtro (R-052-4) y el interbloqueo preexistente de altas concurrentes con
+partidas (R-052-5, para el siguiente endurecimiento).
 
 ### 053 — Matriz de autorización: núcleo (propuesta)
 Capacidad genérica del motor (en SAP, *estrategia de liberación*): **quién autoriza deja de estar escrito en el proceso y pasa a

@@ -78,41 +78,54 @@ public static class FilterSql
             if (Validate(e, filter) is { } err) throw new AppException(400, $"Filtro inválido: {err}");
             var f = e.FindField(filter.Field)!;
             if (!FieldAccess.CanSee(e, f, user)) throw new AppException(400, "Filtro inválido: no se puede filtrar por un campo que no ves.");
-            var values = Values(e, f, filter, user.Id);
-            if (FieldTypes.IsMulti(f.Type))
-            {
-                // Spec 050: filas de la tabla de unión del registro (alias t), ids como parámetros.
-                var rows = $"SELECT 1 FROM {JoinTable(e.Name, f.Name)} j WHERE j.[OwnerId] = t.[Id]";
-                parts.Add(filter.Op switch
-                {
-                    "contains" => $"EXISTS ({rows} AND j.[ValueId] = {Add(values[0])})",
-                    "in" => $"EXISTS ({rows} AND j.[ValueId] IN ({string.Join(", ", values.Select(Add))}))",
-                    "blank" => $"NOT EXISTS ({rows})",
-                    "notBlank" => $"EXISTS ({rows})",
-                    _ => throw new AppException(400, "Filtro inválido."),
-                });
-                continue;
-            }
-            var col = $"t.{Quote(f.Name)}";
-            var textual = InterfaceRules.KindOf(f) is ValueKind.Text or ValueKind.LongText;
-            var blank = textual ? $"({col} IS NULL OR LTRIM(RTRIM({col})) = N'')" : $"{col} IS NULL";
-            parts.Add(filter.Op switch
-            {
-                "eq" => $"{col} = {Add(values[0])}",
-                "ne" => $"({col} <> {Add(values[0])} OR {col} IS NULL)",
-                "gt" => $"{col} > {Add(values[0])}",
-                "gte" => $"{col} >= {Add(values[0])}",
-                "lt" => $"{col} < {Add(values[0])}",
-                "lte" => $"{col} <= {Add(values[0])}",
-                "contains" => $"{col} LIKE {Add("%" + EscapeLike((string)values[0]) + "%")} ESCAPE '\\'",
-                "in" => $"{col} IN ({string.Join(", ", values.Select(Add))})",
-                "blank" => blank,
-                "notBlank" => $"NOT {blank}",
-                _ => throw new AppException(400, "Filtro inválido."),
-            });
+            parts.Add(Condition(e, f, filter.Op, Values(e, f, filter, user.Id), Add));
         }
         return string.Join(" AND ", parts);
     }
+
+    /// <summary>
+    /// SQL de una condición sobre el alias <c>t</c> (spec 052: también la usa el filtro del buscador). <paramref name="f"/> es un
+    /// campo de <paramref name="e"/> ya validado; <paramref name="add"/> agrega cada valor como parámetro y devuelve su nombre.
+    /// </summary>
+    internal static string Condition(EntityDef e, FieldDef f, string op, IReadOnlyList<object> values, Func<object, string> add)
+    {
+        if (FieldTypes.IsMulti(f.Type))
+        {
+            // Spec 050: filas de la tabla de unión del registro (alias t), ids como parámetros.
+            var rows = $"SELECT 1 FROM {JoinTable(e.Name, f.Name)} j WHERE j.[OwnerId] = t.[Id]";
+            return op switch
+            {
+                "contains" => $"EXISTS ({rows} AND j.[ValueId] = {add(values[0])})",
+                "in" => $"EXISTS ({rows} AND j.[ValueId] IN ({string.Join(", ", values.Select(add))}))",
+                "blank" => $"NOT EXISTS ({rows})",
+                "notBlank" => $"EXISTS ({rows})",
+                _ => throw new AppException(400, "Filtro inválido."),
+            };
+        }
+        var col = $"t.{Quote(f.Name)}";
+        var textual = InterfaceRules.KindOf(f) is ValueKind.Text or ValueKind.LongText;
+        var blank = textual ? $"({col} IS NULL OR LTRIM(RTRIM({col})) = N'')" : $"{col} IS NULL";
+        return op switch
+        {
+            "eq" => $"{col} = {add(values[0])}",
+            "ne" => $"({col} <> {add(values[0])} OR {col} IS NULL)",
+            "gt" => $"{col} > {add(values[0])}",
+            "gte" => $"{col} >= {add(values[0])}",
+            "lt" => $"{col} < {add(values[0])}",
+            "lte" => $"{col} <= {add(values[0])}",
+            "contains" => $"{col} LIKE {add("%" + EscapeLike(Convert.ToString(values[0], CultureInfo.InvariantCulture)!) + "%")} ESCAPE '\\'",
+            "in" => $"{col} IN ({string.Join(", ", values.Select(add))})",
+            "blank" => blank,
+            "notBlank" => $"NOT {blank}",
+            _ => throw new AppException(400, "Filtro inválido."),
+        };
+    }
+
+    /// <summary>Spec 052: operadores que admite el tipo del campo (los mismos de vistas y reportes).</summary>
+    internal static bool Allows(FieldDef f, string? op) => OpsByKind[InterfaceRules.KindOf(f)].Contains(op ?? "");
+
+    /// <summary>Spec 052: valores de una constante ya validada (<see cref="Validate"/>), convertidos al tipo del campo.</summary>
+    internal static List<object> ConstantValues(EntityDef e, FieldDef f, ViewFilter filter, int userId) => Values(e, f, filter, userId);
 
     private static string EscapeLike(string s) =>
         s.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_").Replace("[", "\\[");

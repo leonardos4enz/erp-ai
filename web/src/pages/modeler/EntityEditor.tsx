@@ -15,6 +15,8 @@ import { ConfirmDialog } from '../../components/Dialog';
 import { IconPicker } from '../../components/IconPicker';
 import { TagInput } from '../../components/TagInput';
 import { ExprInput, type ExprScope } from '../../components/ExprInput';
+import { LookupFilterEditor } from '../../components/LookupFilterEditor';
+import { fromRows, hasLookupFilter, lookupSignature, toRows } from '../../lib/lookupFilter';
 import { Alert, Button, Field, Input, Select, Switch, Tabs, Textarea, type TabItem } from '../../components/ui';
 import { FIELD_TYPE_LABELS, MODELER_FIELD_TYPES, supportsDefault } from '../../lib/entity';
 import { IDENTIFIER_RE, pluralize, toIdentifier } from '../../lib/format';
@@ -153,6 +155,8 @@ function cleanField(f: DraftField, order: number): FieldDef {
   if (f.type === 'formula') { out.formula = f.formula?.trim() ?? ''; out.resultType = f.resultType ?? 'decimal'; }
   if (f.type === 'lines') out.childEntity = f.childEntity;
   if (supportsDefault(f.type) && f.defaultValue?.trim()) out.defaultValue = f.defaultValue.trim();
+  // Spec 052: el filtro del buscador, solo con condiciones.
+  if (f.type === 'reference' && hasLookupFilter(f.lookupFilter)) out.lookupFilter = fromRows(toRows(f.lookupFilter));
   return out;
 }
 
@@ -277,6 +281,8 @@ export function buildOperations(original: EntityDef | undefined, d: Draft): Oper
     if (moved.has(o.name)) { u.displayOrder = moved.get(o.name)!; changed = true; }
     if (supportsDefault(f.type) && (f.defaultValue ?? '').trim() !== (o.defaultValue ?? '')) { u.defaultValue = (f.defaultValue ?? '').trim(); changed = true; }
     if (f.type === 'formula' && (f.formula ?? '').trim() !== (o.formula ?? '')) { u.formula = (f.formula ?? '').trim(); changed = true; }
+    // Spec 052: sin condiciones, { conditions: [] } quita el filtro.
+    if (f.type === 'reference' && lookupSignature(f.lookupFilter) !== lookupSignature(o.lookupFilter)) { u.lookupFilter = fromRows(toRows(f.lookupFilter)); changed = true; }
     if (changed) ops.push(u);
   });
   return [...ops, ...behaviourOperations(original.name, original, d)];
@@ -351,7 +357,8 @@ function fieldChanged(f: DraftField): boolean {
   if (!o) return false;
   return f.label.trim() !== o.label || !!f.required !== !!o.required || !!f.showInList !== !!o.showInList || (f.editable !== false) !== (o.editable !== false)
     || !!f.isArchived !== !!o.isArchived || !sameList(f.options, o.options) || !sameList(f.requiredForRoles, o.requiredForRoles)
-    || (f.defaultValue ?? '').trim() !== (o.defaultValue ?? '') || (f.formula ?? '').trim() !== (o.formula ?? '');
+    || (f.defaultValue ?? '').trim() !== (o.defaultValue ?? '') || (f.formula ?? '').trim() !== (o.formula ?? '')
+    || lookupSignature(f.lookupFilter) !== lookupSignature(o.lookupFilter);
 }
 
 function FieldRow({ f, index, count, errors, entities, allEntities, roleNames, origin, scope, onChange, onMove, onRemove }: FieldRowProps) {
@@ -495,12 +502,15 @@ function FieldRow({ f, index, count, errors, entities, allEntities, roleNames, o
               {entities.filter((x) => !x.isArchived).map((x) => <option key={x.name} value={x.name}>{x.labelPlural}</option>)}
             </Select>
           )}
-          {/* Spec 026 (fuera del editor visual): el filtro de búsqueda de la 005 se ve, pero se cambia por plan o paquete. */}
-          {f.lookupFilter && (
-            <p className="field-hint span-all">
-              El buscador solo ofrece registros con <span className="mono">{f.lookupFilter.field} = {f.lookupFilter.source}</span>.
-              Este filtro se cambia con un paquete o con el asistente; aquí no tiene control.
-            </p>
+          {/* Spec 052 (H4): el filtro del buscador en renglones (antes, spec 026, solo se mostraba). */}
+          {f.type === 'reference' && f.referenceEntity && (
+            <LookupFilterEditor
+              value={f.lookupFilter}
+              onChange={(lookupFilter) => onChange({ lookupFilter })}
+              ownerFields={scope.fields}
+              entities={allEntities}
+              target={allEntities.find((x) => x.name.toLowerCase() === f.referenceEntity!.toLowerCase())}
+            />
           )}
           {f.type === 'choice' && (
             <Field label="Opciones" error={err('options')} className="span-all">

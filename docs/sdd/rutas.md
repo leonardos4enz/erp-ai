@@ -9,7 +9,7 @@ sin compuerta, si es costosa sin límite o si aplica lo revisado sin huella. `we
 Capacidades: **anónima** (lista blanca) · **sesión** (lo propio del usuario) · **registros** (el motor exige permiso del
 catálogo, alcance por registro y seguridad por campo) · **modelador** · **usuarios** · **auditoría** · **superusuario**.
 
-Total: 192 rutas.
+Total: 193 rutas.
 
 | Método | Ruta | Capacidad | Efecto | Compuerta | Costosa | Huella |
 |---|---|---|---|---|---|---|
@@ -113,6 +113,7 @@ Total: 192 rutas.
 | GET | `/api/data/{entity}/export` | registros | bitácora |  | hasta 5000 filas (bulk) |  |
 | POST | `/api/data/{entity}/import` | registros | datos |  | archivo de hasta 2 MB por el motor (bulk) |  |
 | GET | `/api/data/{entity}/lookup` | registros |  |  |  |  |
+| POST | `/api/data/{entity}/lookup/{field}` | registros | ninguno |  |  |  |
 | DELETE | `/api/data/{entity}/{id:long}` | registros | datos |  |  |  |
 | GET | `/api/data/{entity}/{id:long}` | registros |  |  |  |  |
 | PUT | `/api/data/{entity}/{id:long}` | registros | datos |  |  |  |

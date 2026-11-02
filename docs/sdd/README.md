@@ -116,3 +116,4 @@ y cada sesión queda como registro de una sola entrega. Al cerrar la spec:
 | 049 | [Endurecimiento 8: el interruptor del Acompañante apaga lo que está en marcha y una propuesta no sobrevive a su turno](specs/049-endurecimiento-8/spec.md) | Implementado |
 | 050 | [Campos de varios valores](specs/050-campos-varios-valores/spec.md) | Implementado |
 | 051 | [«Pertenece a» en expresiones y en la seguridad por registro](specs/051-pertenece-a/spec.md) | Implementado |
+| 052 | [Filtros de búsqueda compuestos](specs/052-filtros-busqueda/spec.md) | Implementado |

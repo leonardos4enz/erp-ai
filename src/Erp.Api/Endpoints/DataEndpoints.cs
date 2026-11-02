@@ -22,6 +22,11 @@ public static class DataEndpoints
             records.LookupAsync(entity, search, http.CurrentUser(), ct, filterField, filterValue))
             .Requires(Capability.Records);
 
+        // Spec 052: el buscador de un campo (Campo o Partidas.Campo) con su filtro resuelto en el servidor con el borrador.
+        g.MapPost("/lookup/{field}", (string entity, string field, LookupRequest req, HttpContext http, RecordService records, CancellationToken ct) =>
+            records.LookupForAsync(entity, field, req, http.CurrentUser(), ct))
+            .Requires(Capability.Records).ReadsOnly();
+
         // Contrato (plan 002): la respuesta envuelve los valores en { values }; spec 007 agrega { layout } y spec 023 { warnings }.
         g.MapPost("/compute", async (string entity, ComputeRequest req, HttpContext http, RecordService records, CancellationToken ct) =>
         {

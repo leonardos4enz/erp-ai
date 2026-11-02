@@ -92,6 +92,9 @@ const MODEL = (canary: string) => ({
       { name: 'Nombre', label: 'Nombre', type: 'text', maxLength: 80, required: true },
       { name: 'Puente', label: 'Puente', type: 'reference', referenceEntity: 'CnPuente' },
       { name: 'Puente2', label: 'Puente doble', type: 'reference', referenceEntity: 'CnPuente2' },
+      // Spec 052: un buscador con filtro (resuelto en el servidor con el borrador) sobre el catálogo cuya etiqueta llega al secreto.
+      { name: 'Filtrado', label: 'Puente filtrado', type: 'reference', referenceEntity: 'CnPuente',
+        lookupFilter: { conditions: [{ field: 'Secreto', op: 'notBlank' }, { field: 'Empresa', op: 'eq', source: 'Puente.Empresa' }] } },
       { name: 'Oculto', label: 'Oculto', type: 'text', maxLength: 120 },
       // Dos y tres saltos a un registro fuera de alcance, detrás de uno visible (auditoría 4 D-01).
       { name: 'Dos', label: 'A dos saltos', type: 'formula', resultType: 'text', formula: 'Puente.Secreto.Dato' },
@@ -567,6 +570,14 @@ test('H2 CA2: tampoco las rutas que no son GET y devuelven datos (tomadas del in
         await check(`compute nuevo ${JSON.stringify(values)}`, await l.post('/api/data/CnDoc/compute', { data: { values: { Nombre: 'x', ...values } } }));
       for (const id of [ids.doc, ids.docEmpresa])
         await check(`compute ${id}`, await l.post('/api/data/CnDoc/compute', { data: { id, values: {} } }));
+    },
+    // Spec 052: el buscador de un campo con el borrador (con y sin filtro), nuevo y de un registro guardado.
+    'POST /api/data/{entity}/lookup/{field}': async () => {
+      for (const field of ['Puente', 'Puente2', 'Filtrado'])
+        for (const values of [{ Puente: ids.puente }, { Puente: ids.puenteEmpresa }, { Puente: ids.secreto }, {}])
+          for (const search of [undefined, canary])
+            await check(`buscador ${field} ${JSON.stringify(values)} ${search ?? ''}`, await l.post(`/api/data/CnDoc/lookup/${field}`, { data: { search, values } }));
+      await check('buscador de un registro guardado', await l.post('/api/data/CnDoc/lookup/Filtrado', { data: { id: ids.doc, values: {} } }));
     },
     'POST /api/data/{entity}/import': async () => {
       const res = await l.post('/api/data/CnDoc/import', { params: { dryRun: 'true' }, data: IMPORT_CSV, headers: { 'Content-Type': 'application/octet-stream' } });

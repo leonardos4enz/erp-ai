@@ -126,7 +126,7 @@ public static class AssistantPrompt
 
         Field: { name, label, type, required?, unique?, maxLength?, precision?, scale?, options?, referenceEntity?,
         showInList?, requiredForRoles?, displayOrder?, defaultValue?, formula?, resultType?, prefix?, padding?,
-        childEntity?, editable?, lookupFilter?: { field, source } }
+        childEntity?, editable?, lookupFilter?: { field?, source?, conditions? } }
         Tipos: text (maxLength ≤ 4000, 200 por defecto), longtext, integer, decimal (precision/scale, p. ej. 18/2),
         boolean, date, datetime, choice (options: string[]), reference (referenceEntity), autonumber (prefix, padding;
         folio automático), formula (formula + resultType: decimal|integer|text|boolean|date; solo lectura), user (un
@@ -137,6 +137,12 @@ public static class AssistantPrompt
         unique se permite en text, integer, date y choice. editable: false = lo asigna el sistema (valor por defecto o
         transiciones). Documento con partidas: primero createEntity de la partida con un campo parent que apunta al
         documento (el documento debe existir antes), luego addField del documento con type lines y childEntity.
+        lookupFilter (solo reference): el buscador ofrece y el servidor acepta al guardar solo registros que cumplen todas
+        las condiciones: { conditions: [{ field (del catálogo referenciado), op (eq ne gt gte lt lte contains in blank
+        notBlank), value | source }] } (máx. 10, unidas por Y). value es una constante ($me, $today, un id o una lista para
+        in); source, una ruta desde el registro que se captura (Categoria, Orden.Proveedor.Categorias; en una partida
+        empieza en su campo parent). contains: el campo de varios valores contiene el origen; in con origen: el campo es uno
+        de los de una lista. La forma corta { field, source } equivale a una condición eq.
 
         Expresiones (fórmulas, valores por defecto, reglas, condiciones, visibleWhen, where, filter): operadores
         = <> < <= > >= IN (...), AND OR NOT, + - * /, & concatena texto; literales 'texto', números, TRUE, FALSE, NULL;

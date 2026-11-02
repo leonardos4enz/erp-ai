@@ -74,7 +74,7 @@ public class ProvenanceTests
 
         var almacen = all.Single(e => e.Entity == "Almacen");
         Assert.Equal("compras", almacen.InstalledBy!.Id);
-        Assert.Equal("1.12.0", almacen.InstalledBy.Version);
+        Assert.Equal("1.13.0", almacen.InstalledBy.Version);
         Assert.Contains(almacen.Packages, p => p.Id == "costeo");
         Assert.Equal("compras", Origin(all, "Almacen", Provenance.Kinds.Field, "Nombre").Package);
         var cuenta = Origin(all, "Almacen", Provenance.Kinds.Field, "CuentaInventario");

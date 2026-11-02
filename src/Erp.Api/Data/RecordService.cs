@@ -148,24 +148,9 @@ public sealed partial class RecordService(Db db, MetadataStore store)
             CanWrite(o));
         Require(allowed);
 
-        // Spec 029 (F-B): un campo para mostrar que no ve no se ofrece ni se busca: queda el número del registro.
-        var label = e.EffectiveDisplayField is { } d && !FieldAccess.DisplayHidden(e, user) ? $"t.{Quote(d)}" : "CAST(t.[Id] AS nvarchar(20))";
         await using var cn = await db.OpenAsync(ct);
         await using var cmd = cn.CreateCommand();
-        var where = "t.[IsDeleted] = 0";
-        // Spec 006: el buscador solo ofrece registros a su alcance (una partida, los de su documento).
-        if (RecordFilter.ForRecordOrParent(e, model, user) is { } scope)
-        {
-            scope.AddTo(cmd.Parameters);
-            where += " AND " + scope.Sql;
-        }
-        if (!string.IsNullOrWhiteSpace(search))
-        {
-            var term = search.Trim();
-            if (term.Length > MaxSearchLength) term = term[..MaxSearchLength];
-            cmd.Parameters.Add(new SqlParameter("@search", "%" + EscapeLike(term) + "%"));
-            where += $" AND {label} LIKE @search ESCAPE '\\'";
-        }
+        string? extra = null;
         // Spec 005: buscador filtrado. El campo sale de los metadatos (lista blanca); el valor es parámetro.
         if (!string.IsNullOrEmpty(filterField))
         {
@@ -182,8 +167,35 @@ public sealed partial class RecordService(Db db, MetadataStore store)
             }
             if (fv is null) return []; // sin valor de origen todavía (p. ej. sin orden elegida): nada que ofrecer
             cmd.Parameters.Add(new SqlParameter("@filter", fv));
-            where += $" AND t.{Quote(ff.Name)} = @filter";
+            extra = $"t.{Quote(ff.Name)} = @filter";
         }
+        return await QueryOptionsAsync(cmd, e, model, search, user, extra, ct);
+    }
+
+    /// <summary>
+    /// Opciones del buscador de <paramref name="e"/>: a su alcance (006), por el campo para mostrar que ve (029), con la búsqueda y
+    /// la condición <paramref name="extra"/> (sobre el alias <c>t</c>, con sus parámetros ya en <paramref name="cmd"/>).
+    /// </summary>
+    private static async Task<IReadOnlyList<LookupItem>> QueryOptionsAsync(SqlCommand cmd, EntityDef e, IReadOnlyDictionary<string, EntityDef> model,
+        string? search, UserContext user, string? extra, CancellationToken ct)
+    {
+        // Spec 029 (F-B): un campo para mostrar que no ve no se ofrece ni se busca: queda el número del registro.
+        var label = e.EffectiveDisplayField is { } d && !FieldAccess.DisplayHidden(e, user) ? $"t.{Quote(d)}" : "CAST(t.[Id] AS nvarchar(20))";
+        var where = "t.[IsDeleted] = 0";
+        // Spec 006: el buscador solo ofrece registros a su alcance (una partida, los de su documento).
+        if (RecordFilter.ForRecordOrParent(e, model, user) is { } scope)
+        {
+            scope.AddTo(cmd.Parameters);
+            where += " AND " + scope.Sql;
+        }
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var term = search.Trim();
+            if (term.Length > MaxSearchLength) term = term[..MaxSearchLength];
+            cmd.Parameters.Add(new SqlParameter("@search", "%" + EscapeLike(term) + "%"));
+            where += $" AND {label} LIKE @search ESCAPE '\\'";
+        }
+        if (extra is not null) where += $" AND ({extra})";
         cmd.CommandText = $"SELECT TOP 20 t.[Id], {label} FROM {AppTable(e.Name)} t WHERE {where} ORDER BY 2";
         var list = new List<LookupItem>();
         await using var reader = await cmd.ExecuteReaderAsync(ct);
@@ -291,7 +303,8 @@ public sealed partial class RecordService(Db db, MetadataStore store)
             loader.Reset();
             Compute(draft, e, model, loader, env);
         }
-        var warnings = Validate(draft, e, model, loader, env, user);
+        // Spec 052: el filtro del buscador, con el alcance de quien captura (en una automatización, el del motor).
+        var warnings = Validate(draft, e, model, loader, env, user, person: c.Depth == 0 ? user : null);
         // Spec 023: avisos de la fila importada. Spec 031 (H1, auditoría 5 A-01): los que /compute le daría (su alcance en cada
         // salto); los guardados en la auditoría son los del motor.
         if (told is not null) c.Sink!.Items.AddRange(ShownWarnings(cn, tx, e, model, told, user, null, (d, l, en) => Compute(d, e, model, l, en)));
@@ -334,7 +347,7 @@ public sealed partial class RecordService(Db db, MetadataStore store)
             loader.Reset();
             Compute(draft, e, model, loader, env);
         }
-        var warnings = Validate(draft, e, model, loader, env, user);
+        var warnings = Validate(draft, e, model, loader, env, user, person: user);
         await CheckLedgerAsync(cn, tx, e, model, draft, draft.CompanyId, LedgerSnapshot(e, before), id, ct);
 
         await UpdateHeaderAsync(cn, tx, e, id, draft.Header, rowVersion, user.Id, ct);
@@ -442,7 +455,7 @@ public sealed partial class RecordService(Db db, MetadataStore store)
         var from = draft.Header.GetValueOrDefault(Workflow.StateField) as string;
         var told = CloneDraft(draft);
         Advance(draft, e, c.Model, t, loader, env);
-        var warnings = Validate(draft, e, c.Model, loader, env, c.User, checkRequired: false);
+        var warnings = Validate(draft, e, c.Model, loader, env, c.User, checkRequired: false, person: c.Depth == 0 ? c.User : null);
         // Spec 023: confirm / block / allow. Una automatización (sin lista de aceptados) no tiene a quién preguntar. Spec 031
         // (H1, H4): lo que se le dice o se le pregunta se evalúa con el alcance de quien ejecuta (o disparó la automatización).
         CheckWarnings(t, warnings, acceptedWarnings,
@@ -624,8 +637,9 @@ public sealed partial class RecordService(Db db, MetadataStore store)
     }
 
     /// <summary>Errores (lanza <see cref="ValidationFailed"/>) y, spec 023, los avisos incumplidos, que no detienen.</summary>
+    /// <param name="person">Spec 052: quien captura (el filtro del buscador con su alcance); null, el motor.</param>
     private static List<RuleWarning> Validate(DocDraft d, EntityDef e, IReadOnlyDictionary<string, EntityDef> model, RelatedLoader loader, ExprEnv env,
-        UserContext user, bool checkRequired = true)
+        UserContext user, bool checkRequired = true, UserContext? person = null)
     {
         var errors = new Dictionary<string, string[]>();
         var warnings = new List<RuleWarning>();
@@ -647,6 +661,7 @@ public sealed partial class RecordService(Db db, MetadataStore store)
                 RuleErrors(child, lineScopes[field][i], env, prefix, errors, warnings);
             }
         }
+        CheckLookupFilters(d, e, model, loader, user, person, errors);
         if (errors.Count > 0) throw new ValidationFailed(errors);
         return warnings;
     }
@@ -1202,6 +1217,9 @@ public sealed partial class RecordService(Db db, MetadataStore store)
             }
             draft.Lines[lf.Name] = list;
         }
+        draft.Original = new Values(draft.Header);
+        draft.OriginalLines = draft.Lines.SelectMany(kv => kv.Value.Select(l => (Key: (kv.Key.ToLowerInvariant(), l.Id!.Value), l.Values)))
+            .ToDictionary(x => x.Key, x => new Values(x.Values));
         return draft;
     }
 
