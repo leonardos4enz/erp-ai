@@ -117,6 +117,9 @@ También: `buscar_en_el_sistema` mandaba `"recortado": null`; ahora solo se mand
 
 - Ajustes visuales del dueño: el aviso de la lista con margen abajo (`.list-stale`) y el avatar de la cabecera del panel de
   52 a 44 px. Capturas `acompanante-light/dark/movil.png` regeneradas y revisadas; `acompanante.spec.ts --veces=3` en verde.
+- **CI de `a1341b4` en verde** (anotada al abrir la auditoría 9, 2026-11-02): corrida
+  [41466140553](https://github.com/leonardos4enz/erp-ai/actions/runs/41466140553); «Unitarias, build, Vitest y auditoría» en
+  46 s e «Integración y E2E (SQL Server LocalDB)» en 20 min 18 s, las dos `success`.
 
 ## 6. Riesgos residuales
 Registrados en [riesgos.md](../../riesgos.md): [R-048-1](../../riesgos.md#048) (la caducidad reanuda sin la persona; sin

@@ -405,7 +405,8 @@ ya marcados) y sus hallazgos se vuelven una spec de endurecimiento.
 | 2026-10-27, auditoría 6 (origen de la 034), al cerrar la 033 | 031–033 | 7 defectos (1 alto: quien administra usuarios cambiaba la contraseña o desactivaba al superusuario) y huecos del catálogo de Studio antes del MCP; R-009-1 y R-032-6 confirmados |
 | 2026-10-31, auditoría 7, al cerrar la 039 (servidor MCP, flujo SSE y multi-turno de Studio, reportes a dos saltos) | 034–039 | 12 defectos (1 medio: el registro dinámico del MCP se agota —con direcciones IPv6 sin cuenta, o para siempre con una cuenta, porque los clientes que tuvieron conexión no se barren— y bloquea conexiones nuevas; 11 bajos: tope de pendientes por dirección detrás de un proxy, cola de Studio que vence sesiones en un solo lote, `RenewSeconds` sin relación con `LeaseSeconds`, salidas de `datos` sin purgar si el servidor no vuelve, conversación que cambia de empresa, tope de uniones de la 039 que no existe, «#id» en lugar de «(sin acceso)», canario sin reportes a dos saltos, entre otros) y 3 observaciones. Sin fugas ni escaladas verificadas; los 25 riesgos marcados siguen abiertos. Propone la **040 — Endurecimiento 6**; el dueño la puso antes de los reportes personales (2026-10-31), que pasan a la 041, Ventas a la 042 y MCP 2 a la 043 |
 | 2026-11-01, auditoría 8, al cerrar la 044 (registro dinámico endurecido, reportes y tableros personales con reparto, Ventas, copia aislada por conexión MCP con su barrido, escrituras con clave y propuestas por MCP) | 040–044 | 11 defectos (1 alto: explorar o reportar sobre las partidas de un documento salta un campo de partidas oculto —el motor las oculta en el registro, OData, la bitácora y las fórmulas, pero los reportes solo piden leer el documento—, desde la 007 y al alcance de cualquier usuario desde la 041; 1 medio: el vendedor crea un cliente sin límite de crédito, que no puede fijar, y confirma a crédito sin tope; 9 bajos: «Público en general» editable por todo vendedor, borrar el pedido de una cotización aceptada, un campo único que revela registros fuera de alcance, exportar reportes sin bitácora, compartidos sin tope, tres en las claves y la copia del MCP y una carrera del barrido del registro) y 3 observaciones ([detalle](#045--endurecimiento-7-auditoría-8-propuesta)). Las correcciones de la 040 se sostienen; el oráculo por campo oculto de R-043-6 no se reproduce en ningún camino. Propone la **045 — Endurecimiento 7**; el dueño decide su lugar |
-| **Siguiente: auditoría 9** (tras cerrar la 048), adelantada al cerrar la 046 (el Acompañante agrega un punto de entrada —`/api/companion`—, un trabajo asíncrono —su cola y su barrido— y delegación: un agente que escribe con los permisos de la persona cuando ella confirma, ADR-0010). Se recomendaba antes de la 047; el dueño decidió (2026-11-01) cerrar primero la 047 y (2026-11-02) también la 048, que cambia el motor del Acompañante, así que **cubre 045–048** | 045–048 | Pendiente |
+| 2026-11-02, auditoría 9, adelantada al cerrar la 046 (el Acompañante agrega un punto de entrada —`/api/companion`—, un trabajo asíncrono —su cola, su barrido y la reanudación al decidir— y delegación: escribe con los permisos de la persona cuando ella confirma, ADR-0010) y hecha tras la 048 por decisión del dueño | 045–048 | 3 defectos (1 medio: `Companion:Enabled=false` no apaga lo que ya está en marcha —el trabajador sigue reclamando turnos, confirmar y descartar reanudan y el barrido reanuda las propuestas caducadas, así que se sigue llamando al proveedor y escribiendo—; 2 bajos: una propuesta sobrevive a un turno que termina sin llegar a «esperando» —«Detener», un tope o la identidad en la herramienta siguiente de la misma respuesta— y su resultado no vuelve al modelo; sin tope de entrada por petición, el «prompt is too long» del proveedor se dice «error inesperado») y 5 observaciones ([detalle](#049--endurecimiento-8-auditoría-9-propuesta)). Sin fugas ni escaladas verificadas: identidad, dueña, empresa, orden de bloqueos, «una vez» y reanudación se sostienen. Propone la **049 — Endurecimiento 8**; el dueño decide su lugar |
+| **Siguiente: auditoría 10** (cada 5 specs: tras la 053, o antes si una spec agrega un punto de entrada, un trabajo asíncrono o delegación) | 049– | Pendiente |
 
 La auditoría 5 (adelantada, sobre la 029) confirmó que las 139 rutas conservan una capacidad igual o más estricta y
 encontró que la regla «lo vivo con el alcance de quien lo ve» de la 029 no llegaba a la importación, a las transiciones ni
@@ -711,6 +712,8 @@ En este orden, por decisión del dueño (2026-10-25):
     hoy. Toca el motor de la 046 y la tarjeta de la 047. Pendiente, si se pide: herramienta «¿qué pasa si…?» (qué
     automatizaciones se disparan al crear, editar o ejecutar algo) y `filledBy` como ayuda en el formulario («lo llena…»). Pendiente también: guías paso a paso que señalan el control en pantalla, modo instructor con recorridos,
     eliminar registros por el Acompañante, unificar el bucle de Studio y el del Acompañante (R-046-1).
+    **Auditoría 9** (045–048) hecha el 2026-11-02 en una sesión aparte ([resultado](#auditorías)): propone la
+    [049 — Endurecimiento 8](#049--endurecimiento-8-auditoría-9-propuesta); el dueño decide su lugar.
 15. **Pólizas en moneda extranjera** (pendiente de la 020).
 16. **Revaluación de existencias** (pendiente de la 020).
 17. **Reversa de pólizas con otra póliza** (pendiente de la 020).
@@ -756,6 +759,65 @@ trabajos en segundo plano ni secretos, y `entregar` es una transacción con el b
 Riesgos que la auditoría no cierra: los 21 medios o altos marcados **auditoría** (R-001-1 … R-022-3, R-039-4) siguen sin
 prueba y fuera del alcance de 040–044; se revisaron sin cambios y el dueño decide si la 045 toma alguno. R-043-5
 (`Producto.CostoUltimo` visible para vendedores, medio) sigue por decidir con el dueño.
+
+### 049 — Endurecimiento 8 (auditoría 9): propuesta
+Origen: la auditoría externa 9 (2026-11-02, solo lectura al cerrar la 048, commit `a1341b4`, specs 045–048). Lectura del
+código completo del Acompañante (`src/Erp.Api/Companion/*`, `CompanionEndpoints`, `ModelEndpoints`, `FieldSources`, el
+despachador, el panel y `lib/companion.ts`) y de las correcciones de la 045; no se cambió código ni pruebas, y no se corrió la
+suite (el servidor de desarrollo puede tener `Erp.Api.exe` tomado). Cada D-xx debe volverse una prueba que falle con `a1341b4`.
+
+| # | Defecto · dónde | Escenario |
+|---|---|---|
+| D-01 | **Media** · `Companion:Enabled` solo lo revisan `StartAsync` y `SendAsync` (`CompanionService.cs:79-82`, `:99`, `:130`). `CompanionDispatcher` (`CompanionService.cs:477-527`) corre siempre (`ErpApp.cs:109`) y `ClaimAsync` (`:305-315`) toma cualquier `queued`; el bucle solo exige la clave (`CompanionAgent.cs:120-121`); `ConfirmAsync`, `DiscardAsync` (`CompanionActions.cs:261-292`, `:353-383`) y el barrido (`:474-481`) reanudan sin mirarlo | El dueño apaga el Acompañante (`Enabled=false`, el interruptor que citan R-046-7 y el STRIDE de la 046) por un incidente de inyección o de costo. Lo que estaba en cola corre igual; una conversación «esperando» se reanuda al decidir («No, y dile qué cambiar» llama al modelo) o, sin nadie, a las 24 h cuando el barrido caduca la propuesta y la reanuda (R-048-1); confirmar sigue escribiendo. En cada caso el historial viaja al proveedor y se cobra. Corrección: con `Enabled=false` no reclamar ni reanudar (o cerrar `queued`/`waiting` como detenidas) y confirmar/descartar con 503 como empezar |
+| D-02 | Baja · `CompanionAgent.cs:175-196`: los resultados de una respuesta se guardan solo después de recorrer **todas** sus llamadas (`:192-193`); si a media lista el turno sale —tope de consultas (`:177-178`), identidad (`:179-180`), «Detener», tiempo, lease perdido o caída (`ExpireAsync`, `CompanionService.cs:321-353`)— la propuesta ya guardada sigue `proposed`. `FinishAsync` (`:382-383`) solo la descarta si el turno terminaba en `waiting` | La respuesta trae `proponer_accion` y luego `ver_registro`; la persona pulsa «Detener» durante la segunda: la conversación queda `cancelled`, la tarjeta sigue confirmable (contradice 048 H1 CA6: detener es «no» a lo pendiente) y confirmarla no reanuda nada. En el mensaje siguiente `Normalize` rellena esa llamada con «el turno se interrumpió» (`StudioTranscript.cs:19`, `:83-84`), y `LoadAsync` solo sustituye resultados que existen (`CompanionAgent.cs:303-304`): el modelo no sabe que se aplicó, el síntoma que originó la 048. Determinista con el tope: `ToolCalls = MaxToolCalls − 1` y la respuesta `[proponer_accion, ver_registro]`. Corrección: descartar lo propuesto en el turno en todo cierre que no sea `waiting` (y en `ExpireAsync`), y aplicar los resultados de las acciones también a los que agrega `Normalize` |
+| D-03 | Baja · `CompanionAgent.cs:133-137`: el único tope de entrada es el acumulado de la conversación (`MaxTokens`, 1,5 M); no hay tope por petición contra la ventana del modelo. El 400 «prompt is too long» cae en `bad_request` (`AssistantModel.cs:121`) y se muestra «La respuesta falló por un error inesperado» (`CompanionService.cs:468`; igual `workspace`, `model` y `provider`) | Un turno con cinco respuestas de ocho lecturas en paralelo de ~20 000 caracteres (`MaxToolResultChars`, p. ej. `buscar_registros` con 50 filas) llega a ~800 000 caracteres de contexto con ~0,5 M tokens acumulados: pasa la estimación y el proveedor rechaza la petición; la persona ve un error genérico y el turno se pierde (la purga al cerrar lo deja usable después). Corrección: `Companion:MaxInputTokens` (estimado antes de cada llamada, con `limit_tokens` y su mensaje) y un código propio para «prompt is too long»; lo mismo vale para el bucle de Studio (R-046-1) |
+
+Observaciones (sin defecto verificado): **O-01** decidir reanuda con el `SecurityStamp` guardado al empezar el turno
+(`ResumeAsync`, `CompanionActions.cs:389-394`; solo `SendAsync` y `AnswerAsync` lo renuevan): tras cambiar su contraseña y
+volver a entrar, la persona confirma (se aplica con su sesión nueva) y el turno reanudado se detiene por identidad; falla en lo
+seguro y el resultado llega al modelo con el mensaje siguiente. **O-02** `como_funciona` pasa al modelo las expresiones de las
+reglas (`assert`, `when`) y las condiciones de transición tal como las da `/api/model/entities/{name}` (`ForUser`,
+`ModelEndpoints.cs:129-154`, no toca `Rules`, `Workflow` ni `Automations`): una regla sobre un campo oculto lo nombra (nombre y
+umbral, no valores). Es así desde la 006 en la ruta del navegador; el Acompañante lo lleva al proveedor y el prompt pide
+traducirlo. No se buscó un caso en los paquetes. **O-03** `filledBy` y `buscar_en_el_sistema` deciden si se ve una partida con
+`CanSee` del documento (`ModelEndpoints.cs:119-123`), no con `FieldAccess.SeesLines` (045 D-01): con el campo de partidas oculto
+aparecen la etiqueta de la automatización y del catálogo de partidas, sin valores. **O-04** «Detener» y borrar no piden estar
+en la empresa de la conversación (`CompanionService.cs:245-301`), a diferencia de leer, seguir, confirmar y responder (046 F-07,
+048 F-05); son de la propia persona y no revelan nada. **O-05** sigue pendiente la prueba de la 045 O-03 (registro dinámico y
+renovaciones del MCP a la vez); la CI en rojo de `cfcef01` fue otra carrera (de la prueba de Studio con su barrido).
+
+Sin hallazgo (comprobado): `/api/companion` solo con la sesión: una clave de API no está en sus rutas permitidas, un token
+OAuth no tiene alcance para ellas y el token MCP solo sirve en `/mcp` (`BearerScope.Check`); CSRF aplica y la cuenta de
+servicio se rechaza en todas, también al confirmar. Cada consulta filtra por `UserId`; leer, seguir, confirmar y responder
+piden la empresa. Orden de bloqueos conversación → acción en confirmar (las dos fases), descartar, detener, borrar y responder
+(con el bloqueo por persona antes en `SendAsync`); confirmar diez veces pasa una (`proposed → applying` bajo `UPDLOCK`);
+caducar y confirmar se ordenan en la fila de la acción; la reanudación exige que no quede nada `proposed` ni `applying` y va en la
+transacción de la decisión, y `FinishAsync` reanuda en la suya si la persona decidió mientras el turno cerraba. Fallas parciales:
+una caída entre `applying` y el resultado queda `unknown` y nunca se repite; entre decidir y reanudar no hay hueco (una
+transacción); una señal perdida la cubre el sondeo; nada se queda en `waiting` o `queued`: el barrido reanuda lo que espera sin
+pendientes, caduca a las 24 h, pasa `applying` a `unknown` a los 120 s, y la retención no toca lo ocupado. Delegación: la
+escritura va por `RouteDispatcher` con la persona de la petición (capacidad, `BearerScope`, límites y permisos del momento),
+una de tres rutas fijas, con la huella del cuerpo exacto y su `_rowVersion`; el modelo no elige ruta, persona ni empresa, las
+herramientas despachan con `allowWrites: false` y la identidad se recarga con sello y empresa antes de cada llamada y cada
+herramienta, también al reanudar. Inyección: lo que devuelven las herramientas va en `<datos_no_confiables>` con
+`JavaScriptEncoder` (escapa `<` y `>`), así que un registro no fabrica un `<pedido>`; el resultado de una acción lo arman
+palabras fijas y el error de una regla va dentro de los datos; solo el motivo de la persona (de su sesión, en `DiscardAsync` o al
+responder escribiendo) va como `<pedido>`; la pantalla la arma el servidor; el Markdown del panel no crea enlaces ni imágenes y
+el enlace al registro sale del id del servidor. Fugas: las partidas no se leen como catálogo (`RootEntityAsync`: 400 en lista,
+registro e historial; `buscar_folio` omite partidas); `filledBy` se pega solo a campos visibles y con automatizaciones de
+catálogos que la persona ve; `buscar_en_el_sistema` nombra solo campos visibles de catálogos visibles y omite las transiciones
+de sistema; al modelo solo vuelve el número del registro de una acción; la vista previa es el registro como ella lo ve y solo
+se proponen campos visibles y capturables. Topes al reanudar: el costo del día se reserva bajo el bloqueo de la persona antes de
+cada llamada, y pasos, consultas, tokens y costo son los acumulados de la conversación; propuestas ≤ 5 pendientes y 50 por día
+(borrar no las quita). 045: `FieldAccess.SeesLines` en `Catalog`, `Sources`, `Available` y `CanReadPath`; el barrido del MCP solo
+borra claves terminadas o con el *lease* vencido y `WriteLeaseSeconds` ≤ la mitad de `IdempotencyHours` (D-01 y D-10 leídos en
+el código; los demás, por sus pruebas en `Hardening045Tests`, `Mcp2Tests.Hardening045` y `SalesTests`).
+
+Riesgos que la auditoría no cierra: R-046-2 (confirmar sin leer, media) y R-046-3 (el texto del modelo que cita registros se
+queda en el historial, media) siguen aceptados; R-048-1 (la caducidad reanuda sin la persona) empeora con D-01 mientras el
+interruptor no detenga la reanudación. Los 21 medios o altos marcados **auditoría** (R-001-1 … R-022-3, R-039-4) siguen sin
+prueba y fuera de 045–048; R-043-5 sigue por decidir con el dueño. Fuera de alcance por decisión del dueño (2026-11-02): al modelo
+no le llegan el nombre de la persona ni la fecha.
 
 ## Decisión: ¿extensión con código?
 La auditoría tiene razón en el costo: cada necesidad nueva exige una capacidad del motor. Se mantiene
