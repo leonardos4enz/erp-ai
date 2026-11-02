@@ -290,6 +290,19 @@ public static class FieldAccess
     public static bool CanSee(EntityDef e, FieldDef f, UserContext u) => ByRole(e, f, u) != FieldAccessLevels.Hidden;
 
     /// <summary>
+    /// Spec 045 (auditoría 8, D-01): ¿ve los registros del catálogo? Lee su raíz y, si es una partida, ve el campo de partidas
+    /// del documento que apunta a ella (lo que ya exigen el registro, la bitácora, OData y las fórmulas). Una sola regla para
+    /// reportes, exploración, tableros y cada salto de una ruta.
+    /// </summary>
+    public static bool SeesLines(EntityDef e, UserContext u, IReadOnlyDictionary<string, EntityDef> model)
+    {
+        if (!e.IsChild) return u.Access(e.Name).Read;
+        if (!model.TryGetValue(e.ParentEntity ?? "", out var root) || !u.Access(root.Name).Read) return false;
+        return root.ActiveFields.Any(f => f.Type == FieldTypes.Lines && string.Equals(f.ChildEntity, e.Name, StringComparison.OrdinalIgnoreCase)
+            && CanSee(root, f, u));
+    }
+
+    /// <summary>
     /// ¿Puede capturarlo en el formulario o la API? <paramref name="state"/> es el estado del registro (o del
     /// documento, en una partida). <c>editableIn</c> aplica a todos, incluido el superusuario: es lógica de proceso.
     /// </summary>

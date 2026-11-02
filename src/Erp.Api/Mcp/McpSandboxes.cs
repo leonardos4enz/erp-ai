@@ -43,13 +43,17 @@ public sealed class McpSandboxLease : IAsyncDisposable
 
     private async Task RenewAsync(TimeSpan every)
     {
+        // Spec 045 (auditoría 8, D-09): una falla pasajera no termina la renovación; la siguiente vuelta lo vuelve a intentar.
         try
         {
             using var timer = new PeriodicTimer(every);
-            while (await timer.WaitForNextTickAsync(_stop.Token)) await _owner.RenewAsync(Id, Token, _stop.Token);
+            while (await timer.WaitForNextTickAsync(_stop.Token))
+            {
+                try { await _owner.RenewAsync(Id, Token, _stop.Token); }
+                catch (Exception) when (!_stop.IsCancellationRequested) { /* de mejor esfuerzo, también un tiempo agotado: se reintenta en la siguiente vuelta */ }
+            }
         }
         catch (OperationCanceledException) { }
-        catch (Exception) { /* la renovación es de mejor esfuerzo: el lease inicial y el último uso siguen protegiendo la copia */ }
     }
 
     public async ValueTask DisposeAsync()
@@ -294,7 +298,12 @@ public sealed class McpSandboxes(Db db, SandboxFactory factory, McpOptions optio
             return live;
         }, ct);
         await using (var cn = await db.OpenAsync(ct))
-            await cn.ExecuteAsync("DELETE meta.McpWrite WHERE CreatedAt < DATEADD(hour, -@hours, SYSUTCDATETIME())", new { hours = options.IdempotencyHours });
+            // Spec 045 (auditoría 8, D-10): solo claves terminadas o con el lease vencido; una en curso no se borra (su reintento
+            // la ejecutaría otra vez).
+            await cn.ExecuteAsync("""
+                DELETE meta.McpWrite WHERE CreatedAt < DATEADD(hour, -@hours, SYSUTCDATETIME())
+                   AND (Status = 'done' OR PendingUntil IS NULL OR PendingUntil < SYSUTCDATETIME())
+                """, new { hours = options.IdempotencyHours });
         return count;
     }
 

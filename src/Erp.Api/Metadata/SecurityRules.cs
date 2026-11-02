@@ -6,6 +6,7 @@ namespace Erp.Api.Metadata;
 public static class SecurityRules
 {
     public const int MaxFieldRules = 200;
+    public const int MaxDeleteMessage = 300;
 
     public static IEnumerable<string> Validate(EntityDef e, SecurityPolicy s, IReadOnlyDictionary<string, EntityDef> model, IReadOnlySet<string> roles)
     {
@@ -21,6 +22,11 @@ public static class SecurityRules
 
         if (e.IsChild && (s.Records is not null || s.Owner is not null || s.SystemManaged || s.TeamOwners))
             msgs.Add("es una partida: el dueño, los permisos por registro y «lo administra el sistema» se declaran en su documento.");
+        // Spec 045 (D-04): la expresión se valida con las demás del catálogo (PlanCompiler); aquí, dónde y el mensaje.
+        if (e.IsChild && (s.DeletableWhen is not null || s.DeleteMessage is not null))
+            msgs.Add("es una partida: se elimina con su documento; «deletableWhen» se declara en el documento.");
+        if (s.DeleteMessage is not null && s.DeletableWhen is null) msgs.Add("«deleteMessage» requiere «deletableWhen».");
+        if (s.DeleteMessage?.Length > MaxDeleteMessage) msgs.Add($"«deleteMessage» admite hasta {MaxDeleteMessage} caracteres.");
 
         var fields = s.Fields ?? [];
         if (fields.Count > MaxFieldRules) msgs.Add($"máximo {MaxFieldRules} reglas de campo.");

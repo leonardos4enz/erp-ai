@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Dapper;
+using Microsoft.Data.SqlClient;
 using Erp.Api.Infrastructure;
 using Erp.Api.Integrations;
 using Erp.Api.Security;
@@ -153,13 +154,21 @@ public sealed class McpOAuthService(Db db, McpOptions options, UserContextLoader
         // reemplazadas o vencidas) hace más de un día; se va con sus conexiones, tokens y códigos. Revisión adversarial F-02: en
         // su propia transacción corta (READ COMMITTED), no dentro de la serializable de los topes, que si no detenía o
         // interbloqueaba canjes y renovaciones. Luego, los topes por dirección y total, que cuentan solo lo vivo.
-        await using (var sweep = await cn.BeginTransactionAsync(ct))
+        // Spec 045 (auditoría 8, D-11): un barrido que falla (p. ej. un «Permitir» que cruza sus DELETE) no tumba este registro:
+        // se registra y el siguiente lo reintenta.
+        // Revisión adversarial 045 (F-05): en su propia conexión; una falla grave cierra la conexión y la de los topes seguiría rota.
+        try
         {
-            await cn.ExecuteAsync($"""
+        await using var sweepCn = await db.OpenAsync(ct);
+        await using (var sweep = await sweepCn.BeginTransactionAsync(ct))
+        {
+            await sweepCn.ExecuteAsync($"""
                 DECLARE @cut datetime2(3) = DATEADD(day, -1, SYSUTCDATETIME());
                 DECLARE @idle TABLE (Id int PRIMARY KEY);
                 INSERT @idle SELECT c.Id FROM meta.McpClient c
-                 WHERE (c.CreatedAt < DATEADD(hour, -1, SYSUTCDATETIME()) AND NOT EXISTS (SELECT 1 FROM meta.McpGrant g WHERE g.ClientId = c.Id))
+                 WHERE (c.CreatedAt < DATEADD(hour, -1, SYSUTCDATETIME()) AND NOT EXISTS (SELECT 1 FROM meta.McpGrant g WHERE g.ClientId = c.Id)
+                        -- Spec 045 (D-11): tampoco el que nunca canjeó, si alguien acaba de pulsar «Permitir» (código vigente).
+                        AND NOT EXISTS (SELECT 1 FROM meta.McpCode k WHERE k.ClientId = c.Id AND k.UsedAt IS NULL AND k.ExpiresAt > SYSUTCDATETIME()))
                     OR (EXISTS (SELECT 1 FROM meta.McpGrant g WHERE g.ClientId = c.Id) AND ISNULL(c.LastAuthorizedAt, c.CreatedAt) < @cut
                         -- Quien vuelve a conectar ese cliente ahora mismo (código sin usar ni vencer) no se queda a medias.
                         AND NOT EXISTS (SELECT 1 FROM meta.McpCode k WHERE k.ClientId = c.Id AND k.UsedAt IS NULL AND k.ExpiresAt > SYSUTCDATETIME())
@@ -171,6 +180,11 @@ public sealed class McpOAuthService(Db db, McpOptions options, UserContextLoader
                 DELETE meta.McpClient WHERE Id IN (SELECT Id FROM @idle);
                 """, transaction: sweep);
             await sweep.CommitAsync(ct);
+        }
+        }
+        catch (SqlException ex)
+        {
+            log.LogWarning(ex, "El barrido del registro de clientes MCP falló; se reintenta en el siguiente registro");
         }
         await using var tx = await cn.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, ct);
         var ip = ClientAddress.Key(http.Connection.RemoteIpAddress, options.Ipv6PrefixLength);

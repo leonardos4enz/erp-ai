@@ -167,11 +167,12 @@ public sealed class PersonalDashboardService(Db db, MetadataStore store, ReportS
               FROM meta.PersonalDashboard d WHERE UserId = @uid ORDER BY Label
             """, new { uid = user.Id });
         var shared = (await cn.QueryAsync<Row>($"""
-            SELECT d.Id, d.UserId, d.Label, d.Description, d.DefinitionJson, d.Version, d.CreatedAt, d.UpdatedAt, u.DisplayName AS Owner
+            SELECT TOP (@max) d.Id, d.UserId, d.Label, d.Description, d.DefinitionJson, d.Version, d.CreatedAt, d.UpdatedAt, u.DisplayName AS Owner
               FROM meta.PersonalDashboard d JOIN meta.[User] u ON u.Id = d.UserId
              WHERE d.UserId <> @uid AND {PersonalSharing.Visible(ShareTable, ShareKey, "d")}
-             ORDER BY d.Label, u.DisplayName
-            """, new { uid = user.Id, viewerRoles = user.Roles })).ToList();
+             ORDER BY COALESCE(d.UpdatedAt, d.CreatedAt) DESC, d.Id DESC
+            """, new { uid = user.Id, viewerRoles = user.Roles, max = PersonalSharing.MaxListed }))
+            .OrderBy(x => x.Label, StringComparer.CurrentCulture).ThenBy(x => x.Owner, StringComparer.CurrentCulture).ToList(); // los más recientes, por nombre
         var valid = await PersonalSharing.RevalidateAsync(ShareTable, ShareKey, shared.Select(d => (d.Id, d.UserId)).ToList(), user.Roles, cn);
         shared = shared.Where(d => valid.Contains(d.Id)).ToList();
         return new PersonalDashboardList(

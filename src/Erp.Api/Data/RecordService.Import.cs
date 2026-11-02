@@ -47,6 +47,7 @@ public sealed partial class RecordService
         var colOf = map.ToDictionary(m => m.Value.Name, m => columns[m.Key].Column, StringComparer.OrdinalIgnoreCase);
         var structural = columns.Any(c => c.Status == "error");
         var imported = 0;
+        var uniques = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase); // spec 045 (D-05): rastro por campo
 
         // Spec 014 (H3): la vista previa no toca la secuencia de folios; la importación reserva su bloque de una vez, en una
         // transacción corta, y las altas de otras personas no esperan a que termine.
@@ -89,6 +90,7 @@ public sealed partial class RecordService
                     }
                     catch (ValidationFailed vf)
                     {
+                        if (vf.Unique is { } u) uniques[u.Field] = uniques.GetValueOrDefault(u.Field) + 1;
                         tx.Rollback("fila");
                         folios?.Restore(mark!);
                         foreach (var (key, messages) in vf.Errors ?? new Dictionary<string, string[]>())
@@ -132,6 +134,8 @@ public sealed partial class RecordService
         finally
         {
             if (!committed && folios is { IsPreview: false }) await ReleaseFoliosAsync(folios, CancellationToken.None);
+            // Spec 045 (D-05): la vista previa también responde «ya existe»; el rastro va aparte (la transacción se revirtió).
+            foreach (var (field, rows) in uniques) await ProblemExceptionHandler.UniqueTrailAsync(http, e.Name, field, rows, CancellationToken.None);
         }
     }
 

@@ -19,7 +19,7 @@ namespace Erp.IntegrationTests;
 /// conexión, errores que no consumen) y <c>entregar</c> como propuesta de Studio (exactamente una vez, tope, falla inyectada,
 /// revisar y aplicar con huella, sin mensajes).
 /// </summary>
-public class Mcp2Tests(Mcp2Tests.Host host) : IClassFixture<Mcp2Tests.Host>
+public partial class Mcp2Tests(Mcp2Tests.Host host) : IClassFixture<Mcp2Tests.Host>
 {
     public const string Pwd = "frase larga del servidor mcp dos 2026";
     public const string Callback = "https://claude.ai/api/mcp/auth_callback";
@@ -54,7 +54,7 @@ public class Mcp2Tests(Mcp2Tests.Host host) : IClassFixture<Mcp2Tests.Host>
             } });
             var modeler = await admin.RoleIdAsync("M2 Modelador");
             var reader = await admin.RoleIdAsync("M2 Lector");
-            foreach (var u in new[] { "m2-ana", "m2-beto", "m2-carla", "m2-dora", "m2-eli", "m2-fer", "m2-gil", "m2-hugo", "m2-ines", "m2-juan", "m2-kim", "m2-lia", "m2-mar", "m2-nico", "m2-olga", "m2-pau", "m2-quim", "m2-lector" })
+            foreach (var u in new[] { "m2-ana", "m2-beto", "m2-carla", "m2-dora", "m2-eli", "m2-fer", "m2-gil", "m2-hugo", "m2-ines", "m2-juan", "m2-kim", "m2-lia", "m2-mar", "m2-nico", "m2-olga", "m2-pau", "m2-quim", "m2-rita", "m2-sol", "m2-tito", "m2-lector" })
             {
                 var res = await admin.PostAsync("/api/admin/users", new { username = u, displayName = u, password = Pwd, roleIds = new[] { u == "m2-lector" ? reader : modeler } });
                 Assert.True(res.Status == 201, res.Text);

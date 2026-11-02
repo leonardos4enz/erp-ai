@@ -32,7 +32,7 @@ public static class AuditFilter
     public static readonly IReadOnlyList<string> EntityActions =
     [
         AuditActions.Import, AuditActions.Export, AuditActions.ViewChange, AuditActions.ScheduleChange, AuditActions.AutomationRetry,
-        AuditActions.WebhookChange, AuditActions.PersonalReportChange,
+        AuditActions.WebhookChange, AuditActions.PersonalReportChange, AuditActions.UniqueConflict, // spec 045
     ];
 
     /// <summary>

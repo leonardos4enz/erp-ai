@@ -1,7 +1,7 @@
 {
   "id": "ventas",
   "name": "Ventas",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "icon": "badge-dollar-sign",
   "description": "Clientes con límite de crédito, cotizaciones que se convierten en pedidos, embarques que sacan la mercancía al costo real con su póliza de costo de ventas, facturas con póliza de ventas y cobranza con póliza de ingreso.",
   "requires": ["inventario", "contabilidad", "costeo"],
@@ -1691,7 +1691,54 @@
       }
     ]
   },
-  "upgrades": [],
+  "upgrades": [
+    { "version": "1.1.0",
+      "description": "Auditoría 8: un cliente sin límite de crédito capturado tiene límite 0 para quien no es gerente de ventas; «Público en general» solo lo cambia el gerente; el pedido creado desde una cotización no se borra (se cancela).",
+      "plan": { "description": "Ventas 1.1.0", "operations": [
+        {
+          "op": "setRules",
+          "entity": "Pedido",
+          "merge": true,
+          "rules": [
+            {
+              "name": "LimiteCredito",
+              "field": "Cliente",
+              "severity": "warning",
+              "when": "Estado IN ('Borrador', 'Confirmado')",
+              "assert": "(ISBLANK(Cliente.LimiteCredito) AND HASROLE('Gerente de ventas')) OR Cliente.Saldo + Cliente.PedidosAbiertos + TotalBase <= COALESCE(Cliente.LimiteCredito, 0)",
+              "message": "El pedido más el saldo por cobrar y los pedidos abiertos del cliente supera su límite de crédito."
+            },
+            {
+              "name": "LimiteCreditoGerente",
+              "field": "Cliente",
+              "when": "Estado = 'Confirmado' AND NOT HASROLE('Gerente de ventas')",
+              "assert": "Cliente.Saldo + Cliente.PedidosAbiertos + TotalBase <= COALESCE(Cliente.LimiteCredito, 0)",
+              "message": "El pedido más el saldo por cobrar y los pedidos abiertos del cliente supera su límite de crédito (un cliente sin límite capturado tiene límite 0). Solo el gerente de ventas confirma un pedido sobre el límite o fija el límite del cliente."
+            }
+          ]
+        },
+        {
+          "op": "setSecurity",
+          "entity": "Cliente",
+          "security": {
+            "owner": "Vendedor",
+            "records": [{"roles": ["Vendedor"], "scope": "own"}, {"roles": ["Gerente de ventas", "Facturación y cobranza", "Surtidor"], "scope": "all"}, {"roles": ["Vendedor"], "where": "RFC = 'XAXX010101000'", "access": "read"}],
+            "fields": [{"field": "LimiteCredito", "edit": ["Gerente de ventas"]}, {"field": "Vendedor", "edit": ["Gerente de ventas"]}]
+          }
+        },
+        {
+          "op": "setSecurity",
+          "entity": "Pedido",
+          "security": {
+            "owner": "Vendedor",
+            "records": [{"roles": ["Vendedor"], "scope": "own"}, {"roles": ["Gerente de ventas", "Facturación y cobranza", "Surtidor"], "scope": "all"}],
+            "fields": [{"field": "Vendedor", "edit": ["Gerente de ventas"]}, {"field": "TipoCambio", "edit": ["Gerente de ventas"]}],
+            "deletableWhen": "ISBLANK(Cotizacion)",
+            "deleteMessage": "Este pedido se creó desde una cotización aceptada: no se elimina; cancélalo para conservar la relación con la cotización."
+          }
+        }
+      ] } }
+  ],
   "roles": [
     {
       "name": "Vendedor",

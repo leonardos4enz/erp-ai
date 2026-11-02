@@ -182,7 +182,7 @@ test('H2 CA3 (UI): sobre el límite, el vendedor ve el aviso y no confirma; el g
   await page.getByRole('button', { name: 'Confirmar pedido', exact: true }).click();
   const dialog = page.getByRole('dialog');
   await dialog.getByRole('button', { name: 'Confirmar pedido', exact: true }).click();
-  await expect(dialog.getByRole('alert')).toContainText('Solo el gerente de ventas confirma un pedido sobre el límite.');
+  await expect(dialog.getByRole('alert')).toContainText('Solo el gerente de ventas confirma un pedido sobre el límite'); // 045: «… o fija el límite del cliente.»
   await page.keyboard.press('Escape');
   await page.context().close();
 
@@ -197,9 +197,9 @@ test('H2 CA3 (UI): sobre el límite, el vendedor ve el aviso y no confirma; el g
   await expect(confirm).toBeHidden();
   await expect(estado(g)).toContainText('Confirmado');
   await g.context().close();
-  // Para lo que sigue, el cliente queda sin límite.
+  // Para lo que sigue, el cliente queda con un límite amplio (spec 045, D-02: sin límite capturado, el vendedor tiene límite 0).
   const c2 = (await get('gerente', `/api/data/Cliente/${ids.cliente}`)) as Row;
-  expect((await (await as('gerente')).put(`/api/data/Cliente/${ids.cliente}`, { data: { LimiteCredito: null, _rowVersion: c2._rowVersion } })).status()).toBe(200);
+  expect((await (await as('gerente')).put(`/api/data/Cliente/${ids.cliente}`, { data: { LimiteCredito: 1000000, _rowVersion: c2._rowVersion } })).status()).toBe(200);
 });
 
 let pedidoSurtido: Row;

@@ -1,3 +1,4 @@
+using Erp.Api.Security;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
 
@@ -11,7 +12,11 @@ public class AppException(int status, string title, IDictionary<string, string[]
 }
 
 public sealed class ValidationFailed(IDictionary<string, string[]> errors, string title = "Hay datos inválidos.")
-    : AppException(StatusCodes.Status400BadRequest, title, errors);
+    : AppException(StatusCodes.Status400BadRequest, title, errors)
+{
+    /// <summary>Spec 045 (D-05): catálogo (raíz) y campo de un choque de valor único, para su rastro en la bitácora.</summary>
+    public (string Entity, string Field)? Unique { get; init; }
+}
 
 public sealed class NotFound(string title = "No encontrado.") : AppException(StatusCodes.Status404NotFound, title);
 public sealed class Forbidden(string title = "No tienes permiso para esta acción.") : AppException(StatusCodes.Status403Forbidden, title);
@@ -30,6 +35,7 @@ public sealed class ProblemExceptionHandler(IProblemDetailsService problems, ILo
         {
             pd = new ProblemDetails { Status = app.Status, Title = app.Message };
             if (app.Errors is not null) pd.Extensions["errors"] = app.Errors;
+            if (ex is ValidationFailed { Unique: { } unique }) await UniqueTrailAsync(http, unique.Entity, unique.Field, 1, ct);
         }
         else if (ex is Expressions.ExprException expr)
         {
@@ -48,5 +54,22 @@ public sealed class ProblemExceptionHandler(IProblemDetailsService problems, ILo
         }
         http.Response.StatusCode = pd.Status!.Value;
         return await problems.TryWriteAsync(new ProblemDetailsContext { HttpContext = http, ProblemDetails = pd, Exception = ex });
+    }
+
+    /// <summary>
+    /// Spec 045 (auditoría 8, D-05): el rastro de un choque de valor único, en su propia conexión (la transacción del alta ya
+    /// se revirtió). Es rastro, no control: si falla, se registra en el log y la respuesta no cambia.
+    /// </summary>
+    internal static async Task UniqueTrailAsync(HttpContext http, string entity, string field, int rows, CancellationToken ct)
+    {
+        try
+        {
+            await using var cn = await http.RequestServices.GetRequiredService<Db>().OpenAsync(ct);
+            await Audit.WriteAsync(cn, null, http, AuditActions.UniqueConflict, entity, null, after: new { field, rows });
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            http.RequestServices.GetRequiredService<ILogger<ProblemExceptionHandler>>().LogWarning(e, "No se pudo registrar el choque de valor único en {Entity}.{Field}", entity, field);
+        }
     }
 }

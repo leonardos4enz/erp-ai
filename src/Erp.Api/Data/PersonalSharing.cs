@@ -17,6 +17,8 @@ public sealed record ShareResult(int Id, int Version, IReadOnlyList<string> Role
 public static class PersonalSharing
 {
     public const int MaxRoles = 20;
+    /// <summary>Spec 045 (auditoría 8, D-07): lo compartido con quien pide que se lista (los más recientes).</summary>
+    public const int MaxListed = 100;
 
     /// <summary>
     /// Condición de candidatos «compartido con quien lee»: uno de sus roles (<c>@viewerRoles</c>, nombres efectivos) está en el

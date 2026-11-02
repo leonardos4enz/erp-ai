@@ -44,7 +44,11 @@ public static class ClientAddress
     /// </summary>
     public static ForwardedHeadersOptions? ForwardedOptions(IConfiguration config)
     {
-        var entries = config.GetSection("Security:ForwardedProxies").Get<string[]>() ?? [];
+        var section = config.GetSection("Security:ForwardedProxies");
+        var entries = section.Get<string[]>() ?? [];
+        // Spec 045 (auditoría 8, O-02): escrita como texto (variable de entorno sin «__0»), la lista se leía vacía y se ignoraba.
+        if (entries.Length == 0 && section.Value is { Length: > 0 } text)
+            entries = text.Split([',', ';', ' '], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         if (entries.Length == 0) return null;
         var o = new ForwardedHeadersOptions
         {

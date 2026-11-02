@@ -228,6 +228,7 @@ public static partial class PlanCompiler
             Check(t.When, $"transición {t.Name}");
             foreach (var s in t.Set ?? []) Check(s.Value, $"transición {t.Name} › {s.Field}");
         }
+        Check(e.Security?.DeletableWhen, "seguridad (deletableWhen)"); // spec 045 (D-04)
         foreach (var m in msgs) yield return m;
     }
 
@@ -558,13 +559,14 @@ public static partial class PlanCompiler
         var e = ctx.Active(op.Entity);
         if (e is null) return null;
         var s = op.Security;
-        if (s is not null && s.Fields is null && s.Records is null && s.Owner is null && !s.SystemManaged) s = null;
+        if (s is not null && s.Fields is null && s.Records is null && s.Owner is null && !s.SystemManaged && s.DeletableWhen is null && s.DeleteMessage is null) s = null;
         if (s is null)
             return new(e with { Security = null }, $"Quitar la seguridad por campo y por registro de '{e.Label}'", []);
         var parts = new List<string>();
         if (s.Fields is { Count: > 0 } fs) parts.Add($"{fs.Count} regla(s) de campo");
         if (s.Records is { Count: > 0 } rs) parts.Add($"{rs.Count} permiso(s) por registro");
         if (s.SystemManaged) parts.Add("lo administra el sistema");
+        if (s.DeletableWhen is { } dw) parts.Add($"se elimina solo si {dw}"); // revisión adversarial 045 (F-03)
         return new(e with { Security = s }, $"Definir la seguridad de '{e.Label}': {(parts.Count == 0 ? "dueño del registro" : string.Join(", ", parts))}", []);
     }
 

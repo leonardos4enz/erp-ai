@@ -147,7 +147,7 @@ Total: 182 rutas.
 | GET | `/api/my-reports/` | registros |  |  |  |  |
 | POST | `/api/my-reports/` | registros | sesión |  |  |  |
 | POST | `/api/my-reports/explore` | registros | ninguno |  | agrega el catálogo completo (aggregate) |  |
-| POST | `/api/my-reports/explore/export` | registros | ninguno |  | hasta 1000 grupos en un archivo (bulk) |  |
+| POST | `/api/my-reports/explore/export` | registros | bitácora |  | hasta 1000 grupos en un archivo (bulk) |  |
 | GET | `/api/my-reports/shared` | registros |  |  |  |  |
 | GET | `/api/my-reports/sources` | registros |  |  |  |  |
 | GET | `/api/my-reports/sources/{entity}` | registros |  |  |  |  |
@@ -157,7 +157,7 @@ Total: 182 rutas.
 | PUT | `/api/my-reports/{id:int}/share` | registros | sesión |  |  |  |
 | GET | `/api/reports/` | registros |  |  |  |  |
 | GET | `/api/reports/{entity}/{name}` | registros |  |  | agrega el catálogo completo (aggregate) |  |
-| GET | `/api/reports/{entity}/{name}/export` | registros |  |  | hasta 1000 grupos en un archivo (bulk) |  |
+| GET | `/api/reports/{entity}/{name}/export` | registros | bitácora |  | hasta 1000 grupos en un archivo (bulk) |  |
 | GET | `/api/search` | registros |  |  | busca en todos los catálogos con folio (search) |  |
 | GET | `/api/studio/` | modelador |  |  |  |  |
 | GET | `/api/studio/sessions` | modelador |  |  |  |  |

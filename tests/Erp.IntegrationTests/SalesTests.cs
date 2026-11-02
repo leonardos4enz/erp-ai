@@ -80,13 +80,19 @@ public class SalesTests(SalesTests.Host host) : IClassFixture<SalesTests.Host>
     private int Id(string key) => host.Ids[key];
     private Task<Client> As(string user) => host.LoginAsync(user, Pwd);
 
-    private async Task<JsonNode> ClienteAsync(Client c, string rfc, object? extra = null)
+    /// <summary>
+    /// Cliente dado de alta por <paramref name="c"/>. Spec 045 (D-02): sin límite capturado, para quien no es gerente el límite
+    /// es 0; las pruebas que no son de crédito reciben un límite amplio del gerente (<paramref name="limite"/>; null = sin límite).
+    /// </summary>
+    private async Task<JsonNode> ClienteAsync(Client c, string rfc, object? extra = null, decimal? limite = 1_000_000m)
     {
         var data = JsonNode.Parse(System.Text.Json.JsonSerializer.Serialize(extra ?? new { }))!.AsObject();
         data["RFC"] = rfc; data["RazonSocial"] = $"Cliente {rfc}"; data["Moneda"] = Id("mxn");
         var res = await c.SendAsync(HttpMethod.Post, "/api/data/Cliente", new StringContent(data.ToJsonString(), System.Text.Encoding.UTF8, "application/json"));
         Assert.True(res.Status == 201, res.Text);
-        return res.Body!;
+        if (limite is null) return res.Body!;
+        using var gerente = await As(Gerente);
+        return await Ok(gerente.PutAsync($"/api/data/Cliente/{res.Body!.Id()}", new { LimiteCredito = limite, _rowVersion = res.Body!.Str("_rowVersion") }));
     }
 
     private static async Task<JsonNode> Ok(Task<Res> call, int status = 200)
@@ -287,7 +293,7 @@ public class SalesTests(SalesTests.Host host) : IClassFixture<SalesTests.Host>
     {
         using var vendedor = await As(Vendedor);
         using var gerente = await As(Gerente);
-        var cliente = await ClienteAsync(vendedor, "LIM430101AAA");
+        var cliente = await ClienteAsync(vendedor, "LIM430101AAA", limite: null);
         // H6 CA2: el límite lo captura el gerente de ventas.
         var conLimite = await vendedor.PutAsync($"/api/data/Cliente/{cliente.Id()}", new { LimiteCredito = 500, _rowVersion = cliente.Str("_rowVersion") });
         var row = await gerente.RecordAsync("Cliente", cliente.Id());
@@ -306,11 +312,107 @@ public class SalesTests(SalesTests.Host host) : IClassFixture<SalesTests.Host>
         var ok = await gerente.PostAsync($"/api/data/Pedido/{pedido.Id()}/transition", new { transition = "confirmar", _rowVersion = pedido.Str("_rowVersion"), acceptWarnings = new[] { aviso } });
         Assert.True(ok.Status == 200, ok.Text);
 
-        // Sin límite no avisa.
-        var libre = await ClienteAsync(vendedor, "SIN430101AAA");
-        var p2 = await vendedor.CreateAsync("Pedido", new { Cliente = libre.Id(), Almacen = Id("almacen"), Partidas = new[] { new { Producto = Id("a"), Cantidad = 50 } } });
+        // Sin límite, al gerente no le avisa (R-043-1); al vendedor, desde la 045, sí (H045_H2_CA1).
+        var libre = await ClienteAsync(vendedor, "SIN430101AAA", limite: null);
+        var p2 = await gerente.CreateAsync("Pedido", new { Cliente = libre.Id(), Almacen = Id("almacen"), Vendedor = host.Ids[Vendedor], Partidas = new[] { new { Producto = Id("a"), Cantidad = 50 } } });
         Assert.DoesNotContain("límite de crédito", p2.Json());
-        Assert.Equal(200, (await vendedor.TransitionAsync("Pedido", p2, "confirmar")).Status);
+        Assert.Equal(200, (await gerente.TransitionAsync("Pedido", p2, "confirmar")).Status);
+    }
+
+    // ---------------- Spec 045 (auditoría 8): Ventas 1.1.0 ----------------
+
+    [Fact]
+    public async Task H045_H2_CA1_sin_limite_capturado_el_vendedor_no_confirma_a_credito()
+    {
+        // Regresión (auditoría 8, D-02): el vendedor creaba el cliente sin poder fijarle límite y «sin límite» era crédito ilimitado.
+        using var vendedor = await As(Vendedor);
+        using var gerente = await As(Gerente);
+        var cliente = await ClienteAsync(vendedor, "CER450101AAA", new { LimiteCredito = 1_000_000 }, limite: null);
+        Assert.Null((await gerente.RecordAsync("Cliente", cliente.Id())).Dec("LimiteCredito"));
+        var pedido = await vendedor.CreateAsync("Pedido", new { Cliente = cliente.Id(), Almacen = Id("almacen"), Partidas = new[] { new { Producto = Id("a"), Cantidad = 1 } } });
+        Assert.Contains("límite de crédito", pedido.Json()); // el aviso al guardar
+        var negado = await vendedor.TransitionAsync("Pedido", pedido, "confirmar");
+        Assert.True(negado.Status == 400 && negado.Text.Contains("límite 0") && negado.Text.Contains("fija el límite"), negado.Text);
+        // También con «Público en general», que todo vendedor usa.
+        var publico = (await vendedor.GetAsync("/api/data/Cliente", new { search = "XAXX010101000" })).Items.Nodes().Single();
+        var mostrador = await vendedor.CreateAsync("Pedido", new { Cliente = publico.Id(), Almacen = Id("almacen"), Partidas = new[] { new { Producto = Id("a"), Cantidad = 1 } } });
+        Assert.Equal(400, (await vendedor.TransitionAsync("Pedido", mostrador, "confirmar")).Status);
+        // El gerente sí confirma un cliente sin límite (043, R-043-1) y, con un límite, el vendedor confirma dentro de él.
+        Assert.Equal(200, (await gerente.TransitionAsync("Pedido", await gerente.RecordAsync("Pedido", pedido.Id()), "confirmar")).Status);
+        var row = await gerente.RecordAsync("Cliente", cliente.Id());
+        await Ok(gerente.PutAsync($"/api/data/Cliente/{cliente.Id()}", new { LimiteCredito = 10_000, _rowVersion = row.Str("_rowVersion") }));
+        var otro = await vendedor.CreateAsync("Pedido", new { Cliente = cliente.Id(), Almacen = Id("almacen"), Partidas = new[] { new { Producto = Id("a"), Cantidad = 1 } } });
+        Assert.DoesNotContain("límite de crédito", otro.Json());
+        Assert.Equal(200, (await vendedor.TransitionAsync("Pedido", otro, "confirmar")).Status);
+    }
+
+    [Fact]
+    public async Task H045_H2_CA2_publico_en_general_lo_usa_el_vendedor_pero_no_lo_edita()
+    {
+        // Regresión (auditoría 8, D-03): el permiso compartido no llevaba access: read y era también de escritura.
+        using var vendedor = await As(Vendedor);
+        using var gerente = await As(Gerente);
+        var publico = (await vendedor.GetAsync("/api/data/Cliente", new { search = "XAXX010101000" })).Items.Nodes().Single();
+        var row = await vendedor.RecordAsync("Cliente", publico.Id());
+        // Un campo cualquiera (cambiar el RFC ya daba 403: lo sacaría de su alcance de escritura).
+        var editar = await vendedor.PutAsync($"/api/data/Cliente/{publico.Id()}", new { Notas = "Editado por un vendedor", _rowVersion = row.Str("_rowVersion") });
+        Assert.True(editar.Status == 403, editar.Text);
+        Assert.Equal("XAXX010101000", (await gerente.RecordAsync("Cliente", publico.Id())).Str("RFC"));
+        Assert.Equal(200, (await vendedor.GetAsync($"/api/data/Cliente/{publico.Id()}")).Status);
+        var notas = await gerente.PutAsync($"/api/data/Cliente/{publico.Id()}", new { Notas = "Ventas de mostrador", _rowVersion = row.Str("_rowVersion") });
+        Assert.True(notas.Status == 200, notas.Text);
+    }
+
+    [Fact]
+    public async Task H045_H3_CA2_el_pedido_de_una_cotizacion_aceptada_no_se_borra()
+    {
+        // Regresión (auditoría 8, D-04): el vendedor lo borraba y la cotización (final) quedaba con un folio huérfano.
+        using var vendedor = await As(Vendedor);
+        var cliente = await ClienteAsync(vendedor, "BOR450101AAA");
+        var cot = await vendedor.CreateAsync("Cotizacion", new { Cliente = cliente.Id(), Almacen = Id("almacen"), Partidas = new[] { new { Producto = Id("a"), Cantidad = 1 } } });
+        cot = await Ok(vendedor.TransitionAsync("Cotizacion", cot, "enviar"));
+        cot = await Ok(vendedor.TransitionAsync("Cotizacion", cot, "aceptar"));
+        var pedido = (await vendedor.GetAsync("/api/data/Pedido", new { search = cot.Str("Pedido") })).Items.Nodes().Single();
+        var borrar = await vendedor.DeleteAsync($"/api/data/Pedido/{pedido.Id()}");
+        Assert.True(borrar.Status == 409 && borrar.Text.Contains("cancélalo"), borrar.Text);
+        Assert.Equal(200, (await vendedor.GetAsync($"/api/data/Pedido/{pedido.Id()}")).Status);
+        // Uno capturado directo sí se borra en borrador.
+        var directo = await vendedor.CreateAsync("Pedido", new { Cliente = cliente.Id(), Almacen = Id("almacen"), Partidas = new[] { new { Producto = Id("a"), Cantidad = 1 } } });
+        Assert.Equal(204, (await vendedor.DeleteAsync($"/api/data/Pedido/{directo.Id()}")).Status);
+    }
+
+    [Fact]
+    public async Task Regresion_045_F01_borrar_y_confirmar_a_la_vez_no_borra_un_pedido_confirmado()
+    {
+        // Regresión (revisión adversarial 045, F-01): el borrado leía el documento sin bloquearlo; una confirmación entre la
+        // lectura y el borrado dejaba un pedido confirmado borrado, contado para siempre en los pedidos abiertos del cliente.
+        using var vendedor = await As(Vendedor);
+        var cliente = await ClienteAsync(vendedor, "CON450101AAA");
+        var pedido = await vendedor.CreateAsync("Pedido", new { Cliente = cliente.Id(), Almacen = Id("almacen"), Partidas = new[] { new { Producto = Id("a"), Cantidad = 1, PrecioUnitario = 100 } } });
+        // El borrado queda detenido en su revisión de integridad (los embarques que apuntan al pedido), ya leído el documento;
+        // mientras, se confirma. Con el documento bloqueado, la confirmación espera al borrado y no al revés.
+        Task<Res> borrar, confirmar;
+        await using (var hold = await host.HoldAsync("SELECT TOP 0 * FROM [app].[Embarque] WITH (TABLOCKX, HOLDLOCK)"))
+        {
+            borrar = vendedor.DeleteAsync($"/api/data/Pedido/{pedido.Id()}");
+            await hold.WaitUntilBlockingAsync();
+            confirmar = vendedor.TransitionAsync("Pedido", pedido, "confirmar");
+            await Task.WhenAny(confirmar, Task.Delay(TimeSpan.FromSeconds(2)));
+        }
+        await Task.WhenAll(borrar, confirmar);
+        var borradosConfirmados = await host.ScalarAsync<int>($"SELECT COUNT(*) FROM [app].[Pedido] WHERE [Cliente] = {cliente.Id()} AND [IsDeleted] = 1 AND [Estado] <> 'Borrador'");
+        Assert.Equal(0, borradosConfirmados);
+        var abiertos = await host.ScalarAsync<int>($"SELECT COUNT(*) FROM [app].[Pedido] WHERE [Cliente] = {cliente.Id()} AND [IsDeleted] = 0 AND [Estado] = 'Confirmado'");
+        Assert.Equal(abiertos * 116m, (await vendedor.RecordAsync("Cliente", cliente.Id())).Dec("PedidosAbiertos"));
+    }
+
+    [Fact]
+    public async Task H045_H2_CA3_la_instalacion_queda_en_1_1_0_sin_actualizaciones_pendientes()
+    {
+        using var admin = await host.AdminAsync();
+        var ventas = (await admin.GetAsync("/api/admin/modules")).Array.Nodes().Single(m => m.Str("id") == "ventas");
+        Assert.Equal("1.1.0", ventas.Str("installedVersion"));
+        Assert.False(ventas["upgradeAvailable"]!.GetValue<bool>(), ventas.Json());
     }
 
     [Fact]
@@ -488,7 +590,7 @@ public class SalesTests(SalesTests.Host host) : IClassFixture<SalesTests.Host>
         // Regresión (revisión adversarial 043, F-B): solo contaban las facturas; N pedidos de 900 pasaban un límite de 1 000.
         using var vendedor = await As(Vendedor);
         using var gerente = await As(Gerente);
-        var cliente = await ClienteAsync(vendedor, "FBB430101AAA");
+        var cliente = await ClienteAsync(vendedor, "FBB430101AAA", limite: null);
         var row = await gerente.RecordAsync("Cliente", cliente.Id());
         await Ok(gerente.PutAsync($"/api/data/Cliente/{cliente.Id()}", new { LimiteCredito = 1000, _rowVersion = row.Str("_rowVersion") }));
 

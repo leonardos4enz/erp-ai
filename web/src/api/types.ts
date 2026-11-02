@@ -58,6 +58,9 @@ export interface SecurityPolicy {
   systemManaged?: boolean;
   /** Spec 015: el campo dueño acepta un equipo (requiere `owner`). */
   teamOwners?: boolean;
+  /** Spec 045: expresión del documento que debe cumplirse para eliminarlo, y el mensaje si no. */
+  deletableWhen?: string;
+  deleteMessage?: string;
 }
 
 /* ---------- Spec 007: metadatos de interfaz ---------- */

@@ -92,6 +92,11 @@ public static class AuditActions
     /// preparada o borrada (con el motivo).</summary>
     public const string McpProposal = "mcp.proposal";
     public const string McpSandbox = "mcp.sandbox";
+    /// <summary>
+    /// Spec 045 (auditoría 8, D-05): un valor único que choca y se le responde a una persona (alta, cambio o importación,
+    /// también en vista previa): el campo y cuántas filas, nunca el valor. Deja rastro de quien prueba valores.
+    /// </summary>
+    public const string UniqueConflict = "data.unique";
 }
 
 public static class Audit

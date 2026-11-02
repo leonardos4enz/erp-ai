@@ -666,13 +666,20 @@ En este orden, por decisión del dueño (2026-10-25):
     (R-044-2). **Auditoría 8** (040–044) a continuación, en una sesión aparte (decisión del dueño, 2026-11-01): la 044 agrega
     un trabajo asíncrono (el barrido) y escrituras por un punto de entrada existente. Hecha el 2026-11-01
     ([resultado](#auditorías)): propone la 045.
-    **045 — Endurecimiento 7 (auditoría 8)**, propuesta: ver [abajo](#045--endurecimiento-7-auditoría-8-propuesta). El dueño
-    decide si va antes de los puntos 15–17; D-01 (alto) no debería esperar.
+    ~~**045 — Endurecimiento 7 (auditoría 8)**~~ Implementado ([spec](specs/045-endurecimiento-7/spec.md),
+    [verify](specs/045-endurecimiento-7/verify.md); los 11 defectos y O-02, a pedido del dueño, antes de los puntos 15–17; no se
+    dividió). Una sola regla «ve las partidas» (`FieldAccess.SeesLines`) en reportes, exploración, tableros y saltos (D-01);
+    Ventas 1.1.0 por `upgrades`: sin límite capturado el vendedor tiene límite 0, «Público en general» de solo lectura y el
+    pedido de una cotización no se borra (D-02–D-04); capacidad genérica `security.deletableWhen`; rastro `data.unique` y
+    `data.export` (D-05, D-06); 100 compartidos por lista (D-07); claves y *leases* del MCP (D-08–D-10); barrido del registro
+    (D-11). Pendiente, si se pide: `deletableWhen` en el editor visual (R-045-2), HMAC de la huella de definiciones (O-01,
+    R-045-3) y **O-03**: una prueba de integración con registros y renovaciones del MCP a la vez (posible interbloqueo).
 15. **Pólizas en moneda extranjera** (pendiente de la 020).
 16. **Revaluación de existencias** (pendiente de la 020).
 17. **Reversa de pólizas con otra póliza** (pendiente de la 020).
 
 ### 045 — Endurecimiento 7 (auditoría 8): propuesta
+**Hecha en la spec 045** (2026-11-01): ver [verify](specs/045-endurecimiento-7/verify.md).
 Origen: la auditoría externa 8 (2026-11-01, solo lectura al cerrar la 044, commit `63bd34a`, specs 040–044). Lectura del
 código completo de cada camino; no se cambió código ni pruebas. Cada D-xx debe volverse una prueba que falle con `63bd34a`.
 

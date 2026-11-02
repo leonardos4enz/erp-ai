@@ -61,11 +61,14 @@ public static class PersonalReports
         Chart = r.Chart, ChartOptions = r.ChartOptions,
     };
 
-    /// <summary>El catálogo, si existe, está activo y el usuario lee su raíz (una partida, su documento); si no, 404 igual.</summary>
+    /// <summary>
+    /// El catálogo, si existe, está activo y el usuario lo ve (una partida: lee su documento y ve su campo de partidas, spec 045
+    /// D-01); si no, 404 igual.
+    /// </summary>
     public static EntityDef Catalog(string? entity, UserContext user, IReadOnlyDictionary<string, EntityDef> model)
     {
-        if (!model.TryGetValue(entity ?? "", out var e) || e.IsArchived || Root(e, model) is not { IsArchived: false } root
-            || !user.Access(root.Name).Read)
+        if (!model.TryGetValue(entity ?? "", out var e) || e.IsArchived || Root(e, model) is not { IsArchived: false }
+            || !FieldAccess.SeesLines(e, user, model))
             throw new NotFound("El catálogo no existe.");
         return e;
     }
@@ -112,9 +115,9 @@ public static class PersonalReports
         return (e, r);
     }
 
-    /// <summary>Catálogos sobre los que el usuario puede armar un reporte: los que lee y sus partidas.</summary>
+    /// <summary>Catálogos sobre los que el usuario puede armar un reporte: los que lee y las partidas que ve.</summary>
     public static IReadOnlyList<ReportSource> Sources(UserContext user, IReadOnlyDictionary<string, EntityDef> model) =>
-        model.Values.Where(e => !e.IsArchived && Root(e, model) is { IsArchived: false } root && user.Access(root.Name).Read)
+        model.Values.Where(e => !e.IsArchived && Root(e, model) is { IsArchived: false } && FieldAccess.SeesLines(e, user, model))
             .Select(e => new ReportSource(e.Name, e.LabelPlural, Root(e, model)!.Group,
                 e.IsChild ? Root(e, model)!.Label : null))
             .OrderBy(s => s.Group ?? "").ThenBy(s => s.Parent ?? s.Label, StringComparer.CurrentCulture).ThenBy(s => s.Parent is not null)
@@ -142,7 +145,7 @@ public static class PersonalReports
                         InterfaceRules.KindOf(f).ToString().ToLowerInvariant()));
                 if (depth < InterfaceRules.MaxHops && f.Type is FieldTypes.Reference or FieldTypes.Parent
                     && model.TryGetValue(f.ReferenceEntity ?? "", out var next) && !next.IsArchived
-                    && user.Access(Root(next, model)?.Name ?? next.Name).Read)
+                    && FieldAccess.SeesLines(next, user, model))
                     Walk(next, path + ".", label + " › ", depth + 1);
             }
         }

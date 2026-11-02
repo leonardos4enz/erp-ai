@@ -924,6 +924,8 @@ public class McpTests(McpTests.Host host) : IClassFixture<McpTests.Host>
         using (var ana = await host.LoginAsync("mc-ana", Pwd))
             await DecideAsync(ana, Query(idle, Callback, Verifier())); // consiente, nunca canjea
         await host.ExecAsync($"UPDATE meta.McpClient SET CreatedAt = DATEADD(hour, -2, SYSUTCDATETIME()) WHERE ClientId = '{idle}'");
+        // Spec 045 (D-11): mientras su código está vigente (Mcp:CodeSeconds) no se barre; consentir sin canjear no lo salva después.
+        await host.ExecAsync($"UPDATE k SET ExpiresAt = DATEADD(second, -1, SYSUTCDATETIME()) FROM meta.McpCode k JOIN meta.McpClient c ON c.Id = k.ClientId WHERE c.ClientId = '{idle}'");
         await RegisterAsync(); // el registro barre
         Assert.Equal(0, await host.ScalarAsync<int>($"SELECT COUNT(*) FROM meta.McpClient WHERE ClientId = '{idle}'"));
         // Uno que sí canjeó no se barre.

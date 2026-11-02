@@ -79,11 +79,12 @@ public sealed class PersonalReportService(Db db, MetadataStore store)
         var model = await store.GetAsync(ct);
         await using var cn = await db.OpenAsync(ct);
         var candidates = (await cn.QueryAsync<SharedRow>($"""
-            SELECT p.Id, p.EntityName, p.Label, p.DefinitionJson, p.Version, p.CreatedAt, p.UpdatedAt, u.DisplayName AS Owner, p.UserId
+            SELECT TOP (@max) p.Id, p.EntityName, p.Label, p.DefinitionJson, p.Version, p.CreatedAt, p.UpdatedAt, u.DisplayName AS Owner, p.UserId
               FROM meta.PersonalReport p JOIN meta.[User] u ON u.Id = p.UserId
              WHERE p.UserId <> @uid AND {PersonalSharing.Visible(ShareTable, ShareKey, "p")}
-             ORDER BY p.Label, u.DisplayName
-            """, new { uid = user.Id, viewerRoles = user.Roles })).ToList();
+             ORDER BY COALESCE(p.UpdatedAt, p.CreatedAt) DESC, p.Id DESC
+            """, new { uid = user.Id, viewerRoles = user.Roles, max = PersonalSharing.MaxListed }))
+            .OrderBy(x => x.Label, StringComparer.CurrentCulture).ThenBy(x => x.Owner, StringComparer.CurrentCulture).ToList(); // los más recientes, por nombre
         var valid = await PersonalSharing.RevalidateAsync(ShareTable, ShareKey, candidates.Select(r => (r.Id, r.UserId)).ToList(), user.Roles, cn);
         return candidates.Where(r => valid.Contains(r.Id)).Select(r =>
         {

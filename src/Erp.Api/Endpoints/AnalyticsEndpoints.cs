@@ -45,18 +45,20 @@ public static class AnalyticsEndpoints
             };
         }).Requires(Capability.Records).Costly("agrega el catálogo completo").RequireRateLimiting(RatePolicies.Aggregate);
         reports.MapGet("/{entity}/{name}/export", async (string entity, string name, string? format, string? filters,
-            HttpContext http, ReportService svc, CancellationToken ct) =>
+            HttpContext http, ReportService svc, MetadataStore store, Db db, CancellationToken ct) =>
         {
             var r = await svc.RunAsync(entity, name, FilterSql.Parse(filters), http.CurrentUser(), ct);
             // El nombre del archivo sale de los metadatos (identificador validado), nunca de la petición.
             var file = $"{r.Entity}-{r.Name}-{DateTime.Now:yyyyMMdd}";
+            if (format?.ToLowerInvariant() is not ("csv" or "xlsx" or null)) throw new AppException(400, "Formato no válido (csv o xlsx).");
+            await ExportTrailAsync(http, db, await store.GetAsync(ct), r, format, ct);
             return format?.ToLowerInvariant() switch
             {
                 "xlsx" => Results.File(ReportExport.Xlsx(r), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", file + ".xlsx"),
                 "csv" or null => Results.File(ReportExport.Csv(r), "text/csv; charset=utf-8", file + ".csv"),
                 _ => throw new AppException(400, "Formato no válido (csv o xlsx)."),
             };
-        }).Requires(Capability.Records).Costly("hasta 1000 grupos en un archivo").RequireRateLimiting(RatePolicies.Bulk);
+        }).Requires(Capability.Records).Writes(Effect.AuditTrail).Costly("hasta 1000 grupos en un archivo").RequireRateLimiting(RatePolicies.Bulk);
 
         // Spec 041: reportes personales y exploración al vuelo. Solo con sesión: las claves de API y los tokens OAuth no llegan
         // a /api/my-reports. Todo corre con quien pide (PersonalReports.Check en cada corrida).
@@ -72,19 +74,20 @@ public static class AnalyticsEndpoints
         })
             .Requires(Capability.Records).Writes(Effect.None).Costly("agrega el catálogo completo").RequireRateLimiting(RatePolicies.Aggregate);
         mine.MapPost("/explore/export", async (ExploreRequest req, HttpContext http, MetadataStore store, ReportService svc, CostlyGate gate,
-            CancellationToken ct) =>
+            Db db, CancellationToken ct) =>
         {
             if (req.Format?.ToLowerInvariant() is not ("csv" or "xlsx" or null)) throw new AppException(400, "Formato no válido (csv o xlsx).");
             // Regresión (revisión adversarial 042, F-D): la compuerta sigue tomada mientras se arma el archivo (antes se soltaba
             // al terminar la consulta y armar hasta 1 000 grupos en Excel quedaba fuera del tope).
             using var _ = gate.Enter(http.CurrentUser());
             var r = await ExploreAsync(req, http, store, svc, ct);
+            await ExportTrailAsync(http, db, await store.GetAsync(ct), r, req.Format, ct);
             // El nombre del archivo sale del identificador del catálogo (metadatos), nunca de la petición.
             var file = $"{r.Entity}-{PersonalReports.ReportName}-{DateTime.Now:yyyyMMdd}";
             return req.Format?.ToLowerInvariant() == "xlsx"
                 ? Results.File(ReportExport.Xlsx(r), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", file + ".xlsx")
                 : Results.File(ReportExport.Csv(r), "text/csv; charset=utf-8", file + ".csv");
-        }).Requires(Capability.Records).Writes(Effect.None).Costly("hasta 1000 grupos en un archivo").RequireRateLimiting(RatePolicies.Bulk);
+        }).Requires(Capability.Records).Writes(Effect.AuditTrail).Costly("hasta 1000 grupos en un archivo").RequireRateLimiting(RatePolicies.Bulk);
         mine.MapGet("/", (HttpContext http, PersonalReportService svc, CancellationToken ct) => svc.ListAsync(http.CurrentUser(), ct))
             .Requires(Capability.Records);
         // Spec 042: los compartidos con quien pide; abrir uno compartido (sin definición si no corre para él) y compartir el suyo.
@@ -162,6 +165,22 @@ public static class AnalyticsEndpoints
     }
 
     /// <summary>Spec 041: corre una definición sin guardarla, validada contra quien la pide.</summary>
+    /// <summary>
+    /// Spec 045 (auditoría 8, D-06): exportar un reporte o una exploración deja rastro, como la exportación de un listado
+    /// (`data.export` bajo el catálogo raíz: reporte, formato y filas; nunca la definición ni los valores). Va antes de enviar
+    /// el archivo: sin rastro no hay archivo.
+    /// </summary>
+    private static async Task ExportTrailAsync(HttpContext http, Db db, IReadOnlyDictionary<string, EntityDef> model, ReportResult r,
+        string? format, CancellationToken ct)
+    {
+        var root = model.TryGetValue(r.Entity, out var e) && e.IsChild ? e.ParentEntity! : r.Entity;
+        await using var cn = await db.OpenAsync(ct);
+        await Audit.WriteAsync(cn, null, http, AuditActions.Export, root, null, after: new
+        {
+            report = r.Name, entity = r.Entity, format = format?.ToLowerInvariant() ?? "csv", rows = r.Rows.Count, r.Truncated,
+        });
+    }
+
     private static async Task<ReportResult> ExploreAsync(ExploreRequest req, HttpContext http, MetadataStore store, ReportService svc, CancellationToken ct)
     {
         var u = http.CurrentUser();

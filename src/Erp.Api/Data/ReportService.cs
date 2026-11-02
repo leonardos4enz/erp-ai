@@ -62,12 +62,13 @@ public sealed class ReportService(Db db, MetadataStore store)
     }
 
     /// <summary>
-    /// ¿El usuario puede consultar el reporte? Necesita leer el catálogo (una partida, su documento), tener uno de los
-    /// roles y ver todos los campos que el reporte usa (agrupaciones, medidas y filtro fijo), y cada referencia del camino.
+    /// ¿El usuario puede consultar el reporte? Necesita ver el catálogo (una partida: leer su documento y ver su campo de
+    /// partidas, spec 045 D-01), tener uno de los roles y ver todos los campos que el reporte usa (agrupaciones, medidas y
+    /// filtro fijo), y cada referencia del camino.
     /// </summary>
     public static bool Available(EntityDef e, ReportDef r, UserContext user, IReadOnlyDictionary<string, EntityDef> model)
     {
-        if (!user.Access(Root(e, model).Name).Read) return false;
+        if (!FieldAccess.SeesLines(e, user, model)) return false;
         if (!user.IsSuperuser && r.Roles is not null && !user.HasRole(r.Roles)) return false;
         foreach (var path in (r.GroupBy ?? []).Select(g => g.Field).Concat(r.Measures.Select(m => m.Field).OfType<string>()))
             if (InterfaceRules.Resolve(e, path, model).Path is not { } p || !InterfaceRules.CanSee(p, user) || !CanReadPath(p, user, model)) return false;
@@ -82,13 +83,14 @@ public sealed class ReportService(Db db, MetadataStore store)
     /// <summary>
     /// Regresión (revisión adversarial 039, F-A): cada salto llega a un catálogo que el usuario debe poder leer. Sin ese
     /// permiso solo se ve lo que ofrece el buscador de una referencia: el campo para mostrar del último catálogo del camino.
+    /// Spec 045 (D-01): una partida, además, solo si se ve su campo de partidas.
     /// </summary>
     internal static bool CanReadPath(FieldPath p, UserContext user, IReadOnlyDictionary<string, EntityDef> model)
     {
         for (var i = 0; i < p.Hops.Count; i++)
         {
             var to = p.Hops[i].To;
-            if (user.Access(Root(to, model).Name).Read) continue;
+            if (FieldAccess.SeesLines(to, user, model)) continue;
             var display = i == p.Hops.Count - 1 && string.Equals(p.Field.Name, to.EffectiveDisplayField, StringComparison.OrdinalIgnoreCase)
                 && !FieldAccess.DisplayHidden(to, user);
             if (!display) return false;

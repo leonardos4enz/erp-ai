@@ -47,6 +47,8 @@ public partial class Hardening034Tests(Hardening034Tests.Host host) : IClassFixt
                 new { op = "createEntity", group = Group, name = "It34Privado", label = "Privado 034", labelPlural = "Privados 034", displayField = "Nombre", fields = new object[] {
                     new { name = "Nombre", label = "Nombre", type = "text", required = true } } },
                 new { op = "setSecurity", entity = Doc, security = new { records = new[] { new { roles = new[] { "IT34 Auditor" }, scope = "own" } } } },
+                // Spec 045 (D-06): un reporte para que la exportación de reportes (declara «bitácora») se ejerza en el recorrido.
+                new { op = "setReports", entity = Doc, reports = new[] { new { name = "Conteo", label = "Conteo", measures = new[] { new { fn = "count" } } } } },
                 new { op = "setPrintTemplates", entity = Doc, templates = new[] { new { name = "Ficha", label = "Ficha", @default = true, blocks = new object[] {
                     new { type = "text", text = "Documento {{ Nombre }}" } } } } },
             } });
@@ -221,7 +223,7 @@ public partial class Hardening034Tests(Hardening034Tests.Host host) : IClassFixt
             var pattern = RouteDispatcher.Pattern(e);
             var url = pattern.Replace("{entity}", Doc).Replace("{id:long}", host.Ids["doc"].ToString()).Replace("{id:int}", "1")
                 .Replace("{segment}", Doc).Replace("{token}", "x")
-                .Replace("{name}", pattern.StartsWith("/api/explorer") || pattern.StartsWith("/api/model") ? Doc : "NoExiste");
+                .Replace("{name}", pattern.StartsWith("/api/explorer") || pattern.StartsWith("/api/model") ? Doc : pattern.StartsWith("/api/reports") ? "Conteo" : "NoExiste");
             Assert.False(url.Contains('{'), $"La prueba no sabe llenar {pattern}: agrega el parámetro.");
             var before = await host.ScalarAsync<long>("SELECT ISNULL(MAX(Id), 0) FROM meta.AuditLog");
             var res = await admin.GetAsync(url);

@@ -5,6 +5,7 @@
 // Spec 031 (auditoría 5): un parámetro de ruta sin resolver hace fallar el recorrido, las rutas que no son GET salen del
 // inventario y lo que se le dice al lector en la importación es lo mismo que en /compute (el bit, no solo la cadena).
 // Spec 041: también lo que el lector explora, exporta y guarda como reporte personal (H5 (041)).
+// Spec 045 (auditoría 8, D-01): y una partida detrás de un campo de partidas oculto (exploración, reporte del modelo y saltos).
 // Autocontenido: crea sus catálogos (grupo «Pruebas 029»), su empresa y su usuario, y los archiva al terminar.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -42,6 +43,9 @@ const EXPLORE = (canary: string) => [
   { entity: 'CnPuente', groupBy: [{ field: 'Secreto.Dato' }], measures: [{ fn: 'count' }] },
   { entity: 'CnSecreto', groupBy: [{ field: 'Dato' }], measures: [{ fn: 'count' }] },
   { entity: 'CnEmpresa', groupBy: [{ field: 'Dato' }], measures: [{ fn: 'count' }] },
+  // Spec 045 (D-01): la partida detrás del campo de partidas oculto, directa y por su documento.
+  { entity: 'CnDocPartida', groupBy: [{ field: 'Dato' }], measures: [{ fn: 'count' }] },
+  { entity: 'CnDocPartida', groupBy: [{ field: 'Doc.Nombre' }], measures: [{ fn: 'min', field: 'Dato' }] },
 ];
 
 // El canario se guarda en un archivo de la corrida (el proceso se reinicia tras una falla con E2E_INDEPENDENT).
@@ -90,8 +94,15 @@ const MODEL = (canary: string) => ({
       { name: 'OtraEmpresa', label: 'De otra empresa', type: 'formula', resultType: 'text', formula: 'Puente.Empresa.Dato' },
       // Una fórmula visible que lee un campo oculto (auditoría 4 D-05).
       { name: 'Copia', label: 'Copia', type: 'formula', resultType: 'text', formula: "Oculto & ''" } ] },
+    // Spec 045 (auditoría 8, D-01): partidas que solo ve el administrador (su campo de partidas está oculto para el lector).
+    { op: 'createEntity', name: 'CnDocPartida', label: 'Partida 029', labelPlural: 'Partidas 029', fields: [
+      { name: 'Doc', label: 'Documento', type: 'parent', referenceEntity: 'CnDoc' },
+      { name: 'Concepto', label: 'Concepto', type: 'text', maxLength: 80, required: true },
+      { name: 'Dato', label: 'Dato', type: 'text', maxLength: 120 } ] },
+    { op: 'addField', entity: 'CnDoc', field: { name: 'Partidas', label: 'Partidas', type: 'lines', childEntity: 'CnDocPartida' } },
+    { op: 'setReports', entity: 'CnDocPartida', reports: [{ name: 'PorPartida', label: 'Por dato de la partida', groupBy: [{ field: 'Dato' }], measures: [{ fn: 'count' }] }] },
     { op: 'setSecurity', entity: 'CnSecreto', security: { records: [{ roles: [ROLE], scope: 'own' }] } },
-    { op: 'setSecurity', entity: 'CnDoc', security: { fields: [{ field: 'Oculto', read: ['Administrador'] }] } },
+    { op: 'setSecurity', entity: 'CnDoc', security: { fields: [{ field: 'Oculto', read: ['Administrador'] }, { field: 'Partidas', read: ['Administrador'] }] } },
     { op: 'setLayout', entity: 'CnDoc', layout: { sections: [
       { name: 'General', label: 'General', fields: ['Nombre', 'Puente', 'Puente2', 'Oculto', 'Dos', 'Tres', 'OtraEmpresa'] },
       // Se ve solo si el dato secreto está vacío: con el canario legible, desaparecería (un bit de fuga por layout).
@@ -132,6 +143,10 @@ test.afterAll(async () => {
   const boards = (await (await a.get('/api/dashboards')).json()) as { name: string }[];
   const operations = [
     ...(boards.some((d) => d.name === 'CnTablero') ? [{ op: 'archiveDashboard', name: 'CnTablero' }] : []),
+    // Spec 045: primero el campo de partidas y la partida (el documento y su partida se referencian entre sí).
+    ...(model.some((e) => e.name === 'CnDocPartida') ? [
+      { op: 'setSecurity', entity: 'CnDoc', security: { fields: [{ field: 'Oculto', read: ['Administrador'] }] } },
+      { op: 'archiveField', entity: 'CnDoc', field: 'Partidas' }, { op: 'archiveEntity', entity: 'CnDocPartida' }] : []),
     ...[...ENTITIES].filter((n) => model.some((e) => e.name === n)).map((entity) => ({ op: 'archiveEntity', entity })),
   ];
   if (operations.length) await applyPlan(a, { description: 'E2E 029: limpieza del canario', operations });
@@ -191,7 +206,8 @@ test('preparar: canario en un campo oculto, fuera de alcance, detrás de uno vis
   ids.puente = await post('CnPuente', { Nombre: 'Puente visible', Secreto: ids.secreto });
   ids.puente2 = await post('CnPuente2', { Nombre: 'Puente doble visible', Puente: ids.puente });
   // Un secreto propio del lector, con un dato que sí puede ver (para comprobar que el alcance no apaga todo).
-  ids.doc = await post('CnDoc', { Nombre: 'Documento visible', Puente: ids.puente, Puente2: ids.puente2, Oculto: canary });
+  ids.doc = await post('CnDoc', { Nombre: 'Documento visible', Puente: ids.puente, Puente2: ids.puente2, Oculto: canary,
+    Partidas: [{ Concepto: 'Partida oculta', Dato: canary }] });
   ids.docEmpresa = await post('CnDoc', { Nombre: 'Documento con otra empresa', Puente: ids.puenteEmpresa });
   state = { canary, ids };
   save();
@@ -386,6 +402,31 @@ test('H5 (041): explorar, exportar y guardar a dos saltos: el administrador ve e
   // El del lector no es del administrador (no lo hereda ni lo lee).
   expect((await a.get(`/api/my-reports/${id}`)).status()).toBe(404);
   expect((await l.delete(`/api/my-reports/${id}`, { params: { version: '1' } })).status()).toBe(204);
+});
+
+// Spec 045 (auditoría 8, D-01): las partidas detrás de un campo de partidas oculto. El administrador las explora y ve su
+// reporte del modelo (control positivo); el lector no las tiene como fuente y recibe lo mismo que por un catálogo inexistente.
+test('H1 (045): una partida detrás de un campo de partidas oculto: el administrador ve el canario y el lector no', async () => {
+  const a = await admin();
+  const l = await lector();
+  const { canary } = state;
+  const definition = { entity: 'CnDocPartida', groupBy: [{ field: 'Dato' }], measures: [{ fn: 'count' }] };
+  for (const res of [await a.post('/api/my-reports/explore', { data: { definition } }), await a.get('/api/reports/CnDocPartida/PorPartida'),
+    await a.get('/api/reports/CnDocPartida/PorPartida/export', { params: { format: 'csv' } })]) {
+    expect(res.status(), await res.text()).toBe(200);
+    expect(await res.text()).toContain(canary);
+  }
+  expect(await (await a.get('/api/my-reports/sources')).text()).toContain('CnDocPartida');
+  expect(await (await l.get('/api/my-reports/sources')).text()).not.toContain('CnDocPartida');
+  expect(await (await l.get('/api/reports')).text()).not.toContain('PorPartida');
+  for (const res of [await l.post('/api/my-reports/explore', { data: { definition } }), await l.get('/api/my-reports/sources/CnDocPartida'),
+    await l.get('/api/reports/CnDocPartida/PorPartida'), await l.get('/api/reports/CnDocPartida/PorPartida/export', { params: { format: 'csv' } }),
+    await l.post('/api/my-reports', { data: { label: 'Canario 045', definition } })]) {
+    expect(res.status(), res.url()).toBe(404);
+    expect(await res.text()).not.toContain(canary);
+  }
+  // El registro del documento tampoco trae las partidas (lo que ya hacía el motor; la regla es la misma).
+  expect(await (await l.get(`/api/data/CnDoc/${state.ids.doc}`)).text()).not.toContain(canary);
 });
 
 // Spec 042: un reporte y un tablero personales del administrador, compartidos con el rol del lector, que llegan al canario

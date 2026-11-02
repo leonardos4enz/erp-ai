@@ -848,7 +848,7 @@ export function EntityEditor({ original, entities, onCancel, onReview }: EntityE
           <JsonBacked<SecurityPolicy> kind="object" text={d.securityJson} onText={(securityJson) => setD((s) => ({ ...s, securityJson }))}
             title="Seguridad" description="Quién ve o modifica qué registros y campos. Se aplica en el servidor, también en listados, reportes y API."
             jsonLabel="Seguridad (JSON)" errors={sectionErrors('security')} clientError={visibleErrors.securityJson}
-            hint="fields (field, read, edit, editableIn), owner, teamOwners, systemManaged y records (roles, scope all/unitTree/unit/own, where, access read/write).">
+            hint="fields (field, read, edit, editableIn), owner, teamOwners, systemManaged, records (roles, scope all/unitTree/unit/own, where, access read/write) y deletableWhen con deleteMessage.">
             {(v, write) => <SecurityEditor policy={v} onChange={write} ctx={sectionCtx('security')} />}
           </JsonBacked>
         </div>

@@ -155,13 +155,17 @@ public sealed class McpWrites(Db db, McpOptions options)
 
         private async Task LoopAsync(McpWrites owner, long id, Guid attempt, TimeSpan every)
         {
+            // Spec 045 (auditoría 8, D-09): una falla pasajera no termina la renovación; la siguiente vuelta lo vuelve a intentar.
             try
             {
                 using var timer = new PeriodicTimer(every);
-                while (await timer.WaitForNextTickAsync(_stop.Token)) await owner.RenewAsync(id, attempt, _stop.Token);
+                while (await timer.WaitForNextTickAsync(_stop.Token))
+                {
+                    try { await owner.RenewAsync(id, attempt, _stop.Token); }
+                    catch (Exception) when (!_stop.IsCancellationRequested) { /* de mejor esfuerzo, también un tiempo agotado: se reintenta en la siguiente vuelta */ }
+                }
             }
             catch (OperationCanceledException) { }
-            catch (Exception) { /* de mejor esfuerzo: el lease inicial sigue protegiendo la clave */ }
         }
 
         public async ValueTask DisposeAsync()

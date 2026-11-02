@@ -414,6 +414,14 @@ public sealed record SecurityPolicy
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool TeamOwners { get; init; }
+    /// <summary>
+    /// Spec 045 (auditoría 8, D-04): expresión del documento que debe cumplirse para eliminarlo (para todos, también el
+    /// superusuario) y el mensaje si no. Se omiten en nulo (forma canónica de los paquetes).
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DeletableWhen { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DeleteMessage { get; init; }
 
     /// <summary>Spec 015: ¿este campo es el dueño y admite equipos?</summary>
     public bool AcceptsTeams(string field) => TeamOwners && string.Equals(Owner, field, StringComparison.OrdinalIgnoreCase);

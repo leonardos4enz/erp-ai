@@ -84,9 +84,11 @@ public static class AssistantPrompt
           (o ledger: null). Libro de partida doble: en los estados contabilizados las partidas cuadran (cargos = abonos) y
           la fecha cae en un periodo cuya condición open se cumple. Lo garantiza el motor por cualquier vía.
         - setSecurity { entity, security: { owner?, teamOwners?, systemManaged?, fields?: [{ field, read?: string[], edit?: string[],
-          editableIn?: string[] }], records?: [{ roles?, scope?: all|unitTree|unit|own, where?, access?: read|write }] } }
+          editableIn?: string[] }], records?: [{ roles?, scope?: all|unitTree|unit|own, where?, access?: read|write }],
+          deletableWhen?, deleteMessage? } }
           (o security: null para quitarla). Los roles deben existir (lista "roles" del modelo). unitTree = la unidad del
-          usuario y las que cuelgan de ella; teamOwners (requiere owner) = el dueño puede ser un equipo.
+          usuario y las que cuelgan de ella; teamOwners (requiere owner) = el dueño puede ser un equipo; deletableWhen =
+          expresión del documento que debe cumplirse para eliminarlo (no en partidas).
         - setLayout { entity, layout: { sections: [{ name, label, description?, tab?, columns?, visibleWhen?,
           fields: (string | { field, visibleWhen?, wide? })[] }] } }   (o layout: null)
         - setViews { entity, merge?, views: [{ name, label, roles?, columns?, filters?: [{ field, op, value? }], sort?, dir?,

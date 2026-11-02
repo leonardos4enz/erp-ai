@@ -48,6 +48,7 @@ public sealed class McpOptions
         var s = config.GetSection("Mcp");
         static int Clamp(int v, int min, int max) => Math.Clamp(v, min, max);
         var trusted = s.GetSection("TrustedRedirectHosts").Get<string[]>();
+        var idempotencyHours = Clamp(s.GetValue("IdempotencyHours", 24), 1, 24 * 30);
         return new McpOptions
         {
             Enabled = s.GetValue("Enabled", true),
@@ -69,8 +70,9 @@ public sealed class McpOptions
             SandboxIdleMinutes = Clamp(s.GetValue("SandboxIdleMinutes", 30), 1, 24 * 60),
             SandboxLeaseSeconds = Clamp(s.GetValue("SandboxLeaseSeconds", 120), 6, 3600),
             ProposalsPerDay = Clamp(s.GetValue("ProposalsPerDay", 20), 1, 10_000),
-            IdempotencyHours = Clamp(s.GetValue("IdempotencyHours", 24), 1, 24 * 30),
-            WriteLeaseSeconds = Clamp(s.GetValue("WriteLeaseSeconds", 300), 5, 24 * 3600),
+            IdempotencyHours = idempotencyHours,
+            // Spec 045 (auditoría 8, D-10): una clave en curso no puede durar más que la mitad de lo que se conserva.
+            WriteLeaseSeconds = Clamp(s.GetValue("WriteLeaseSeconds", 300), 5, Math.Min(24 * 3600, idempotencyHours * 1800)),
             SweepSeconds = Clamp(s.GetValue("SweepSeconds", 30), 1, 3600),
             SandboxCreationsPerHour = Clamp(s.GetValue("SandboxCreationsPerHour", 6), 1, 10_000),
         };

@@ -477,9 +477,25 @@ public sealed partial class RecordService(Db db, MetadataStore store)
         await using var cn = await db.OpenAsync(ct);
         await using var tx = (SqlTransaction)await cn.BeginTransactionAsync(ct);
         await EnsureAccessAsync(cn, tx, e, id, user, write: true, ct);
+        // Revisión adversarial 045 (F-01): el documento se bloquea antes de leerlo; si no, una transición que confirma entre
+        // la lectura y el borrado dejaba borrar un documento ya no editable (o que ya no cumple «deletableWhen»).
+        await using (var lockCmd = new SqlCommand($"SELECT 1 FROM {AppTable(e.Name)} WITH (UPDLOCK, HOLDLOCK) WHERE [Id] = @id", cn, tx))
+        {
+            lockCmd.Parameters.Add(new SqlParameter("@id", id));
+            await lockCmd.ExecuteScalarAsync(ct);
+        }
         var draft = await LoadDraftAsync(cn, tx, e, model, id, ct) ?? throw new NotFound("El registro no existe.");
         if (e.Workflow?.FindState(draft.Header.GetValueOrDefault(Workflow.StateField) as string) is { Editable: false } st)
             throw new AppException(StatusCodes.Status409Conflict, $"El documento está en estado «{st.Label}» y no se puede eliminar.");
+        // Spec 045 (auditoría 8, D-04): la condición del modelo para eliminar (p. ej. un pedido que nombra a su cotización).
+        // Desconocido (nulo) no elimina, como el «cuándo» de una transición.
+        if (e.Security?.DeletableWhen is { } deletable)
+        {
+            // Revisión adversarial 045 (F-02): con el alcance de quien elimina; lo que no ve es desconocido y no elimina.
+            var loader = new RelatedLoader(cn, tx, model, viewer: user);
+            if (!ExprEvaluator.Test(deletable, HeaderScope(draft, e, model, loader), Env(user, draft, loader), whenNull: false))
+                throw new Conflict(e.Security.DeleteMessage ?? "El registro no cumple la condición para eliminarse.");
+        }
 
         // Integridad: no se elimina un registro que siga en uso por registros activos.
         foreach (var other in model.Values)
@@ -1342,7 +1358,7 @@ public sealed partial class RecordService(Db db, MetadataStore store)
             throw new ValidationFailed(new Dictionary<string, string[]>
             {
                 [field?.Name ?? "registro"] = [$"Ya existe un registro con ese valor{(field is null ? "" : $" de {field.Label}")}."],
-            });
+            }) { Unique = (e.ParentEntity ?? e.Name, field?.Name ?? "registro") };
         }
     }
 }

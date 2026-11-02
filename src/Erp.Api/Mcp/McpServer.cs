@@ -206,17 +206,23 @@ public sealed class McpServer(McpOptions options, McpLimits limits, StudioToolRu
             var error = output.Data?["error"]?.ToString() ?? output.Summary;
             return (ToolErrorResult(error, status, status == 429 ? 60 : null, output.Data?["errors"]), explicitStatus is { } e && Repeatable.Contains(e));
         }
+        // Spec 045 (auditoría 8, D-08): la herramienta ya terminó (sin error): si es una escritura, su efecto está hecho y la clave
+        // se consume aunque el resultado no se pueda entregar; el reintento recibe el mismo error sin volver a ejecutar.
+        var done = tool.NeedsKey ? "La escritura se hizo, pero su resultado" : "El resultado";
         JsonObject structured;
         try { structured = tool.Structure(output.Data, input); }
-        catch (Exception ex) when (ex is InvalidOperationException or FormatException)
+        // Revisión adversarial 045 (F-07): cualquier excepción al leer la salida (la escritura ya se hizo) consume la clave.
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             log.LogError(ex, "La salida de {Tool} no tiene la forma esperada", tool.Name);
-            return (ToolErrorResult("Ocurrió un error inesperado.", 500), false);
+            return (ToolErrorResult(tool.NeedsKey ? $"{done} no se pudo leer: no la repitas; consulta el registro." : "Ocurrió un error inesperado.", 500), true);
         }
         var text = structured.ToJsonString(Json);
         // H5 CA4: no se recorta a medias (rompería el JSON y su esquema): se pide filtrar o paginar.
         if (Encoding.UTF8.GetByteCount(text) > options.MaxResultBytes)
-            return (ToolErrorResult($"El resultado ocupa más de {options.MaxResultBytes / 1024} KB: filtra (q, app, entity) o pide menos registros por página.", 413), false);
+            return (ToolErrorResult(tool.NeedsKey
+                ? $"{done} ocupa más de {options.MaxResultBytes / 1024} KB: no la repitas; consulta el registro."
+                : $"{done} ocupa más de {options.MaxResultBytes / 1024} KB: filtra (q, app, entity) o pide menos registros por página.", 413), true);
         return (ToolResult(structured, text), true);
     }
 
