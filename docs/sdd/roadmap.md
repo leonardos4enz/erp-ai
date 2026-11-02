@@ -399,7 +399,8 @@ ya marcados) y sus hallazgos se vuelven una spec de endurecimiento.
 | 2026-10-25, auditoría 5 (origen de la 031), adelantada | 029 (y la 030 en curso) | 5 defectos (1 alto: la importación calculaba avisos sin el alcance de quien importa) y 9 observaciones del canario y el inventario |
 | 2026-10-27, auditoría 6 (origen de la 034), al cerrar la 033 | 031–033 | 7 defectos (1 alto: quien administra usuarios cambiaba la contraseña o desactivaba al superusuario) y huecos del catálogo de Studio antes del MCP; R-009-1 y R-032-6 confirmados |
 | 2026-10-31, auditoría 7, al cerrar la 039 (servidor MCP, flujo SSE y multi-turno de Studio, reportes a dos saltos) | 034–039 | 12 defectos (1 medio: el registro dinámico del MCP se agota —con direcciones IPv6 sin cuenta, o para siempre con una cuenta, porque los clientes que tuvieron conexión no se barren— y bloquea conexiones nuevas; 11 bajos: tope de pendientes por dirección detrás de un proxy, cola de Studio que vence sesiones en un solo lote, `RenewSeconds` sin relación con `LeaseSeconds`, salidas de `datos` sin purgar si el servidor no vuelve, conversación que cambia de empresa, tope de uniones de la 039 que no existe, «#id» en lugar de «(sin acceso)», canario sin reportes a dos saltos, entre otros) y 3 observaciones. Sin fugas ni escaladas verificadas; los 25 riesgos marcados siguen abiertos. Propone la **040 — Endurecimiento 6**; el dueño la puso antes de los reportes personales (2026-10-31), que pasan a la 041, Ventas a la 042 y MCP 2 a la 043 |
-| **Siguiente: auditoría 8**, al cerrar la 044 (decisión del dueño, 2026-11-01) | 040–044 (registro dinámico endurecido, reportes y tableros personales con reparto, Ventas, copia aislada por conexión MCP con su barrido, escrituras con clave y propuestas por MCP) | Pendiente, en una sesión aparte |
+| 2026-11-01, auditoría 8, al cerrar la 044 (registro dinámico endurecido, reportes y tableros personales con reparto, Ventas, copia aislada por conexión MCP con su barrido, escrituras con clave y propuestas por MCP) | 040–044 | 11 defectos (1 alto: explorar o reportar sobre las partidas de un documento salta un campo de partidas oculto —el motor las oculta en el registro, OData, la bitácora y las fórmulas, pero los reportes solo piden leer el documento—, desde la 007 y al alcance de cualquier usuario desde la 041; 1 medio: el vendedor crea un cliente sin límite de crédito, que no puede fijar, y confirma a crédito sin tope; 9 bajos: «Público en general» editable por todo vendedor, borrar el pedido de una cotización aceptada, un campo único que revela registros fuera de alcance, exportar reportes sin bitácora, compartidos sin tope, tres en las claves y la copia del MCP y una carrera del barrido del registro) y 3 observaciones ([detalle](#045--endurecimiento-7-auditoría-8-propuesta)). Las correcciones de la 040 se sostienen; el oráculo por campo oculto de R-043-6 no se reproduce en ningún camino. Propone la **045 — Endurecimiento 7**; el dueño decide su lugar |
+| **Siguiente: auditoría 9**, a las 5 specs (045–049) o antes si una agrega un punto de entrada, un trabajo asíncrono o delegación | 045–049 | Pendiente |
 
 La auditoría 5 (adelantada, sobre la 029) confirmó que las 139 rutas conservan una capacidad igual o más estricta y
 encontró que la regla «lo vivo con el alcance de quien lo ve» de la 029 no llegaba a la importación, a las transiciones ni
@@ -663,10 +664,54 @@ En este orden, por decisión del dueño (2026-10-25):
     real por MCP** (exigen ADR por la constitución II.8), la bitácora del primer `leer_registros` por conexión y catálogo
     (R-040-3), seguir con el agente de Studio una conversación que empezó por MCP, un tope común de copias entre Studio y MCP
     (R-044-2). **Auditoría 8** (040–044) a continuación, en una sesión aparte (decisión del dueño, 2026-11-01): la 044 agrega
-    un trabajo asíncrono (el barrido) y escrituras por un punto de entrada existente.
+    un trabajo asíncrono (el barrido) y escrituras por un punto de entrada existente. Hecha el 2026-11-01
+    ([resultado](#auditorías)): propone la 045.
+    **045 — Endurecimiento 7 (auditoría 8)**, propuesta: ver [abajo](#045--endurecimiento-7-auditoría-8-propuesta). El dueño
+    decide si va antes de los puntos 15–17; D-01 (alto) no debería esperar.
 15. **Pólizas en moneda extranjera** (pendiente de la 020).
 16. **Revaluación de existencias** (pendiente de la 020).
 17. **Reversa de pólizas con otra póliza** (pendiente de la 020).
+
+### 045 — Endurecimiento 7 (auditoría 8): propuesta
+Origen: la auditoría externa 8 (2026-11-01, solo lectura al cerrar la 044, commit `63bd34a`, specs 040–044). Lectura del
+código completo de cada camino; no se cambió código ni pruebas. Cada D-xx debe volverse una prueba que falle con `63bd34a`.
+
+| # | Defecto · dónde | Escenario |
+|---|---|---|
+| D-01 | **Alta** · `PersonalReports.Catalog` y `Sources` (`src/Erp.Api/Data/PersonalReports.cs:65-71`, `:116-121`), `ReportService.Available` y `CanReadPath` (`src/Erp.Api/Data/ReportService.cs:68-97`): un catálogo de partidas solo exige **leer el documento**, no ver su campo de partidas (`lines`). El resto del motor sí lo exige: `FieldAccess.Strip` (`src/Erp.Api/Security/RecordFilter.cs:312-327`), `AuditFilter`, OData (`ODataModel.cs:71-75`), `DerivedAccess` | `Empleado.Nomina` (partidas) solo lo lee RH. Quien lee `Empleado` sin ser RH ve `EmpleadoNomina` en `/api/my-reports/sources` y con `POST /api/my-reports/explore` `{entity:"EmpleadoNomina", groupBy:[{field:"Empleado.Nombre"}], measures:[{fn:"sum", field:"Monto"}]}` obtiene el total por empleado (`explore/export`: 1 000 filas). Lo heredan los reportes compartidos, las tarjetas de tableros personales y los reportes y tableros del modelo sobre partidas (desde la 007). Corrección: una sola regla «ve las partidas» (lee la raíz y ve el campo `lines`, en cada salto por el documento) en `Catalog`, `Sources`, `Available` y `CanReadPath`; ampliar el canario con un campo de partidas oculto |
+| D-02 | **Media** · `modules/ventas.json:506` y `:513` (`ISBLANK(Cliente.LimiteCredito) OR …`) con `:1334` (`LimiteCredito` solo lo edita el gerente) y `:1704` (el vendedor crea clientes) | El vendedor da de alta un cliente: el límite queda vacío (el motor ignora el campo que no edita, `SalesTests.cs:292`) y las dos reglas lo tratan como «sin límite»: confirma pedidos a crédito de cualquier monto sin aviso ni gerente. Igual con «Público en general». Corrección por `upgrades` del paquete: vacío = 0 para quien no es gerente (o 0 por omisión al crear) |
+| D-03 | Baja · `modules/ventas.json:1333`: el permiso `where RFC = 'XAXX010101000'` no lleva `access: read`, así que también es de escritura (`RecordFilter.cs:93`, `Models.cs:400`) | Cualquier vendedor edita «Público en general»; si le cambia el RFC, ningún vendedor vuelve a verlo |
+| D-04 | Baja · `RecordService.cs:470-505` (borrar en estado editable) y el folio cruzado de texto en Ventas (R-043-6, primera mitad: confirmada) | El vendedor borra el pedido en borrador que creó una cotización aceptada; la cotización queda «Aceptada» (final) con un folio huérfano y sin forma de volver a generar el pedido |
+| D-05 | Baja · `RecordService.cs:1335-1346` y `DdlGenerator.cs:139-145`: el índice único es por empresa, no por alcance, y el error dice «Ya existe…» | Un vendedor con alcance «propios» sabe si un RFC ya es cliente de otro vendedor (genérico del motor, desde la 006) |
+| D-06 | Baja · `AnalyticsEndpoints.cs:74-87` (`explore/export`) y `:47-58` (exportar un reporte del modelo) no escriben bitácora; la exportación de listados sí (`AuditActions.Export`, `RecordService.Import.cs:447`) | Agrupar por folio con 6 medidas baja 1 000 filas por llamada, 20 por minuto, sin rastro. Son datos que la persona ve; rompe «exportar deja rastro» (como R-040-3 para el MCP) |
+| D-07 | Baja · `GET /api/my-reports/shared` (`PersonalReportService.cs:77-95`) sin tope, página ni límite propio | Corre `Check` sobre cada reporte compartido con los roles de quien pide: hasta 50 por persona × personas, en cada carga de la pantalla |
+| D-08 | Baja · `McpServer.cs:207-219`: en una escritura con clave, un resultado de más de `Mcp:MaxResultBytes` (413), una salida que `Structure` no entiende (500) o un error no repetible de la ruta **después** del efecto sueltan la clave (`AbandonAsync`) | `aislado_crear` con un texto de ~300 KB (cabe en los 512 KB del mensaje) crea el registro y responde 413; el reintento con la misma clave crea otro. Contradice H3 de la 044; solo en la copia (amplía R-044-1) |
+| D-09 | Baja · `McpSandboxes.cs:44-53` y `McpWrites.cs:156-165`: el `catch` está fuera del `while`, así que una sola falla de la base termina la renovación del *lease* | Tras una falla pasajera, la clave «en curso» vence en `Mcp:WriteLeaseSeconds` y un reintento corre a la vez que la llamada original; la copia queda a merced del barrido por inactividad si la llamada dura más que `SandboxIdleMinutes` |
+| D-10 | Baja · `McpOptions.cs:72-73` acota `IdempotencyHours` (1–720 h) y `WriteLeaseSeconds` (5 s–24 h) por separado, y `McpSandboxes.SweepAsync` (`:297`) borra `meta.McpWrite` por `CreatedAt` sin mirar `Status` | Con `IdempotencyHours=1` y `WriteLeaseSeconds>3600`, o una escritura que dura más que `IdempotencyHours`, el barrido borra una clave en curso y el reintento la ejecuta otra vez (como D-04 de la auditoría 7) |
+| D-11 | Baja · `McpOAuth.cs:151-167`: el barrido de clientes sin conexión en 1 h no excluye un código recién emitido | «Permitir» en medio del barrido: el `/oauth/register` anónimo que dispara el barrido responde 500 por la llave foránea del código (R-040-6 acepta que el canje falle, no el 500). Sin reproducir: ventana de milisegundos |
+
+Observaciones (sin defecto verificado): **O-01** la huella `definitionSha256` de la bitácora de reportes y tableros personales
+es SHA-256 sin sal (`PersonalReportService.cs:231-237`, `PersonalDashboards.cs:358-359`): un auditor podría confirmar por
+fuerza bruta un filtro de poca entropía (HMAC con clave del servidor, o aceptarlo). **O-02** `Security:ForwardedProxies` escrito
+como texto (variable de entorno sin `__0`) probablemente se ignora sin aviso: falla en lo seguro, pero detrás de un proxy todos
+comparten los límites; avisar al arrancar. **O-03** sospecha de interbloqueo entre la transacción serializable del registro
+dinámico y las renovaciones: una prueba de integración con los dos a la vez lo diría.
+
+Sin hallazgo (comprobado): las 18 rutas nuevas coinciden con [rutas.md](rutas.md) y las de `/api/my-*` no aceptan claves,
+OAuth ni el token MCP; solo el dueño cambia, borra o comparte, comparte solo roles que tiene (máximo 20) y el reparto se
+revalida al leer; lo compartido corre con quien lo ve y sin la definición que no puede correr; `CostlyGate` suelta con
+excepción y cancelación; nadie filtra ni ordena por un campo oculto en listados, exportación, buscadores, OData ni reportes
+(R-043-6, segunda mitad, descartada); `createLines[].from` solo lee partidas del origen (≤ 500) y ningún costo de Ventas llega
+a un camino visible; el paquete solo crea roles nuevos; las correcciones de la 040 se sostienen (`X-Forwarded-For` solo de
+proxies listados, /64 en todos los limitadores, `MaxClients` con clientes vivos, tope por persona revisado en el canje, cola de
+Studio sesión por sesión con *lease* y token, empresa fija con `datos`, tope de 16 uniones también en lo personal); en la 044
+los alcances `aislado` y `proponer` se vuelven a exigir (*modelador*) en cada llamada, la preparación de la copia va bajo
+bloqueo por conexión con la fila antes de la base, el barrido borra por `DELETE … OUTPUT` y por marca, la copia no tiene
+trabajos en segundo plano ni secretos, y `entregar` es una transacción con el bloqueo de Studio de la persona.
+
+Riesgos que la auditoría no cierra: los 21 medios o altos marcados **auditoría** (R-001-1 … R-022-3, R-039-4) siguen sin
+prueba y fuera del alcance de 040–044; se revisaron sin cambios y el dueño decide si la 045 toma alguno. R-043-5
+(`Producto.CostoUltimo` visible para vendedores, medio) sigue por decidir con el dueño.
 
 ## Decisión: ¿extensión con código?
 La auditoría tiene razón en el costo: cada necesidad nueva exige una capacidad del motor. Se mantiene
