@@ -2,7 +2,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useSta
 import { ArrowDown, Gauge, Inbox, Info, MessagesSquare, Pencil, RotateCcw, Rocket, StopCircle, WifiOff, XCircle } from 'lucide-react';
 import { ApiError } from '../../api/client';
 import { studioApi } from '../../api/endpoints';
-import type { StudioSession, StudioStatusInfo, StudioStep } from '../../api/types';
+import type { StudioStatusInfo, StudioStep } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
 import { Dialog } from '../../components/Dialog';
 import { useToast } from '../../components/Toast';
@@ -17,7 +17,7 @@ import { LiveText, reducedMotion } from './LiveText';
 import { CopyButton, Markdown } from './Markdown';
 import { ProposalCard, ReportView } from './ProposalCard';
 import { ToolGroup } from './ToolGroup';
-import { useStudioChat } from './useStudioChat';
+import { useStudioChat } from './useAgentChat';
 
 export function problemText(e: unknown, fallback: string) {
   if (!(e instanceof ApiError)) return fallback;
@@ -30,7 +30,7 @@ function answerText(t: Turn): string {
   return t.segments.map((x) => (x.kind === 'text' ? x.text : x.kind === 'deliver' ? x.delivery.summary : '')).filter(Boolean).join('\n\n');
 }
 
-function useNow(ms: number) {
+export function useNow(ms: number) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => { const t = window.setInterval(() => setNow(Date.now()), ms); return () => window.clearInterval(t); }, [ms]);
   return now;
@@ -281,6 +281,7 @@ export function ChatView({ id, status, dataTools, onListChanged, onOpenBar }: {
                     if (seg.kind === 'text') return <Markdown key={seg.seq} text={seg.text} />;
                     if (seg.kind === 'tools') return <ToolGroup key={seg.steps[0].seq} steps={seg.steps} dataTools={dataTools} />;
                     if (seg.kind === 'notice') return <Notice key={seg.step.seq} step={seg.step} />;
+                    if (seg.kind === 'action') return null; // solo el Acompañante (047) propone acciones
                     const isProposal = seg.seq === proposalSeq || seg.delivery.hasPlan;
                     return (
                       <div key={seg.seq} className="chat-deliver">
@@ -386,7 +387,7 @@ export function ChatView({ id, status, dataTools, onListChanged, onOpenBar }: {
   );
 }
 
-function UserBubble({ text, at, now, innerRef, onEdit }: {
+export function UserBubble({ text, at, now, innerRef, onEdit }: {
   text: string; at: string | null; now: number; innerRef?: Ref<HTMLDivElement>; onEdit?: () => void;
 }) {
   return (
@@ -431,7 +432,11 @@ function EditBox({ value, original, onChange, onCancel, onSend }: {
 }
 
 /** H3 CA1: mientras el turno corre: el punto que late, el texto en vivo o la herramienta en curso. */
-function LiveArea({ live, status }: { live: ReturnType<typeof useStudioChat>['live']; status: StudioSession['status'] }) {
+export function LiveArea({ live, status, toolLabels }: {
+  live: ReturnType<typeof useStudioChat>['live']; status: string;
+  /** Spec 047: el Acompañante dice qué consulta en lenguaje de usuario. */
+  toolLabels?: Readonly<Record<string, { live: string }>>;
+}) {
   const writing = live?.kind === 'text' && !!live.text;
   return (
     <div className="chat-live">
@@ -439,7 +444,7 @@ function LiveArea({ live, status }: { live: ReturnType<typeof useStudioChat>['li
       {!writing && (
         <p className="chat-status-line" key={live?.kind === 'tool' ? `tool-${live.tool}` : live?.kind ?? 'w'}>
           <span className="chat-dot" aria-hidden />
-          <span>{liveLabel(live, status)}</span>
+          <span>{liveLabel(live, status, toolLabels)}</span>
         </p>
       )}
     </div>
@@ -447,7 +452,7 @@ function LiveArea({ live, status }: { live: ReturnType<typeof useStudioChat>['li
 }
 
 /** Tope o error registrado como paso. */
-function Notice({ step }: { step: StudioStep }) {
+export function Notice({ step }: { step: StudioStep }) {
   return (
     <div className="chat-notice is-warning">
       <XCircle size={16} aria-hidden />
@@ -457,7 +462,7 @@ function Notice({ step }: { step: StudioStep }) {
 }
 
 /** H4 CA1 y CA2: cómo terminó el último turno si no fue con una respuesta (detenido, falló, interrumpido). */
-function TurnEnd({ s, onRetry, onEdit }: { s: StudioSession; onRetry?: () => void; onEdit?: () => void }) {
+export function TurnEnd({ s, onRetry, onEdit }: { s: { status: string; error?: string | null }; onRetry?: () => void; onEdit?: () => void }) {
   const stopped = s.status === 'cancelled';
   const failed = s.status === 'failed' || s.status === 'interrupted';
   if (!stopped && !failed) return null;

@@ -1,7 +1,7 @@
 import { api, ApiError } from './client';
 import type {
   AppSummary, SearchHit, AuditEntry, AutomationRun, AutomationRunDetail, ScheduleSummary, ChangePlan, Company, EntityOrigin, ExprFunction, FieldDef, ExchangeRate, ChangeSetSummary, DashboardResult, DashboardSummary, EntityDef, HistoryEntry, LayoutState, LookupItem, Me, PrintChoice, PrintTemplate, StoredImage,
-  ApiKey, AssistantStatus, McpAuthorizeInfo, McpConnections, StudioScope, StudioSession, StudioStatusInfo, StudioSummary, OAuthClient, OAuthScope, BusinessUnit, PendingChange, SecurityChange, Team, Conversation, ConversationSummary, Proposal, EnvironmentInfo, ExportableCatalogs, ExportPreview, ExportRequest, ImportResult, ModuleInfo, PackageImport, ModulePreview, WebhookDelivery, WebhookSummary, Paged, PlanPreview, ReportResult, ReportSummary, Role, Row, RowList, SavedView, User, ViewFilter, ViewList,
+  ApiKey, AssistantStatus, CompanionAction, CompanionConversation, CompanionScreen, CompanionStatus, CompanionSummary, McpAuthorizeInfo, McpConnections, StudioScope, StudioSession, StudioStatusInfo, StudioSummary, OAuthClient, OAuthScope, BusinessUnit, PendingChange, SecurityChange, Team, Conversation, ConversationSummary, Proposal, EnvironmentInfo, ExportableCatalogs, ExportPreview, ExportRequest, ImportResult, ModuleInfo, PackageImport, ModulePreview, WebhookDelivery, WebhookSummary, Paged, PlanPreview, ReportResult, ReportSummary, Role, Row, RowList, SavedView, User, ViewFilter, ViewList,
   PersonalReport, PersonalReportDef, PersonalReportSummary, ReportSource, ReportSourceFields,
   PersonalDashboardList, PersonalDashboardResult, PersonalWidget, SharedReportSummary, ShareResult,
 } from './types';
@@ -364,6 +364,24 @@ export const studioApi = {
   /** Con la huella de lo revisado; si el modelo cambió, 409. */
   apply: (id: number, reviewHash: string) =>
     api<{ changeSetId: number; session: StudioSession }>(`/studio/sessions/${id}/apply`, { method: 'POST', body: { reviewHash } }),
+};
+
+/** Spec 047: el Acompañante (contrato de la 046, plan §2). `context` es la pantalla que la persona está viendo. */
+export const companionApi = {
+  status: (signal?: AbortSignal) => api<CompanionStatus>('/companion', { signal }),
+  conversations: (signal?: AbortSignal) => api<CompanionSummary[]>('/companion/conversations', { signal }),
+  conversation: (id: number, signal?: AbortSignal) => api<CompanionConversation>(`/companion/conversations/${id}`, { signal }),
+  start: (text: string, context?: CompanionScreen | null) =>
+    api<CompanionConversation>('/companion/conversations', { method: 'POST', body: { text, context: context ?? undefined } }),
+  send: (id: number, text: string, context?: CompanionScreen | null) =>
+    api<CompanionConversation>(`/companion/conversations/${id}/messages`, { method: 'POST', body: { text, context: context ?? undefined } }),
+  streamUrl: (id: number, after: number) => `/api/companion/conversations/${id}/stream?after=${after}`,
+  cancel: (id: number) => api<CompanionConversation>(`/companion/conversations/${id}/cancel`, { method: 'POST' }),
+  remove: (id: number) => api<void>(`/companion/conversations/${id}`, { method: 'DELETE' }),
+  /** Con la huella de la vista previa; un 428 trae los avisos en `fieldErrors` y se confirma otra vez aceptándolos. */
+  confirm: (id: number, hash: string, acceptWarnings?: string[]) =>
+    api<{ action: CompanionAction; record?: unknown }>(`/companion/actions/${id}/confirm`, { method: 'POST', body: { hash, acceptWarnings } }),
+  discard: (id: number) => api<CompanionAction>(`/companion/actions/${id}/discard`, { method: 'POST' }),
 };
 
 /** Spec 015: equipo (dueño de registros); la unidad es el nombre de una existente. */

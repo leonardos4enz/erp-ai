@@ -13,11 +13,18 @@ const STATUS = {
  * Spec 037 (H3 CA2): las herramientas seguidas de una respuesta en una línea plegable («Usó 3 herramientas»); cada fila
  * abre su entrada y su salida, como texto (nunca como marcado).
  */
-export function ToolGroup({ steps, dataTools }: { steps: StudioStep[]; dataTools: ReadonlySet<string> }) {
+export function ToolGroup({ steps, dataTools, labels }: {
+  steps: StudioStep[]; dataTools: ReadonlySet<string>;
+  /** Spec 047: nombres para personas (el Acompañante); con ellos no se muestran la entrada ni la salida técnicas. */
+  labels?: Readonly<Record<string, { done: string }>>;
+}) {
   const [open, setOpen] = useState(false);
   const panel = useId();
   const failed = steps.filter((s) => s.status !== 'ok').length;
-  const label = `Usó ${steps.length === 1 ? steps[0].tool ?? 'una herramienta' : `${steps.length} herramientas`}${failed ? ` · ${failed} con error` : ''}`;
+  const named = (s: StudioStep) => (s.tool && labels?.[s.tool]?.done) || (labels ? 'Consultó el sistema' : s.tool ?? 'herramienta');
+  const label = labels
+    ? `${steps.length === 1 ? named(steps[0]) : `Consultó ${steps.length} cosas`}${failed ? ` · ${failed} sin respuesta` : ''}`
+    : `Usó ${steps.length === 1 ? steps[0].tool ?? 'una herramienta' : `${steps.length} herramientas`}${failed ? ` · ${failed} con error` : ''}`;
   return (
     <div className="chat-tools">
       <button type="button" className="chat-tools-toggle" aria-expanded={open} aria-controls={panel} onClick={() => setOpen((o) => !o)}>
@@ -27,10 +34,26 @@ export function ToolGroup({ steps, dataTools }: { steps: StudioStep[]; dataTools
       </button>
       {open && (
         <ul id={panel} className="chat-tools-list" aria-label="Herramientas">
-          {steps.map((s) => <ToolRow key={s.seq} step={s} dataTools={dataTools} />)}
+          {steps.map((s) => (labels ? <PlainRow key={s.seq} step={s} name={named(s)} /> : <ToolRow key={s.seq} step={s} dataTools={dataTools} />))}
         </ul>
       )}
     </div>
+  );
+}
+
+/** Spec 047: una consulta del Acompañante, sin entrada ni salida (lenguaje de usuario, H2 CA2). */
+function PlainRow({ step, name }: { step: StudioStep; name: string }) {
+  const st = STATUS[step.status] ?? STATUS.error;
+  const Icon = st.icon;
+  return (
+    <li className={`chat-tool ${st.cls}`}>
+      <div className="chat-tool-row is-plain">
+        <Icon size={15} aria-hidden className="chat-tool-icon" />
+        <span className="sr-only">{st.label}: </span>
+        <span className="chat-tool-name">{name}</span>
+        <span className="chat-tool-summary">{step.summary}</span>
+      </div>
+    </li>
   );
 }
 

@@ -826,8 +826,9 @@ export interface StudioSummary {
 export type StudioPlanStatus = 'proposed' | 'applied' | 'discarded';
 /** Un paso del agente: texto del modelo, herramienta, entrega o tope. Entrada y salida son datos no confiables. */
 export interface StudioStep {
-  /** Spec 036: `user` es un mensaje de la persona (`output.text`); `turn`, el turno de la conversación. */
-  seq: number; kind: 'user' | 'text' | 'tool' | 'deliver' | 'limit' | 'error'; tool?: string | null; status: 'ok' | 'error' | 'denied';
+  /** Spec 036: `user` es un mensaje de la persona (`output.text`); `turn`, el turno de la conversación. Spec 046: `action`, una
+   *  propuesta del Acompañante (`output.accion`, su id). */
+  seq: number; kind: 'user' | 'text' | 'tool' | 'deliver' | 'action' | 'limit' | 'error'; tool?: string | null; status: 'ok' | 'error' | 'denied';
   summary: string; input?: unknown; output?: unknown; durationMs: number; at: string; turn?: number;
 }
 export interface StudioTest { description: string; ok: boolean; detail?: string | null }
@@ -930,7 +931,9 @@ export type CompanionActionStatus = 'proposed' | 'applying' | 'applied' | 'faile
 export interface CompanionChange { campo: string; antes?: unknown; despues?: unknown }
 /** La vista previa la arma el servidor con etiquetas; existe mientras la acción está pendiente. */
 export interface CompanionPreview {
-  tipo: CompanionActionKind; catalogo: string; registro?: number | null; explicacion: string; cambios?: CompanionChange[];
+  tipo: CompanionActionKind; catalogo: string; registro?: number | null;
+  /** Revisión adversarial 046 (F-03): lo que escribió el modelo; el panel lo muestra aparte y marcado como suyo. */
+  segunElAcompanante?: string | null; cambios?: CompanionChange[];
   transicion?: string; desde?: string; hacia?: string; comentario?: string | null;
 }
 export interface CompanionAction {

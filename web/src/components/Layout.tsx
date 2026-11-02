@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, BarChart3, Building2, Check, ChevronDown, ChevronRight, Gauge, LayoutDashboard, LayoutGrid, LogOut, Moon, PanelLeftClose, PanelLeftOpen,
-  Plug, Search, Settings, Sun,
+  Plug, Search, Settings, Sparkles, Sun,
 } from 'lucide-react';
 import { dashboardsApi, reportsApi } from '../api/endpoints';
 import type { AppSummary, EntityDef } from '../api/types';
@@ -15,10 +15,12 @@ import { safeStorageGet, safeStorageSet } from '../lib/hooks';
 import { ADMIN_GROUPS, adminGroupsFor } from '../lib/adminNav';
 import { AppsProvider, useApps } from '../lib/apps';
 import { CommandPalette } from './CommandPalette';
+import { CompanionPanel } from './companion/CompanionPanel';
 import { DynamicIcon } from './DynamicIcon';
 import { Button } from './ui';
 
 const SIDEBAR_KEY = 'erp.sidebar.collapsed';
+const COMPANION_KEY = 'erp.companion.open'; // spec 047: el panel recuerda si quedó abierto (por navegador)
 const NARROW_QUERY = '(max-width: 900px)'; // igual que el @media del sidebar flotante en app.css
 
 const isNarrowViewport = () => window.matchMedia(NARROW_QUERY).matches;
@@ -380,12 +382,37 @@ function Shell() {
   const narrow = useNarrowViewport();
   const [collapsed, setCollapsed] = useState(() => isNarrowViewport() || safeStorageGet(SIDEBAR_KEY) === '1');
   const [paletteOpen, setPaletteOpen] = useState(false);
+  // Spec 047 (H1): el Acompañante; en pantallas angostas flota y arranca cerrado.
+  const [companionOpen, setCompanionOpen] = useState(() => !isNarrowViewport() && safeStorageGet(COMPANION_KEY) === '1');
+  // La conversación abierta se recuerda por persona y navegador (al recargar se retoma; de otra persona nunca se lee).
+  const conversationKey = `${COMPANION_KEY}.${me?.id ?? 0}`;
+  const [conversation, setConversation] = useState<number | null>(() => Number(safeStorageGet(conversationKey)) || null);
+  const company = useRef(me?.company?.id);
+  const companionButton = useRef<HTMLButtonElement>(null);
   const crumbs = useBreadcrumb();
   const location = useLocation();
   const adminArea = location.pathname === '/admin' || location.pathname.startsWith('/admin/');
   const showAdmin = adminGroupsFor(me).length > 0;
 
   useEffect(() => { if (!narrow) safeStorageSet(SIDEBAR_KEY, collapsed ? '1' : '0'); }, [collapsed, narrow]);
+  useEffect(() => { if (!narrow) safeStorageSet(COMPANION_KEY, companionOpen ? '1' : '0'); }, [companionOpen, narrow]);
+  useEffect(() => { safeStorageSet(conversationKey, conversation ? String(conversation) : ''); }, [conversationKey, conversation]);
+  // La conversación es de la empresa en que empezó (046, 040 D-07): al cambiar de empresa el panel empieza de nuevo.
+  useEffect(() => {
+    if (company.current === me?.company?.id) return;
+    company.current = me?.company?.id;
+    setConversation(null);
+  }, [me?.company?.id]);
+  const closeCompanion = useCallback(() => {
+    setCompanionOpen(false);
+    window.setTimeout(() => companionButton.current?.focus(), 0);
+  }, []);
+  useEffect(() => {
+    if (!narrow || !companionOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !document.querySelector('[data-dialog-root]')) closeCompanion(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [narrow, companionOpen, closeCompanion]);
   useEffect(() => { if (narrow) setCollapsed(true); }, [narrow, location.pathname]);
   useEffect(() => { document.querySelector('.content')?.scrollTo(0, 0); }, [location.pathname]);
   useEffect(() => {
@@ -407,7 +434,7 @@ function Shell() {
   }, []);
 
   return (
-    <div className="shell">
+    <div className={`shell${companionOpen ? ' cmp-open' : ''}`}>
       <aside className={`sidebar${collapsed ? ' collapsed' : ''}`} aria-label="Navegación principal">
         <div className="sidebar-brand">
           <Brand />
@@ -457,6 +484,10 @@ function Shell() {
               aria-current={adminArea ? 'page' : undefined} onClick={() => navigate('/admin')} />
           )}
           <Button variant="ghost" size="sm" iconOnly icon={theme === 'dark' ? Sun : Moon} aria-label={theme === 'dark' ? 'Usar tema claro' : 'Usar tema oscuro'} onClick={toggle} />
+          <button ref={companionButton} type="button" className="cmp-toggle" aria-label="Acompañante" aria-expanded={companionOpen} aria-controls={companionOpen ? 'companion-panel' : undefined}
+            title={companionOpen ? 'Cerrar el Acompañante' : 'Abrir el Acompañante'} onClick={() => (companionOpen ? closeCompanion() : setCompanionOpen(true))}>
+            <Sparkles size={15} aria-hidden /><span className="cmp-toggle-text">Acompañante</span>
+          </button>
           <UserMenu />
         </header>
         <main className="content" id="main" tabIndex={-1}>
@@ -464,6 +495,12 @@ function Shell() {
           <Outlet key={me?.company?.id ?? 0} />
         </main>
       </div>
+      {companionOpen && (
+        <>
+          {narrow && <div className="cmp-backdrop" aria-hidden onClick={closeCompanion} />}
+          <CompanionPanel key={me?.company?.id ?? 0} id="companion-panel" conversation={conversation} onConversation={setConversation} onClose={closeCompanion} />
+        </>
+      )}
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
     </div>
   );

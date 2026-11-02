@@ -1,4 +1,4 @@
-import { forwardRef, useImperativeHandle, useLayoutEffect, useRef, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
+import { forwardRef, useId, useImperativeHandle, useLayoutEffect, useRef, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { ArrowUp, Square } from 'lucide-react';
 
 /** H2 CA1 (análisis §1): de una línea (28 px de área) hasta 384 px; después se desplaza por dentro. */
@@ -21,6 +21,8 @@ interface Props {
   placeholder: string;
   welcome?: boolean;
   footer?: ReactNode;
+  /** Spec 047: nombre del formulario (Studio o el Acompañante). */
+  label?: string;
 }
 
 /**
@@ -28,9 +30,11 @@ interface Props {
  * crece con el texto. Mientras el agente trabaja, el mismo botón detiene la respuesta.
  */
 export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
-  { value, onChange, onSubmit, onStop, working, stopping, sending, blocked, maxChars, placeholder, welcome, footer }, ref,
+  { value, onChange, onSubmit, onStop, working, stopping, sending, blocked, maxChars, placeholder, welcome, footer, label = 'Mensaje para ERP AI Studio' }, ref,
 ) {
   const area = useRef<HTMLTextAreaElement>(null);
+  // Spec 047: con el Acompañante abierto sobre Studio hay dos compositores en la página: cada uno con su propio id.
+  const countId = useId();
   useImperativeHandle(ref, () => ({ focus: () => area.current?.focus() }), []);
 
   useLayoutEffect(() => {
@@ -55,7 +59,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   }
   const near = value.length > maxChars * 0.8;
   return (
-    <form className={`chat-composer${welcome ? ' is-welcome' : ''}`} onSubmit={submit} aria-label="Mensaje para ERP AI Studio">
+    <form className={`chat-composer${welcome ? ' is-welcome' : ''}`} onSubmit={submit} aria-label={label}>
       {blocked && <p className="chat-composer-blocked" role="note">{blocked}</p>}
       <div className="chat-composer-box">
         <textarea
@@ -66,13 +70,13 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
           maxLength={maxChars}
           placeholder={placeholder}
           aria-label="Escribe tu mensaje"
-          aria-describedby={near ? 'chat-composer-count' : undefined}
+          aria-describedby={near ? countId : undefined}
           disabled={!!blocked}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={onKeyDown}
         />
         <div className="chat-composer-actions">
-          {near && <span id="chat-composer-count" className="chat-composer-count">{value.length}/{maxChars}</span>}
+          {near && <span id={countId} className="chat-composer-count">{value.length}/{maxChars}</span>}
           {working ? (
             <button type="button" className="chat-send is-stop" aria-label="Detener respuesta" title="Detener respuesta" disabled={stopping} onClick={onStop}>
               <Square size={12} fill="currentColor" aria-hidden />

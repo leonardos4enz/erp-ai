@@ -16,7 +16,7 @@ export const STATUS_TONE: Record<StudioSessionStatus, 'accent' | 'danger' | 'neu
 
 export const PLAN_LABEL: Record<StudioPlanStatus, string> = { proposed: 'Propuesta lista', applied: 'Aplicada', discarded: 'Descartada' };
 
-export const isActive = (s: StudioSessionStatus) => s === 'queued' || s === 'running';
+export const isActive = (s: StudioSessionStatus | string) => s === 'queued' || s === 'running';
 
 /**
  * Agrega los pasos que llegan (flujo o lectura con `after`) a los que ya se ven. Dos lecturas que se cruzan, o un flujo que
@@ -97,7 +97,9 @@ export type Segment =
   | { kind: 'text'; seq: number; text: string }
   | { kind: 'tools'; steps: StudioStep[] }
   | { kind: 'deliver'; seq: number; step: StudioStep; delivery: Delivery }
-  | { kind: 'notice'; step: StudioStep };
+  | { kind: 'notice'; step: StudioStep }
+  /** Spec 047: una acción que el Acompañante propuso (`output.accion`); la tarjeta se arma con la acción de la conversación. */
+  | { kind: 'action'; seq: number; step: StudioStep; action: number | null };
 
 export interface Turn { turn: number; user: { seq: number | null; text: string; at: string | null }; segments: Segment[]; steps: StudioStep[] }
 
@@ -151,6 +153,9 @@ export function groupTurns(trail: StudioStep[], prompt: string): Turn[] {
       t.segments.push({ kind: 'text', seq: step.seq, text: typeof text === 'string' ? text : step.summary });
     } else if (step.kind === 'deliver') {
       t.segments.push({ kind: 'deliver', seq: step.seq, step, delivery: deliveryOf(step) });
+    } else if (step.kind === 'action') {
+      const id = (step.output as { accion?: unknown } | undefined)?.accion;
+      t.segments.push({ kind: 'action', seq: step.seq, step, action: typeof id === 'number' ? id : null });
     } else {
       t.segments.push({ kind: 'notice', step });
     }
@@ -181,8 +186,10 @@ export function lastUserText(turns: Turn[]): string | null {
 }
 
 /** Estado en vivo en palabras (para la línea de estado y `aria-live`). */
-export function liveLabel(live: StudioLive | null, status: StudioSessionStatus): string {
+export function liveLabel(live: StudioLive | null, status: StudioSessionStatus | string, toolLabels?: Readonly<Record<string, { live: string }>>): string {
   if (status === 'queued') return 'En cola…';
+  // Spec 047: el Acompañante dice qué hace en lenguaje de usuario («Buscando registros…»), no el nombre de la herramienta.
+  if (live?.kind === 'tool' && toolLabels) return `${(live.tool && toolLabels[live.tool]?.live) || 'Consultando'}…`;
   if (live?.kind === 'tool') return `Usando ${live.tool ?? 'una herramienta'}…`;
   if (live?.kind === 'text') return 'Escribiendo…';
   return 'Pensando…';

@@ -91,6 +91,9 @@ export default defineConfig({
       Studio__PollSeconds: '1',
       Studio__RenewSeconds: '1',
       Studio__SessionsPerDay: '50',
+      // Spec 047: el Acompañante con el mismo proveedor simulado (acompanante.spec.ts); detener se nota en ~1 s.
+      Companion__PollSeconds: '1',
+      Companion__RenewSeconds: '1',
       Spa__Path: path.join(root, 'web', 'dist'),
     },
   },

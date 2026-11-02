@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ApiError } from '../../api/client';
 import { studioApi } from '../../api/endpoints';
-import type { StudioEndReason, StudioLive, StudioSession, StudioStep, StudioStreamSession } from '../../api/types';
+import type { StudioEndReason, StudioLive, StudioSession, StudioStep } from '../../api/types';
 import { createSseParser, isActive, lastSeq, mergeTrail, nextBackoff } from '../../lib/studio';
 
 export type Connection = 'ok' | 'reconnecting' | 'offline';
@@ -9,29 +9,47 @@ export type Connection = 'ok' | 'reconnecting' | 'offline';
 /** Mensaje enviado que todavía no llega como paso `user` (se ve al instante, como en Claude: H2 CA3). */
 export interface Pending { text: string; after: number }
 
+/** Lo que el chat necesita de una conversación (Studio o el Acompañante): sus pasos y su estado. */
+export interface ChatConversation { trail: StudioStep[]; status: string; error?: string | null }
+
+/**
+ * Spec 047 (CLARIFY 2): la API de una conversación. Studio y el Acompañante comparten el flujo (036/046: mismos eventos SSE)
+ * y difieren en sus rutas y en cómo la respuesta 202 de enviar se combina con lo que ya se ve (`sent`).
+ */
+export interface ChatApi<S extends ChatConversation> {
+  load: (id: number) => Promise<S>;
+  send: (id: number, text: string) => Promise<S>;
+  cancel: (id: number) => Promise<S>;
+  streamUrl: (id: number, after: number) => string;
+  sent: (prev: S, res: S) => S;
+}
+
 const sleep = (ms: number, signal: AbortSignal) => new Promise<void>((resolve) => {
   const t = window.setTimeout(resolve, ms);
   signal.addEventListener('abort', () => { window.clearTimeout(t); resolve(); }, { once: true });
 });
 
 /**
- * Spec 037 (H3): una conversación de Studio. Lectura completa al abrir; mientras un turno corre, el flujo SSE de la 036
- * (`fetch`, CLARIFY 4) con `after` = último paso recibido; al terminar el turno, otra lectura completa (la propuesta con su
- * vista previa y su huella). Si el flujo se corta, se reanuda con espera creciente; tras 4 fallas, «Sin conexión».
+ * Spec 037 (H3), generalizado en la 047: una conversación con su flujo. Lectura completa al abrir; mientras un turno corre, el
+ * flujo SSE de la 036 (`fetch`, CLARIFY 4) con `after` = último paso recibido; al terminar el turno, otra lectura completa.
+ * Si el flujo se corta, se reanuda con espera creciente; tras 4 fallas, «Sin conexión».
  */
-export function useStudioChat(id: number, onListChanged: () => void, dataTools: ReadonlySet<string> = new Set()) {
-  const [session, setSessionState] = useState<StudioSession | null>(null);
+export function useAgentChat<S extends ChatConversation>(id: number, chatApi: ChatApi<S>, onListChanged: () => void, dataTools: ReadonlySet<string> = new Set()) {
+  const [session, setSessionState] = useState<S | null>(null);
   const [live, setLive] = useState<StudioLive | null>(null);
   const [conn, setConn] = useState<Connection>('ok');
   const [loadError, setLoadError] = useState<unknown>(null);
   const [pending, setPending] = useState<Pending | null>(null);
-  const current = useRef<StudioSession | null>(null);
+  const current = useRef<S | null>(null);
   const stream = useRef<AbortController | null>(null);
   const alive = useRef(true);
   const listChanged = useRef(onListChanged);
   listChanged.current = onListChanged;
   const data = useRef(dataTools);
   data.current = dataTools;
+  // La API se lee de una referencia: quien la arma en cada render no reinicia la conversación.
+  const apiRef = useRef(chatApi);
+  apiRef.current = chatApi;
   // Revisión adversarial 037 (F-04): cada lectura completa (o respuesta de enviar o detener) toma un turno al pedirse; una
   // que llega después de otra más nueva no la pisa con un estado viejo.
   const ticket = useRef(0);
@@ -39,7 +57,7 @@ export function useStudioChat(id: number, onListChanged: () => void, dataTools: 
   const again = useRef(false);
   const applied = useRef(0);
 
-  const setSession = useCallback((next: StudioSession | ((s: StudioSession) => StudioSession)) => {
+  const setSession = useCallback((next: S | ((s: S) => S)) => {
     const value = typeof next === 'function' ? (current.current ? next(current.current) : null) : next;
     if (!value) return;
     current.current = value;
@@ -47,7 +65,7 @@ export function useStudioChat(id: number, onListChanged: () => void, dataTools: 
   }, []);
 
   /** Aplica una foto completa del servidor si nadie aplicó una pedida después. */
-  const snapshot = useCallback(async (request: () => Promise<StudioSession>, merge?: (prev: StudioSession, s: StudioSession) => StudioSession) => {
+  const snapshot = useCallback(async (request: () => Promise<S>, merge?: (prev: S, s: S) => S) => {
     const mine = ++ticket.current;
     const s = await request();
     if (mine > applied.current) {
@@ -57,7 +75,7 @@ export function useStudioChat(id: number, onListChanged: () => void, dataTools: 
     return s;
   }, [setSession]);
 
-  const full = useCallback(() => snapshot(() => studioApi.session(id)), [id, snapshot]);
+  const full = useCallback(() => snapshot(() => apiRef.current.load(id)), [id, snapshot]);
 
   const runStream = useCallback(async (ctrl: AbortController) => {
     try { await streamLoop(ctrl); } finally {
@@ -72,7 +90,7 @@ export function useStudioChat(id: number, onListChanged: () => void, dataTools: 
     while (!signal.aborted) {
       let ended: StudioEndReason | null = null;
       try {
-        const res = await fetch(studioApi.streamUrl(id, lastSeq(current.current?.trail ?? [])), {
+        const res = await fetch(apiRef.current.streamUrl(id, lastSeq(current.current?.trail ?? [])), {
           headers: { Accept: 'text/event-stream' }, credentials: 'same-origin', signal,
         });
         // 401 y 404: la lectura con `api()` lo resuelve (inicio de sesión o «ya no existe»).
@@ -94,7 +112,7 @@ export function useStudioChat(id: number, onListChanged: () => void, dataTools: 
               attempt = 0;
               setSession((s) => ({ ...s, trail: mergeTrail(s.trail, [parsed as StudioStep]) }));
             } else if (ev.event === 'session') {
-              const x = parsed as StudioStreamSession;
+              const x = parsed as Partial<S> & { status: string; error?: string | null };
               const changed = current.current?.status !== x.status;
               setSession((s) => ({ ...s, ...x, error: x.error ?? null }));
               if (changed) listChanged.current();
@@ -115,7 +133,7 @@ export function useStudioChat(id: number, onListChanged: () => void, dataTools: 
       if (ended) {
         // idle: el turno terminó; identity o gone: la lectura completa dice qué pasó.
         if (alive.current) setLive(null);
-        let after: StudioSession | null = null;
+        let after: S | null = null;
         try { after = await full(); } catch (e) { if (alive.current) setLoadError(e); }
         listChanged.current();
         // F-04: la persona pudo mandar otro mensaje mientras llegaba esta lectura (el estado `session` ya decía que
@@ -171,9 +189,7 @@ export function useStudioChat(id: number, onListChanged: () => void, dataTools: 
     if (!before) return null;
     setPending({ text, after: lastSeq(before.trail) });
     try {
-      // La respuesta 202 no trae pasos ni compila: se conserva lo que ya se ve y la propuesta queda sin huella mientras corre.
-      await snapshot(() => studioApi.send(id, text),
-        (s, res) => ({ ...s, ...res, trail: s.trail, plan: s.plan, preview: s.preview, warnings: s.warnings, reviewHash: null, canApply: false }));
+      await snapshot(() => apiRef.current.send(id, text), (s, res) => apiRef.current.sent(s, res));
       setLive({ kind: 'waiting' });
       listChanged.current();
       follow();
@@ -188,7 +204,7 @@ export function useStudioChat(id: number, onListChanged: () => void, dataTools: 
 
   /** H4 CA1: detener. La lectura completa que devuelve trae lo escrito hasta ese momento. */
   const stop = useCallback(async () => {
-    const s = await snapshot(() => studioApi.cancel(id), (prev, x) => ({ ...x, trail: mergeTrail(prev.trail, x.trail) }));
+    const s = await snapshot(() => apiRef.current.cancel(id), (prev, x) => ({ ...x, trail: mergeTrail(prev.trail, x.trail) }));
     listChanged.current();
     // El flujo termina solo (`end: idle`) cuando el trabajador cierra el turno.
     return s;
@@ -199,4 +215,18 @@ export function useStudioChat(id: number, onListChanged: () => void, dataTools: 
   }, [full, follow]);
 
   return { session, setSession, live, conn, loadError, pending, send, stop, full, reconnect };
+}
+
+const STUDIO_CHAT: ChatApi<StudioSession> = {
+  load: (id) => studioApi.session(id),
+  send: (id, text) => studioApi.send(id, text),
+  cancel: (id) => studioApi.cancel(id),
+  streamUrl: (id, after) => studioApi.streamUrl(id, after),
+  // La respuesta 202 no trae pasos ni compila: se conserva lo que ya se ve y la propuesta queda sin huella mientras corre.
+  sent: (s, res) => ({ ...s, ...res, trail: s.trail, plan: s.plan, preview: s.preview, warnings: s.warnings, reviewHash: null, canApply: false }),
+};
+
+/** Spec 037: una conversación de ERP AI Studio. */
+export function useStudioChat(id: number, onListChanged: () => void, dataTools: ReadonlySet<string> = new Set()) {
+  return useAgentChat(id, STUDIO_CHAT, onListChanged, dataTools);
 }
