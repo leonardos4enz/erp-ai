@@ -17,6 +17,8 @@ public sealed record CompanionOptions
     public int MaxSteps { get; init; } = 80;
     public int MaxToolCalls { get; init; } = 160;
     public long MaxTokens { get; init; } = 1_500_000;
+    /// <summary>Spec 049 (auditoría 9, D-03): entrada estimada de una sola llamada (<see cref="StudioOptions.EstimateInput"/>).</summary>
+    public long MaxInputTokens { get; init; } = 180_000;
     public decimal MaxCostUsd { get; init; } = 2m;
     /// <summary>Minutos de un turno.</summary>
     public int MaxMinutes { get; init; } = 5;
@@ -72,6 +74,7 @@ public sealed record CompanionOptions
             MaxSteps = Math.Clamp(s.GetValue("MaxSteps", 80), 1, 1000),
             MaxToolCalls = Math.Clamp(s.GetValue("MaxToolCalls", 160), 1, 2000),
             MaxTokens = Math.Clamp(s.GetValue("MaxTokens", 1_500_000L), 1000L, 50_000_000L),
+            MaxInputTokens = Math.Clamp(s.GetValue("MaxInputTokens", 180_000L), 1000L, 2_000_000L),
             MaxCostUsd = Math.Clamp(s.GetValue("MaxCostUsd", 2m), 0.01m, 1000m),
             MaxMinutes = Math.Clamp(s.GetValue("MaxMinutes", 5), 1, 60),
             ConversationsPerDay = Math.Clamp(s.GetValue("ConversationsPerDay", 30), 1, 1000),

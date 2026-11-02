@@ -76,8 +76,10 @@ public sealed class CompanionService(Db db, MetadataStore store, CompanionOption
             """, new { userId, except }, tx);
 
     /// <summary>H1 CA4: por qué el Acompañante no está disponible en este entorno (null si lo está).</summary>
+    public const string Off = "El Acompañante está apagado en este entorno.";
+
     private async Task<string?> UnavailableAsync(CancellationToken ct) =>
-        !options.Enabled ? "El Acompañante está apagado en este entorno."
+        !options.Enabled ? Off
         : await keys.GetAsync(ct) is null ? "El Acompañante no está disponible: un administrador debe guardar la clave de Anthropic en Configuración › Asistente IA."
         : null;
 
@@ -198,12 +200,29 @@ public sealed class CompanionService(Db db, MetadataStore store, CompanionOption
         return true;
     }
 
-    /// <summary>Spec 048 (H1 CA6): detener mientras espera es «no» a lo pendiente (sin motivo de la persona: «detenida»).</summary>
-    internal static Task DiscardOnStopAsync(DbConnection cn, DbTransaction tx, int id) =>
+    /// <summary>Spec 048 (H1 CA6): detener es «no» a lo pendiente (sin motivo de la persona: «detenida»).</summary>
+    public const string StoppedError = "La persona detuvo la conversación.";
+
+    /// <summary>
+    /// Spec 049 (auditoría 9, D-02): el turno terminó sin llegar a preguntarle a la persona (un tope, su cuenta cambió, se acabó
+    /// el tiempo o el servidor dejó de responder) después de guardar una propuesta de la misma respuesta.
+    /// </summary>
+    public const string EndedError = "El turno terminó antes de preguntarle a la persona (un tope, un cambio de su cuenta o una interrupción).";
+
+    /// <summary>Spec 049 (auditoría 9, D-01): <c>Companion:Enabled=false</c> cerró la conversación que esperaba o estaba en cola.</summary>
+    public const string DisabledError = "El Acompañante se apagó en este entorno.";
+
+    public const string DisabledMessage = "El Acompañante se apagó en este entorno: la conversación se detuvo y lo que proponía se descartó.";
+
+    /// <summary>
+    /// Lo propuesto que sigue pendiente pasa a descartado con <paramref name="error"/> (no es la respuesta de la persona: vuelve al
+    /// modelo como «detenida»). Va en la transacción del cierre, con la conversación ya bloqueada (conversación y luego acción).
+    /// </summary>
+    internal static Task DiscardPendingAsync(DbConnection cn, DbTransaction tx, int id, string error) =>
         cn.ExecuteAsync("""
-            UPDATE meta.CompanionAction SET Status = 'discarded', Error = N'La persona detuvo la conversación.', DecidedAt = SYSUTCDATETIME(), PreviewJson = NULL
+            UPDATE meta.CompanionAction SET Status = 'discarded', Error = @error, DecidedAt = SYSUTCDATETIME(), PreviewJson = NULL
              WHERE ConversationId = @id AND Status = 'proposed'
-            """, new { id }, tx);
+            """, new { id, error }, tx);
 
     public async Task<IReadOnlyList<CompanionSummaryDto>> ListAsync(UserContext user, CancellationToken ct)
     {
@@ -250,9 +269,10 @@ public sealed class CompanionService(Db db, MetadataStore store, CompanionOption
         await using (var cn = await db.OpenAsync(ct))
         await using (var tx = await cn.BeginTransactionAsync(ct))
         {
-            var (status, lease) = (await cn.QueryAsync<(string, Guid?)>("SELECT Status, LeaseToken FROM meta.CompanionConversation WITH (UPDLOCK, ROWLOCK) WHERE Id = @id AND UserId = @UserId AND Status <> 'deleted'",
+            var (status, lease, company) = (await cn.QueryAsync<(string, Guid?, int?)>("SELECT Status, LeaseToken, CompanyId FROM meta.CompanionConversation WITH (UPDLOCK, ROWLOCK) WHERE Id = @id AND UserId = @UserId AND Status <> 'deleted'",
                 new { id, UserId = user.Id }, tx)).SingleOrDefault();
             if (status is null) throw new NotFound("La conversación no existe.");
+            SameCompany(company, user);
             stopLease = lease;
             if (status == StudioStatus.Queued)
                 await cn.ExecuteAsync("UPDATE meta.CompanionConversation SET Status = 'cancelled', ErrorCode = 'cancelled', FinishedAt = SYSUTCDATETIME() WHERE Id = @id", new { id }, tx);
@@ -264,7 +284,7 @@ public sealed class CompanionService(Db db, MetadataStore store, CompanionOption
             {
                 await cn.ExecuteAsync("UPDATE meta.CompanionConversation SET Status = 'cancelled', ErrorCode = 'cancelled', FinishedAt = SYSUTCDATETIME(), LastActivityAt = SYSUTCDATETIME() WHERE Id = @id",
                     new { id }, tx);
-                await DiscardOnStopAsync(cn, tx, id);
+                await DiscardPendingAsync(cn, tx, id, StoppedError);
             }
             await tx.CommitAsync(ct);
         }
@@ -280,8 +300,10 @@ public sealed class CompanionService(Db db, MetadataStore store, CompanionOption
         NotService(user);
         await using var cn = await db.OpenAsync(ct);
         await using var tx = await cn.BeginTransactionAsync(ct);
-        var status = await cn.ExecuteScalarAsync<string?>("SELECT Status FROM meta.CompanionConversation WITH (UPDLOCK, ROWLOCK) WHERE Id = @id AND UserId = @UserId AND Status <> 'deleted'",
-            new { id, UserId = user.Id }, tx) ?? throw new NotFound("La conversación no existe.");
+        var (status, company) = (await cn.QueryAsync<(string, int?)>("SELECT Status, CompanyId FROM meta.CompanionConversation WITH (UPDLOCK, ROWLOCK) WHERE Id = @id AND UserId = @UserId AND Status <> 'deleted'",
+            new { id, UserId = user.Id }, tx)).SingleOrDefault();
+        if (status is null) throw new NotFound("La conversación no existe.");
+        SameCompany(company, user);
         if (StudioStatus.Active(status)) throw new Conflict(Working);
         // Una acción que se está ejecutando termina antes de poder borrar la conversación (su resultado se guarda en ella). El
         // bloqueo de sus filas ordena esto con confirmar: o confirmar ya la marcó (409 aquí) o espera y ya no la encuentra (404).
@@ -338,6 +360,8 @@ public sealed class CompanionService(Db db, MetadataStore store, CompanionOption
                      WHERE Id = @id AND Status = 'running' AND LeaseUntil < SYSUTCDATETIME()
                     """, new { id }, tx);
                 if (userId is null) continue;
+                // Spec 049 (auditoría 9, D-02): lo que propuso el turno caído no se le llegó a preguntar a la persona.
+                await DiscardPendingAsync(cn, tx, id, EndedError);
                 await PurgeDataAsync(cn, tx, id);
                 await Audit.WriteAsync(cn, tx, new DefaultHttpContext(), AuditActions.CompanionFinish, entity: "companion", recordId: id.ToString(),
                     after: new { status = StudioStatus.Interrupted }, userId: userId,
@@ -348,6 +372,45 @@ public sealed class CompanionService(Db db, MetadataStore store, CompanionOption
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch (Exception ex) { log.LogError(ex, "No se pudo cerrar la conversación del Acompañante {Id}; se reintenta en la siguiente vuelta", id); }
+        }
+        return count;
+    }
+
+    /// <summary>
+    /// Spec 049 (auditoría 9, D-01): con <c>Companion:Enabled=false</c> nada vuelve a llamar al proveedor. Lo que estaba en cola
+    /// o esperando a la persona se cierra como fallido (<c>disabled</c>) con sus propuestas descartadas, para que encender el
+    /// Acompañante de nuevo no reanude solo un turno de antes del incidente. Una por una, en su transacción (conversación y
+    /// luego acción, el orden de detener y confirmar); una acción que ya se está aplicando termina y no reanuda nada.
+    /// </summary>
+    internal async Task<int> CloseDisabledAsync(CancellationToken ct)
+    {
+        List<int> candidates;
+        await using (var cn = await db.OpenAsync(ct))
+            candidates = (await cn.QueryAsync<int>("SELECT Id FROM meta.CompanionConversation WHERE Status IN ('queued', 'waiting') ORDER BY Id")).ToList();
+        var count = 0;
+        foreach (var id in candidates)
+        {
+            try
+            {
+                await using var cn = await db.OpenAsync(ct);
+                await using var tx = await cn.BeginTransactionAsync(ct);
+                var userId = await cn.ExecuteScalarAsync<int?>("""
+                    UPDATE meta.CompanionConversation SET Status = 'failed', ErrorCode = 'disabled', Summary = NULL, FinishedAt = SYSUTCDATETIME(),
+                           LiveJson = NULL, LastActivityAt = SYSUTCDATETIME()
+                    OUTPUT inserted.UserId
+                     WHERE Id = @id AND Status IN ('queued', 'waiting')
+                    """, new { id }, tx);
+                if (userId is null) continue;
+                await DiscardPendingAsync(cn, tx, id, DisabledError);
+                await Audit.WriteAsync(cn, tx, new DefaultHttpContext(), AuditActions.CompanionFinish, entity: "companion", recordId: id.ToString(),
+                    after: new { status = StudioStatus.Failed, errorCode = "disabled" }, userId: userId,
+                    username: await cn.ExecuteScalarAsync<string>("SELECT Username FROM meta.[User] WHERE Id = @userId", new { userId }, tx));
+                await tx.CommitAsync(ct);
+                signals.Pulse(id);
+                count++;
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (Exception ex) { log.LogError(ex, "No se pudo cerrar la conversación del Acompañante {Id} al estar apagado; se reintenta en la siguiente vuelta", id); }
         }
         return count;
     }
@@ -389,6 +452,18 @@ public sealed class CompanionService(Db db, MetadataStore store, CompanionOption
     private const string OtherCompanyMessage = "Esta conversación es de otra empresa: vuelve a esa empresa o empieza una conversación nueva.";
 
     internal static bool InCompany(int? companyId, UserContext user) => companyId is null || user.Companies.Any(c => c.Id == companyId);
+
+    /// <summary>
+    /// Spec 049 (auditoría 9, O-04): detener y borrar, como leer, seguir, confirmar y responder (046 F-07, 048 F-05): quien ya
+    /// no está en la empresa de la conversación no la encuentra (404) y, si está pero trabaja en otra, se cambia a ella (409).
+    /// </summary>
+    private static void SameCompany(int? companyId, UserContext user)
+    {
+        // Revisión adversarial 049 (F-05): una conversación sin empresa no tiene a cuál cambiarse: se detiene y borra desde cualquiera.
+        if (companyId is null) return;
+        if (!InCompany(companyId, user)) throw new NotFound("La conversación no existe.");
+        if (companyId != user.Company?.Id) throw new Conflict(OtherCompanyMessage);
+    }
 
     private static void NotService(UserContext user)
     {
@@ -465,6 +540,8 @@ public sealed class CompanionService(Db db, MetadataStore store, CompanionOption
         "timeout" or "network" => "El servicio no respondió a tiempo. Intenta de nuevo.",
         "refusal" => "El Acompañante no pudo atender este mensaje. Reformúlalo.",
         "truncated" => "La respuesta quedó incompleta. Pide algo más acotado.",
+        "too_long" => StudioOptions.TooLongMessage,
+        "disabled" => DisabledMessage,
         _ => "La respuesta falló por un error inesperado.",
     };
 
@@ -473,7 +550,11 @@ public sealed class CompanionService(Db db, MetadataStore store, CompanionOption
     private static DateTime Utc(DateTime d) => DateTime.SpecifyKind(d, DateTimeKind.Utc);
 }
 
-/// <summary>Spec 046: reclama turnos con lease, vence los interrumpidos y barre propuestas viejas y conversaciones sin actividad.</summary>
+/// <summary>
+/// Spec 046: reclama turnos con lease, vence los interrumpidos y barre propuestas viejas y conversaciones sin actividad. Spec 049
+/// (D-01): con <c>Companion:Enabled=false</c> sigue venciendo, barriendo y reteniendo, pero no reclama ni reanuda, y cierra lo
+/// que estaba en cola o esperando.
+/// </summary>
 public sealed class CompanionDispatcher(IServiceScopeFactory scopes, CompanionOptions options, ILogger<CompanionDispatcher> log) : BackgroundService
 {
     private int running;
@@ -491,6 +572,7 @@ public sealed class CompanionDispatcher(IServiceScopeFactory scopes, CompanionOp
                 try
                 {
                     await svc.ExpireAsync(stoppingToken);
+                    if (!options.Enabled) await svc.CloseDisabledAsync(stoppingToken);
                     if (DateTime.UtcNow - lastSweep > TimeSpan.FromSeconds(Math.Min(60, options.ApplyingSeconds)))
                     {
                         await scope.ServiceProvider.GetRequiredService<CompanionActions>().SweepAsync(stoppingToken);
@@ -502,7 +584,8 @@ public sealed class CompanionDispatcher(IServiceScopeFactory scopes, CompanionOp
                 {
                     log.LogError(ex, "Error al vencer o barrer conversaciones del Acompañante");
                 }
-                while (Volatile.Read(ref running) < options.Workers && await svc.ClaimAsync(stoppingToken) is { } claim)
+                // Spec 049 (auditoría 9, D-01): apagado, no se reclama ningún turno (no se llama al proveedor ni se escribe).
+                while (options.Enabled && Volatile.Read(ref running) < options.Workers && await svc.ClaimAsync(stoppingToken) is { } claim)
                 {
                     Interlocked.Increment(ref running);
                     runs.Add(Task.Run(async () =>

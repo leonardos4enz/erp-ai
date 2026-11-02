@@ -322,7 +322,11 @@ public sealed class CompanionToolRunner(RouteDispatcher routes, CompanionActions
             {
                 // Lo que toca, solo con catálogos y campos visibles (los de un catálogo que no ve no se nombran).
                 var touches = new JsonArray();
-                foreach (var act in (a["actions"] as JsonArray ?? []).OfType<JsonObject>())
+                // Spec 049 (auditoría 9, O-03): las acciones sobre partidas cuyo campo la persona no ve (ya no viene en «fields»)
+                // no se nombran; una automatización que solo actúa sobre ellas, tampoco.
+                var actions = (a["actions"] as JsonArray ?? []).OfType<JsonObject>().Where(act => S(act, "lines") is not { } lines || FieldLabel(e, lines).Length > 0).ToList();
+                if (actions.Count == 0 && (a["actions"] as JsonArray)?.Count > 0) continue;
+                foreach (var act in actions)
                 {
                     var dest = S(act, "type") is "create" or "cost" || (S(act, "type") == "rollup" && act["target"] is null) ? S(act, "entity")
                         : act["target"] is null ? (act["lines"] is null ? S(e, "name") : null)

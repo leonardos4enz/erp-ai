@@ -262,6 +262,7 @@ public sealed class CompanionActions(Db db, RouteDispatcher routes, CompanionOpt
     {
         var user = http.CurrentUser();
         if (user.IsService) throw new Forbidden();
+        Enabled();
         Row row;
         await using (var cn = await db.OpenAsync(ct))
         await using (var tx = await cn.BeginTransactionAsync(ct))
@@ -270,24 +271,33 @@ public sealed class CompanionActions(Db db, RouteDispatcher routes, CompanionOpt
             // pasó y aquí no se encuentra, o espera a que esta acción quede «aplicándose» y entonces responde 409.
             var conversation = await cn.ExecuteScalarAsync<int?>("SELECT ConversationId FROM meta.CompanionAction WHERE Id = @id AND UserId = @UserId",
                 new { id, UserId = user.Id }, tx) ?? throw new NotFound("La propuesta no existe.");
-            if (await cn.ExecuteScalarAsync<string?>("SELECT Status FROM meta.CompanionConversation WITH (UPDLOCK, HOLDLOCK) WHERE Id = @conversation",
-                    new { conversation }, tx) is null or CompanionService.Deleted)
-                throw new NotFound("La propuesta no existe.");
+            var conversationStatus = await cn.ExecuteScalarAsync<string?>("SELECT Status FROM meta.CompanionConversation WITH (UPDLOCK, HOLDLOCK) WHERE Id = @conversation",
+                new { conversation }, tx);
+            if (conversationStatus is null or CompanionService.Deleted) throw new NotFound("La propuesta no existe.");
             row = await cn.QuerySingleOrDefaultAsync<Row>($"SELECT {Columns} FROM meta.CompanionAction WITH (UPDLOCK, ROWLOCK) WHERE Id = @id AND UserId = @UserId",
                       new { id, UserId = user.Id }, tx) ?? throw new NotFound("La propuesta no existe.");
             if (row.Status != CompanionActionStatus.Proposed) throw new Conflict(Decided(row.Status));
+            // Revisión adversarial 049 (F-03): la empresa antes que la caducidad, que también reanuda el turno.
+            if (row.CompanyId != user.Company?.Id)
+                throw new Conflict("La propuesta es de otra empresa: cámbiate a ella para confirmarla.");
+            // Revisión adversarial 049 (F-04): solo se confirma lo de un turno que corre o espera a la persona; una propuesta que
+            // quedó de un turno ya cerrado (de antes de la 049, D-02) se descarta sin aplicarse.
+            if (conversationStatus is not (StudioStatus.Running or CompanionService.Waiting))
+            {
+                await CompanionService.DiscardPendingAsync(cn, tx, conversation, CompanionService.EndedError);
+                await tx.CommitAsync(ct);
+                throw new Conflict(Decided(CompanionActionStatus.Discarded));
+            }
             if (row.CreatedAt < DateTime.UtcNow.AddHours(-options.ActionHours))
             {
                 await cn.ExecuteAsync("UPDATE meta.CompanionAction SET Status = 'expired', DecidedAt = SYSUTCDATETIME(), PreviewJson = NULL WHERE Id = @id", new { id }, tx);
-                var resumedExpired = await ResumeAsync(cn, tx, conversation);
+                var resumedExpired = await ResumeAsync(cn, tx, conversation, user.SecurityStamp);
                 await tx.CommitAsync(ct);
                 if (resumedExpired) signals.Pulse(conversation);
                 throw new Conflict(Decided(CompanionActionStatus.Expired));
             }
             if (!string.Equals(body?.Hash, row.Hash, StringComparison.Ordinal))
                 throw new Conflict("La propuesta no es la que revisaste: vuelve a abrirla antes de confirmar.");
-            if (row.CompanyId != user.Company?.Id)
-                throw new Conflict("La propuesta es de otra empresa: cámbiate a ella para confirmarla.");
             await cn.ExecuteAsync("UPDATE meta.CompanionAction SET Status = 'applying', DecidedAt = SYSUTCDATETIME() WHERE Id = @id", new { id }, tx);
             await tx.CommitAsync(ct);
         }
@@ -335,7 +345,7 @@ public sealed class CompanionActions(Db db, RouteDispatcher routes, CompanionOpt
                 await Audit.WriteAsync(cn, tx, http, AuditActions.CompanionAction, entity: row.EntityName, recordId: (result.Body?["id"] ?? JsonValue.Create(row.RecordId))?.ToString(),
                     after: new { action = id, conversation = row.ConversationId, kind = row.Kind, status, error = error is null ? null : StudioAgent.Cut(error, 300) });
             // Spec 048 (H1 CA4, H2 CA3): el resultado y la reanudación del turno, en la misma transacción.
-            if (updated > 0 && status != CompanionActionStatus.Proposed) resumed = await ResumeAsync(cn, tx, row.ConversationId);
+            if (updated > 0 && status != CompanionActionStatus.Proposed) resumed = await ResumeAsync(cn, tx, row.ConversationId, user.SecurityStamp);
             await tx.CommitAsync(CancellationToken.None);
         }
         if (resumed) signals.Pulse(row.ConversationId);
@@ -353,6 +363,7 @@ public sealed class CompanionActions(Db db, RouteDispatcher routes, CompanionOpt
     public async Task<CompanionActionDto> DiscardAsync(int id, CompanionDiscardBody? body, HttpContext http, CancellationToken ct)
     {
         var user = http.CurrentUser();
+        Enabled();
         var reason = body?.Reason?.Trim() is { Length: > 0 } r ? r : null;
         if (reason is not null && reason.Length > options.MaxPromptChars)
             throw new ValidationFailed(new Dictionary<string, string[]> { ["reason"] = [$"El motivo admite hasta {options.MaxPromptChars} caracteres."] },
@@ -375,7 +386,7 @@ public sealed class CompanionActions(Db db, RouteDispatcher routes, CompanionOpt
                 new { id, reason }, tx);
             await Audit.WriteAsync(cn, tx, http, AuditActions.CompanionAction, entity: row.EntityName, recordId: row.RecordId?.ToString(),
                 after: new { action = id, conversation = row.ConversationId, kind = row.Kind, status = CompanionActionStatus.Discarded, reasonLength = reason?.Length ?? 0 });
-            resumed = await ResumeAsync(cn, tx, conversation);
+            resumed = await ResumeAsync(cn, tx, conversation, user.SecurityStamp);
             await tx.CommitAsync(ct);
         }
         if (resumed) signals.Pulse(conversation);
@@ -385,13 +396,22 @@ public sealed class CompanionActions(Db db, RouteDispatcher routes, CompanionOpt
     /// <summary>
     /// Spec 048 (H1 CA4): la conversación que esperaba a la persona vuelve a la cola cuando ya no tiene propuestas pendientes ni
     /// aplicándose. Va en la transacción de la decisión (con la conversación bloqueada): se encola una sola vez.
+    /// Spec 049 (auditoría 9, O-01): si la reanuda una decisión de la persona, con su sello de ahora (como enviar y responder):
+    /// tras cambiar su contraseña y volver a entrar, el turno reanudado no se detiene por identidad. Sin persona (el cierre del
+    /// turno), se queda el sello guardado.
     /// </summary>
-    internal static async Task<bool> ResumeAsync(DbConnection cn, DbTransaction tx, int conversationId) =>
+    internal static async Task<bool> ResumeAsync(DbConnection cn, DbTransaction tx, int conversationId, Guid? stamp = null) =>
         await cn.ExecuteAsync("""
-            UPDATE meta.CompanionConversation SET Status = 'queued', LastActivityAt = SYSUTCDATETIME()
+            UPDATE meta.CompanionConversation SET Status = 'queued', SecurityStamp = ISNULL(@stamp, SecurityStamp), LastActivityAt = SYSUTCDATETIME()
              WHERE Id = @conversationId AND Status = 'waiting'
                AND NOT EXISTS (SELECT 1 FROM meta.CompanionAction WHERE ConversationId = @conversationId AND Status IN ('proposed', 'applying'))
-            """, new { conversationId }, tx) > 0;
+            """, new { conversationId, stamp }, tx) > 0;
+
+    /// <summary>Spec 049 (auditoría 9, D-01): apagado, decidir no reanuda nada ni escribe: 503, como empezar o enviar.</summary>
+    private void Enabled()
+    {
+        if (!options.Enabled) throw new AppException(StatusCodes.Status503ServiceUnavailable, CompanionService.Off);
+    }
 
     /// <summary>
     /// Spec 048 (H1 CA4): lo que vuelve al modelo como resultado de su <c>proponer_accion</c>. Lo arma el servidor con palabras
@@ -410,7 +430,10 @@ public sealed class CompanionActions(Db db, RouteDispatcher routes, CompanionOpt
                 break;
             case CompanionActionStatus.Discarded when error is not null:
                 data["resultado"] = "detenida";
-                data["nota"] = "La persona detuvo la conversación sin decidir: no se hizo nada.";
+                // Spec 049 (D-02): también cuando el turno terminó antes de preguntarle (un tope, su cuenta o una interrupción).
+                data["nota"] = error == CompanionService.StoppedError
+                    ? "La persona detuvo la conversación sin decidir: no se hizo nada."
+                    : $"No se le preguntó a la persona: {error} No se hizo nada; si todavía hace falta, vuelve a proponerla.";
                 break;
             case CompanionActionStatus.Discarded:
                 data["resultado"] = "rechazada";
@@ -470,7 +493,8 @@ public sealed class CompanionActions(Db db, RouteDispatcher routes, CompanionOpt
              WHERE Status = 'applying' AND DecidedAt < DATEADD(second, -@seconds, SYSUTCDATETIME())
             """, new { seconds = options.ApplyingSeconds });
         // Spec 048 (H2 CA3): las conversaciones que esperaban y ya no tienen nada pendiente (caducó, quedó sin confirmar, o el
-        // proceso cayó entre decidir y reanudar) siguen su turno con ese resultado.
+        // proceso cayó entre decidir y reanudar) siguen su turno con ese resultado. Spec 049 (D-01): no con el Acompañante apagado.
+        if (!options.Enabled) return (expired, unknown);
         var resumed = (await cn.QueryAsync<int>("""
             UPDATE c SET Status = 'queued', LastActivityAt = SYSUTCDATETIME()
             OUTPUT inserted.Id

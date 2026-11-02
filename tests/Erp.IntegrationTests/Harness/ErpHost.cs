@@ -73,6 +73,17 @@ public class ErpHost : IAsyncLifetime
         return f;
     }
 
+    /// <summary>
+    /// Spec 049: detiene la instancia principal (sus trabajadores incluidos) y arranca otra sobre la misma base con estas opciones,
+    /// como el dueño que cambia la configuración y reinicia. Las sesiones anteriores no sirven: se vuelve a entrar.
+    /// </summary>
+    public async Task RestartAsync(Action<IDictionary<string, string?>> configure)
+    {
+        if (_main is { } old) await old.DisposeAsync();
+        _main = Start(s => { Configure(s); configure(s); }, autoCreate: false);
+        await _main.StartAsync();
+    }
+
     private Factory Start(Action<IDictionary<string, string?>> configure, bool autoCreate)
     {
         var root = RepoRoot();

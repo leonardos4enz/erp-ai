@@ -23,7 +23,10 @@ public static class FieldSources
     public const string Automation = "automation";
     public const string Transition = "transition";
 
-    /// <param name="canSee">Si la persona puede ver el catálogo de una automatización (las de uno que no ve no aparecen).</param>
+    /// <param name="canSee">
+    /// Si la persona puede ver el catálogo de una automatización (las de uno que no ve no aparecen), y las partidas sobre las que
+    /// actúa (spec 049: una partida, solo si ve su campo de partidas).
+    /// </param>
     public static IReadOnlyDictionary<string, IReadOnlyList<FieldSource>> For(EntityDef target, IReadOnlyDictionary<string, EntityDef> model, Func<EntityDef, bool> canSee)
     {
         var map = new Dictionary<string, List<FieldSource>>(StringComparer.OrdinalIgnoreCase);
@@ -52,6 +55,8 @@ public static class FieldSources
                 foreach (var a in auto.Actions)
                 {
                     if (AutomationRules.Scope(source, a, model) is not { } scope) continue;
+                    // Spec 049 (auditoría 9, O-03): una acción sobre las partidas del documento solo se nombra a quien ve esas partidas.
+                    if (scope != source && !Is(scope) && !canSee(scope)) continue;
                     var dest = AutomationRules.Target(scope, a, model);
                     switch (a.Type)
                     {

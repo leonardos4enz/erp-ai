@@ -86,6 +86,8 @@ public sealed class StudioAgent(Db db, StudioOptions options, AssistantOptions a
         /// <summary>Tokens de entrada y salida medidos en la llamada anterior y los caracteres que llevaba (F-02).</summary>
         public long LastTokens;
         public long LastChars;
+        /// <summary>Spec 049 (D-03): tokens de entrada medidos en la llamada anterior.</summary>
+        public long LastInput;
     }
 
     private sealed record Outcome(string Status, string? ErrorCode, string? Summary = null, string? PlanJson = null, string? ReportJson = null);
@@ -208,6 +210,9 @@ public sealed class StudioAgent(Db db, StudioOptions options, AssistantOptions a
             var estimate = run.LastTokens + Math.Max(0, chars - run.LastChars);
             if (run.Tokens + estimate + options.MaxTokensPerCall > options.MaxTokens)
                 return await LimitAsync(run, "limit_tokens", $"La siguiente llamada podría rebasar el tope de {options.MaxTokens:N0} tokens de la sesión.");
+            // Spec 049 (auditoría 9, D-03, R-046-1): una sola llamada que no cabe en la ventana del modelo se detiene aquí.
+            if (StudioOptions.EstimateInput(chars, run.LastInput, run.LastChars) > options.MaxInputTokens)
+                return await LimitAsync(run, "limit_tokens", StudioOptions.TooLongMessage);
             var reserve = options.ReserveMicros(estimate);
             if (run.Cost + reserve > options.MaxCostMicros)
                 return await LimitAsync(run, "limit_cost", $"La siguiente llamada podría rebasar el costo máximo de la sesión ({options.MaxCostUsd} USD).");
@@ -223,6 +228,7 @@ public sealed class StudioAgent(Db db, StudioOptions options, AssistantOptions a
             run.Tokens = run.Input + run.Output;
             run.Cost += options.CostMicros(reply.InputTokens, reply.OutputTokens, reply.CacheReadTokens, reply.CacheWriteTokens);
             run.LastTokens = reply.InputTokens + reply.CacheReadTokens + reply.CacheWriteTokens + reply.OutputTokens;
+            run.LastInput = reply.InputTokens + reply.CacheReadTokens + reply.CacheWriteTokens;
             run.LastChars = chars;
             await SettleAsync(run);
 

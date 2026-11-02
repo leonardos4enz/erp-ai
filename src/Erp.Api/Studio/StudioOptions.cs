@@ -12,6 +12,8 @@ public sealed record StudioOptions
     public int MaxToolCalls { get; init; } = 80;
     /// <summary>Tokens de entrada más salida por sesión.</summary>
     public long MaxTokens { get; init; } = 1_500_000;
+    /// <summary>Spec 049 (auditoría 9, D-03, R-046-1): entrada estimada de una sola llamada, por debajo de la ventana del modelo.</summary>
+    public long MaxInputTokens { get; init; } = 180_000;
     public int MaxMinutes { get; init; } = 20;
     public decimal MaxCostUsd { get; init; } = 5m;
     public decimal CostPerDayUsd { get; init; } = 20m;
@@ -61,6 +63,18 @@ public sealed record StudioOptions
     /// </summary>
     public long ReserveMicros(long inputTokens) => CostMicros(0, MaxTokensPerCall, cacheWrite: inputTokens);
 
+    /// <summary>
+    /// Spec 049 (auditoría 9, D-03): entrada estimada de la siguiente llamada contra la ventana del modelo. Con una medición del
+    /// mismo turno, la entrada medida más un token por cada dos caracteres nuevos; sin ella (primera llamada del turno), uno por
+    /// cada tres caracteres. No es el peor caso del costo (<see cref="ReserveMicros"/>): un tope que rechazara conversaciones
+    /// que sí caben estorbaría más que el 400 del proveedor, que queda de respaldo con su propio código (<c>too_long</c>).
+    /// </summary>
+    public static long EstimateInput(long chars, long lastInput, long lastChars) =>
+        lastChars > 0 ? lastInput + Math.Max(0, chars - lastChars) / 2 : chars / 3;
+
+    /// <summary>Spec 049 (D-03): lo que se le dice a la persona cuando una sola llamada no cabe en la ventana del modelo.</summary>
+    public const string TooLongMessage = "Lo que el modelo tendría que leer de una vez ya no cabe: pide algo más acotado o empieza una conversación nueva.";
+
     public static StudioOptions From(IConfiguration config)
     {
         var s = config.GetSection("Studio");
@@ -72,6 +86,7 @@ public sealed record StudioOptions
             MaxSteps = Math.Clamp(s.GetValue("MaxSteps", 30), 1, 200),
             MaxToolCalls = Math.Clamp(s.GetValue("MaxToolCalls", 80), 1, 1000),
             MaxTokens = Math.Clamp(s.GetValue("MaxTokens", 1_500_000L), 1000L, 50_000_000L),
+            MaxInputTokens = Math.Clamp(s.GetValue("MaxInputTokens", 180_000L), 1000L, 2_000_000L),
             MaxMinutes = Math.Clamp(s.GetValue("MaxMinutes", 20), 1, 240),
             MaxCostUsd = Math.Clamp(s.GetValue("MaxCostUsd", 5m), 0.01m, 1000m),
             CostPerDayUsd = Math.Clamp(s.GetValue("CostPerDayUsd", 20m), 0.01m, 10_000m),

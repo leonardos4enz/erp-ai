@@ -118,6 +118,8 @@ public sealed class AnthropicAssistantModel : IAssistantModel, IDisposable
             // Regresión F-06: una clave de organización sin espacio de trabajo responde 400 pidiendo esta cabecera.
             AnthropicBadRequestException when ex.Message.Contains("anthropic-workspace-id", StringComparison.OrdinalIgnoreCase) => "workspace",
             AnthropicNotFoundException => "model",
+            // Spec 049 (auditoría 9, D-03): la entrada no cabe en la ventana del modelo; se dice así, no «error inesperado».
+            AnthropicBadRequestException when TooLong(ex.Message) => "too_long",
             AnthropicBadRequestException or AnthropicUnprocessableEntityException => "bad_request",
             Anthropic5xxException => "provider",
             AnthropicIOException or HttpRequestException => "network",
@@ -128,6 +130,9 @@ public sealed class AnthropicAssistantModel : IAssistantModel, IDisposable
         log.LogWarning("El proveedor del asistente falló ({Code}): {Type} {Message}", code, ex.GetType().Name, ex.Message);
         return new AssistantProviderException(code, ex);
     }
+
+    /// <summary>El 400 de Anthropic cuando la entrada rebasa la ventana del modelo («prompt is too long: N tokens &gt; M maximum»).</summary>
+    internal static bool TooLong(string? message) => message?.Contains("prompt is too long", StringComparison.OrdinalIgnoreCase) == true;
 
     public void Dispose()
     {

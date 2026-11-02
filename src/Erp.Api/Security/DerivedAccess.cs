@@ -59,6 +59,52 @@ public static class DerivedAccess
         return !u.IsSuperuser && info.Crosses.Any(e => RestrictedFor(e, u));
     }
 
+    /// <summary>
+    /// Spec 049 (auditoría 9, O-02): ¿la expresión (una regla, una condición, un valor por omisión) nombra algo que el usuario no
+    /// ve? Un campo oculto del catálogo, de sus partidas o de su documento, o un campo (o un catálogo entero) al otro lado de una
+    /// referencia que no lee. Quien no modela recibe esa expresión sin su texto (<c>ModelEndpoints.ForUser</c>), como una
+    /// fórmula que lee algo oculto (029). Una expresión que no se puede leer cuenta como oculta; un nombre que no es un campo
+    /// (las columnas del sistema) no.
+    /// </summary>
+    public static bool NamesHidden(EntityDef e, string? expression, IReadOnlyDictionary<string, EntityDef> model, UserContext u)
+    {
+        if (string.IsNullOrWhiteSpace(expression)) return false;
+        Node tree;
+        try { tree = ExprParser.Parse(expression); }
+        catch (ExprException) { return true; }
+        return Hidden(tree);
+
+        bool Hidden(Node n) => n switch
+        {
+            PathRef p => PathHidden(p),
+            Unary x => Hidden(x.Operand),
+            Binary b => Hidden(b.Left) || Hidden(b.Right),
+            InList i => Hidden(i.Value) || i.Items.Any(Hidden),
+            Call c => c.Args.Any(Hidden),
+            _ => false,
+        };
+
+        EntityDef Root(EntityDef x) => x.IsChild && model.TryGetValue(x.ParentEntity ?? "", out var p) ? p : x;
+
+        bool PathHidden(PathRef p)
+        {
+            if (e.FindField(p.Head) is not { } hop) return false;
+            if (!FieldAccess.CanSee(e, hop, u)) return true;
+            foreach (var segment in p.Rest)
+            {
+                EntityDef? target = null;
+                if (hop.Type == FieldTypes.Lines) model.TryGetValue(hop.ChildEntity ?? "", out target);
+                else if (hop.Type is FieldTypes.Parent or FieldTypes.Reference) model.TryGetValue(hop.ReferenceEntity ?? "", out target);
+                if (target is null) return false;
+                if (hop.Type == FieldTypes.Reference && !u.IsSuperuser && !u.Access(Root(target).Name).Read) return true;
+                if (target.FindField(segment) is not { } next) return false;
+                if (!FieldAccess.CanSee(target, next, u)) return true;
+                hop = next;
+            }
+            return false;
+        }
+    }
+
     /// <summary>¿El usuario tiene restringido por registro (006/015) este catálogo? El superusuario se lo salta.</summary>
     private static bool RestrictedFor(EntityDef e, UserContext u)
     {

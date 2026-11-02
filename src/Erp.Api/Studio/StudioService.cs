@@ -591,6 +591,7 @@ public sealed class StudioService(Db db, MetadataStore store, PlanService plans,
         "timeout" or "network" => "El proveedor no respondió a tiempo.",
         "refusal" => "El modelo no pudo atender este pedido. Reformúlalo en términos del modelo del ERP.",
         "truncated" => "La respuesta del modelo quedó incompleta. Pide un desarrollo más acotado.",
+        "too_long" => StudioOptions.TooLongMessage, // spec 049 (D-03)
         _ => "La sesión falló por un error inesperado.",
     };
 

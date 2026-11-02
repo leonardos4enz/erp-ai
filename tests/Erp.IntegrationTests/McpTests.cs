@@ -60,7 +60,8 @@ public class McpTests(McpTests.Host host) : IClassFixture<McpTests.Host>
             var modeler = await admin.RoleIdAsync("Mcp Modelador");
             var reader = await admin.RoleIdAsync("Mcp Lector");
             foreach (var (u, role) in new[] { ("mc-ana", modeler), ("mc-beto", modeler), ("mc-carla", modeler), ("mc-dora", modeler), ("mc-eli", modeler),
-                         ("mc-fer", modeler), ("mc-gil", modeler), ("mc-hugo", modeler), ("mc-lector", reader) })
+                         ("mc-fer", modeler), ("mc-gil", modeler), ("mc-hugo", modeler), ("mc-lector", reader),
+                         ("mc-o5a", modeler), ("mc-o5b", modeler), ("mc-o5c", modeler) }) // spec 049 (O-05)
             {
                 var res = await admin.PostAsync("/api/admin/users", new { username = u, displayName = u, password = Pwd, roleIds = new[] { role } });
                 Assert.True(res.Status == 201, res.Text);
@@ -1037,6 +1038,40 @@ public class McpTests(McpTests.Host host) : IClassFixture<McpTests.Host>
         Assert.Equal("unsupported_grant_type", (await TokenAsync(api, ("grant_type", "refresh_token"), ("refresh_token", conn.Refresh), ("client_id", conn.ClientId))).Body!.Str("error"));
         using var ana = await f.LoginAsync("mc-ana", Pwd);
         Assert.Equal(404, (await ana.GetAsync("/api/mcp/connections")).Status);
+    }
+
+    /// <summary>
+    /// Spec 049 (auditoría 9, O-05; pendiente de la 045 O-03): el registro dinámico (su barrido y su transacción serializable de
+    /// topes) y las renovaciones de conexiones vivas, a la vez y en varias vueltas, con un cliente viejo que el barrido borra
+    /// en cada una. Ninguno espera al otro hasta fallar: todos responden lo suyo, sin 500 ni interbloqueo.
+    /// </summary>
+    [Fact]
+    public async Task H049_O05_registro_dinamico_y_renovaciones_a_la_vez_no_se_interbloquean()
+    {
+        var conns = new List<Conn>();
+        foreach (var user in new[] { "mc-o5a", "mc-o5b", "mc-o5c", "mc-o5a", "mc-o5b", "mc-o5c" }) conns.Add(await ConnectAsync(user));
+        for (var round = 0; round < 3; round++)
+        {
+            // Un cliente sin uso de hace dos horas: el primer registro de la vuelta lo barre (DELETE de clientes, códigos y tokens).
+            var old = await RegisterAsync(name: $"Viejo 049 {round}");
+            await host.ExecAsync($"UPDATE meta.McpClient SET CreatedAt = DATEADD(hour, -2, SYSUTCDATETIME()) WHERE ClientId = '{old}'");
+            var current = conns.ToArray();
+            var results = await Concurrently(current.Length + 8, async i =>
+            {
+                using var api = host.Anonymous(false);
+                return i < current.Length
+                    ? await TokenAsync(api, ("grant_type", "refresh_token"), ("refresh_token", current[i].Refresh), ("client_id", current[i].ClientId), ("resource", Resource))
+                    : await api.PostAsync("/oauth/register", new { client_name = $"Claude 049 {round}-{i}", redirect_uris = new[] { Callback } });
+            });
+            for (var i = 0; i < current.Length; i++)
+            {
+                Assert.True(results[i].Status == 200, $"renovación {i} de la vuelta {round}: {results[i].Status} {results[i].Text}");
+                conns[i] = current[i] with { Access = results[i].Body!.Str("access_token")!, Refresh = results[i].Body!.Str("refresh_token")! };
+            }
+            Assert.All(results.Skip(current.Length), r => Assert.True(r.Status == 201, r.Text));
+            Assert.Equal(0, await host.ScalarAsync<int>($"SELECT COUNT(*) FROM meta.McpClient WHERE ClientId = '{old}'"));
+        }
+        foreach (var c in conns) Assert.Equal(200, (await RpcAsync(c.Access, "ping")).Status);
     }
 }
 

@@ -711,9 +711,16 @@ En este orden, por decisión del dueño (2026-10-25):
     sistema y explicar de dónde sale un campo en vez de suponer. Cada punto con su prueba de integración contra el código de
     hoy. Toca el motor de la 046 y la tarjeta de la 047. Pendiente, si se pide: herramienta «¿qué pasa si…?» (qué
     automatizaciones se disparan al crear, editar o ejecutar algo) y `filledBy` como ayuda en el formulario («lo llena…»). Pendiente también: guías paso a paso que señalan el control en pantalla, modo instructor con recorridos,
-    eliminar registros por el Acompañante, unificar el bucle de Studio y el del Acompañante (R-046-1).
+    eliminar registros por el Acompañante, unificar el bucle de Studio y el del Acompañante (R-046-1), pasar la cancelación del turno a las consultas de datos (R-049-5).
     **Auditoría 9** (045–048) hecha el 2026-11-02 en una sesión aparte ([resultado](#auditorías)): propone la
-    [049 — Endurecimiento 8](#049--endurecimiento-8-auditoría-9-propuesta); el dueño decide su lugar.
+    [049 — Endurecimiento 8](#049--endurecimiento-8-auditoría-9-propuesta); el dueño pidió corregirlo todo.
+    ~~**049 — Endurecimiento 8 (auditoría 9)**~~ Implementado ([spec](specs/049-endurecimiento-8/spec.md),
+    [verify](specs/049-endurecimiento-8/verify.md)): `Companion:Enabled=false` cierra lo que está en cola o esperando y decidir
+    responde 503; una propuesta no sobrevive a un turno que termina sin preguntar y su resultado vuelve al modelo; tope de entrada
+    por llamada (`MaxInputTokens`, también en Studio) y `too_long`; decidir reanuda con el sello de ahora; partidas ocultas fuera
+    de la procedencia, la búsqueda y la ruta del modelo; detener y borrar piden la empresa; y (O-02, decisión del dueño) quien no
+    modela no recibe reglas ni condiciones que nombran un campo que no ve. **Siguiente: auditoría 10** (tras la 053, o antes si
+    una spec agrega un punto de entrada, un trabajo asíncrono o delegación).
 15. **Pólizas en moneda extranjera** (pendiente de la 020).
 16. **Revaluación de existencias** (pendiente de la 020).
 17. **Reversa de pólizas con otra póliza** (pendiente de la 020).
@@ -761,6 +768,7 @@ prueba y fuera del alcance de 040–044; se revisaron sin cambios y el dueño de
 (`Producto.CostoUltimo` visible para vendedores, medio) sigue por decidir con el dueño.
 
 ### 049 — Endurecimiento 8 (auditoría 9): propuesta
+**Hecha en la spec 049** (2026-11-02): ver [verify](specs/049-endurecimiento-8/verify.md).
 Origen: la auditoría externa 9 (2026-11-02, solo lectura al cerrar la 048, commit `a1341b4`, specs 045–048). Lectura del
 código completo del Acompañante (`src/Erp.Api/Companion/*`, `CompanionEndpoints`, `ModelEndpoints`, `FieldSources`, el
 despachador, el panel y `lib/companion.ts`) y de las correcciones de la 045; no se cambió código ni pruebas, y no se corrió la

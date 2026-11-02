@@ -37,6 +37,8 @@ public partial class CompanionTests(CompanionTests.Host host) : IClassFixture<Co
             s["Companion:ApplyingSeconds"] = "5";
             s["Companion:IdentitySeconds"] = "1";
             s["Companion:StreamPollMs"] = "200";
+            // Spec 049 (D-03): bajo para que seis lecturas grandes en una respuesta lo rebasen; las conversaciones normales caben.
+            s["Companion:MaxInputTokens"] = "40000";
         }
 
         protected override void ConfigureServices(IServiceCollection services) => services.AddSingleton<IStudioModel>(Llm);
@@ -70,11 +72,15 @@ public partial class CompanionTests(CompanionTests.Host host) : IClassFixture<Co
                     new { name = "Nombre", label = "Nombre", type = "text", required = true } } },
             } });
             await admin.ApplyPlanAsync(GatosPlan);
+            await admin.ApplyPlanAsync(NominaPlan); // spec 049 (O-03)
             static object Perm(string entity) => new { entity, canRead = true, canCreate = true, canUpdate = true, canDelete = false };
             // Spec 048: Gatos y Vacunas los ven todos; la Clínica, nadie más que el administrador.
             foreach (var role in new[] { "Comp Usuario", "Comp Gerente", "Comp Temporal" })
                 Assert.Equal(200, (await admin.PutAsync($"/api/admin/roles/{await admin.RoleIdAsync(role)}", new { name = role, description = "Spec 046", canManageModel = false,
                     canManageUsers = false, canViewAudit = false, permissions = new[] { Perm("CoPedido"), Perm("CoCliente"), Perm("CoGato"), Perm("CoVacuna") } })).Status);
+            // Spec 049 (O-03): «Comp Nómina» lee empleados y nóminas, pero no ve el campo de partidas de la nómina.
+            Assert.Equal(200, (await admin.PostAsync("/api/admin/roles", new { name = "Comp Nomina", description = "Spec 049", canManageModel = false,
+                canManageUsers = false, canViewAudit = false, permissions = new[] { Perm("CoEmpleado"), Perm("CoNomina") } })).Status);
             var usuario = await admin.RoleIdAsync("Comp Usuario");
             var gerente = await admin.RoleIdAsync("Comp Gerente");
             var temporal = await admin.RoleIdAsync("Comp Temporal");
@@ -82,7 +88,10 @@ public partial class CompanionTests(CompanionTests.Host host) : IClassFixture<Co
                          ("co-dani", new[] { usuario }), ("co-eli", new[] { usuario }), ("co-temp", new[] { temporal }), ("co-fer", new[] { usuario }),
                          ("co-gil", new[] { usuario }), ("co-hugo", new[] { usuario }),
                          // Spec 048 (co-eli cambia de contraseña en H1 CA4 de la 046).
-                         ("co-iris", new[] { usuario }), ("co-juan", new[] { usuario }) })
+                         ("co-iris", new[] { usuario }), ("co-juan", new[] { usuario }),
+                         // Spec 049.
+                         ("co-kai", new[] { usuario }), ("co-leo", new[] { usuario }), ("co-max", new[] { usuario }), ("co-nora", new[] { usuario }),
+                         ("co-olga", new[] { usuario, await admin.RoleIdAsync("Comp Nomina") }) })
             {
                 var res = await admin.PostAsync("/api/admin/users", new { username = u, displayName = u, password = Pwd, roleIds = roles });
                 Assert.True(res.Status == 201, res.Text);

@@ -40,6 +40,7 @@ public sealed class CompanionAgent(Db db, CompanionOptions options, AssistantOpt
         public string? LastText;
         public long LastTokens;
         public long LastChars;
+        public long LastInput;
     }
 
     private sealed record Outcome(string Status, string? ErrorCode, string? Summary = null);
@@ -117,6 +118,8 @@ public sealed class CompanionAgent(Db db, CompanionOptions options, AssistantOpt
     private async Task<Outcome> LoopAsync(Run run, CancellationToken ct)
     {
         var claim = run.Claim;
+        // Spec 049 (auditoría 9, D-01): con el Acompañante apagado no se llama al proveedor, aunque el turno ya estuviera reclamado.
+        if (!options.Enabled) return new(StudioStatus.Failed, "disabled");
         var credential = await keys.GetAsync(ct);
         if (credential is null) return new(StudioStatus.Failed, "not_configured");
         var messages = await LoadAsync(run, ct);
@@ -135,6 +138,9 @@ public sealed class CompanionAgent(Db db, CompanionOptions options, AssistantOpt
             var estimate = run.LastTokens + Math.Max(0, chars - run.LastChars);
             if (run.Tokens + estimate + options.MaxTokensPerCall > options.MaxTokens)
                 return await LimitAsync(run, "limit_tokens", "La conversación es muy larga: empieza una nueva.");
+            // Spec 049 (auditoría 9, D-03): una sola llamada que no cabe en la ventana del modelo se detiene aquí, con su mensaje.
+            if (StudioOptions.EstimateInput(chars, run.LastInput, run.LastChars) > options.MaxInputTokens)
+                return await LimitAsync(run, "limit_tokens", StudioOptions.TooLongMessage);
             var reserve = options.ReserveMicros(estimate);
             if (run.Cost + reserve > options.MaxCostMicros)
                 return await LimitAsync(run, "limit_cost", $"La conversación llegó a su costo máximo ({options.MaxCostUsd} USD): empieza una nueva.");
@@ -150,6 +156,7 @@ public sealed class CompanionAgent(Db db, CompanionOptions options, AssistantOpt
             run.Tokens = run.Input + run.Output;
             run.Cost += options.CostMicros(reply.InputTokens, reply.OutputTokens, reply.CacheReadTokens, reply.CacheWriteTokens);
             run.LastTokens = reply.InputTokens + reply.CacheReadTokens + reply.CacheWriteTokens + reply.OutputTokens;
+            run.LastInput = reply.InputTokens + reply.CacheReadTokens + reply.CacheWriteTokens;
             run.LastChars = chars;
             await SettleAsync(run);
 
@@ -300,8 +307,11 @@ public sealed class CompanionAgent(Db db, CompanionOptions options, AssistantOpt
         }
         run.MessageSeq = rows.Count == 0 ? 0 : rows[^1].Seq;
         var outcomes = await OutcomesAsync(run.Claim.Id, ct);
-        return StudioTranscript.Normalize(rows.Select(r => new StudioMessage(r.FromUser, StudioTranscript.Deserialize(r.ContentJson)
-            .Select(b => b is StudioToolResult x && outcomes.TryGetValue(x.ToolUseId, out var text) ? new StudioToolResult(x.ToolUseId, text, false, x.Tool) : b).ToList())));
+        // Spec 049 (auditoría 9, D-02): el resultado de una propuesta se aplica después de normalizar, así que también reemplaza
+        // el «el turno se interrumpió» que agrega Normalize cuando el turno salió antes de guardar los resultados de la respuesta.
+        return StudioTranscript.Normalize(rows.Select(r => new StudioMessage(r.FromUser, StudioTranscript.Deserialize(r.ContentJson))))
+            .Select(m => new StudioMessage(m.FromUser, m.Blocks.Select(b => b is StudioToolResult x && outcomes.TryGetValue(x.ToolUseId, out var text)
+                ? new StudioToolResult(x.ToolUseId, text, false, x.Tool ?? CompanionTools.Propose) : b).ToList())).ToList();
     }
 
     /// <summary>
@@ -378,9 +388,13 @@ public sealed class CompanionAgent(Db db, CompanionOptions options, AssistantOpt
              WHERE Id = @Id AND LeaseToken = @LeaseToken AND Status = 'running'
             """, new { o.Status, o.ErrorCode, o.Summary, run.Steps, run.ToolCalls, run.Input, run.Output,
                 Cost = run.Cost + run.Reserved, run.Claim.Id, run.Claim.LeaseToken }, tx) ?? throw new StudioLeaseLost();
-        // Spec 048: si la persona ya decidió todo mientras el turno terminaba (vio la tarjeta por el flujo), sigue de una vez.
-        if (status == CompanionService.Waiting) await CompanionActions.ResumeAsync(cn, tx, run.Claim.Id);
-        else if (o.Status == CompanionService.Waiting) await CompanionService.DiscardOnStopAsync(cn, tx, run.Claim.Id);
+        // Spec 048: si la persona ya decidió todo mientras el turno terminaba (vio la tarjeta por el flujo), sigue de una vez
+        // (spec 049, D-01: no con el Acompañante apagado; el trabajador la cierra).
+        if (status == CompanionService.Waiting) { if (options.Enabled) await CompanionActions.ResumeAsync(cn, tx, run.Claim.Id); }
+        // Spec 049 (auditoría 9, D-02): un turno que no termina esperando no deja propuestas confirmables (detener, un tope, la
+        // identidad o el tiempo en una herramienta posterior de la misma respuesta). Nunca se le preguntaron a la persona.
+        else await CompanionService.DiscardPendingAsync(cn, tx, run.Claim.Id,
+            status == StudioStatus.Cancelled ? CompanionService.StoppedError : CompanionService.EndedError);
         // H2 CA4: lo leído de registros no se queda al terminar el turno, ni en los pasos ni en el historial.
         await CompanionService.PurgeDataAsync(cn, tx, run.Claim.Id);
         await Audit.WriteAsync(cn, tx, new DefaultHttpContext(), AuditActions.CompanionFinish, entity: "companion", recordId: run.Claim.Id.ToString(),
