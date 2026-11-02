@@ -234,10 +234,12 @@ export function EntityListPage() {
       </div>
 
       {stale && (
-        <Alert tone="info" title="El Acompañante aplicó cambios"
-          action={<Button size="sm" icon={RefreshCw} onClick={() => { setStale(false); setReload((r) => r + 1); }}>Actualizar</Button>}>
-          Es posible que esta lista esté desactualizada.
-        </Alert>
+        <div className="list-stale">
+          <Alert tone="info" title="El Acompañante aplicó cambios"
+            action={<Button size="sm" icon={RefreshCw} onClick={() => { setStale(false); setReload((r) => r + 1); }}>Actualizar</Button>}>
+            Es posible que esta lista esté desactualizada.
+          </Alert>
+        </div>
       )}
       {error ? (
         <Alert tone="danger" title={error instanceof ApiError ? error.title : 'No se pudieron cargar los registros'}>

@@ -207,6 +207,8 @@ code, pre, .mono { font-family: var(--font-mono); font-size: 0.8125rem; }
 .page-header > .grow { min-width: min(9rem, 100%); }
 
 .toolbar { display: flex; gap: var(--space-3); align-items: center; margin-bottom: var(--space-4); flex-wrap: wrap; }
+/* Spec 048: el aviso «El Acompañante aplicó cambios» separado de la tabla como la barra de herramientas. */
+.list-stale { margin-bottom: var(--space-4); }
 .toolbar .input-wrap { width: 320px; max-width: 100%; }
 
 /* ---------- User menu / popover ---------- */

@@ -94,7 +94,7 @@ export function CompanionPanel({ id, conversation, onConversation, onClose }: {
   return (
     <aside id={id} className="cmp-panel" aria-label="Acompañante">
       <header className="cmp-head">
-        <CompanionAvatar state={avatar.state} size={52} />
+        <CompanionAvatar state={avatar.state} size={44} />
         <h2 className="cmp-head-title">
           <span className="cmp-head-name">Acompañante</span>
           <span className="cmp-head-state">{avatar.text}</span>

@@ -115,6 +115,9 @@ También: `buscar_en_el_sistema` mandaba `"recortado": null`; ahora solo se mand
   tomar la sesión entre ambas. Ahora van en una transacción.
 - Corridas: E2E completa 488 en verde (12 min 26 s); `acompanante.spec.ts --veces=3` 21 en verde ×3 (5 min 21 s); `StudioTests` ×3 en verde (57; el interbloqueo no se reprodujo en local: es una carrera con el barrido). Vitest 84.
 
+- Ajustes visuales del dueño: el aviso de la lista con margen abajo (`.list-stale`) y el avatar de la cabecera del panel de
+  52 a 44 px. Capturas `acompanante-light/dark/movil.png` regeneradas y revisadas; `acompanante.spec.ts --veces=3` en verde.
+
 ## 6. Riesgos residuales
 Registrados en [riesgos.md](../../riesgos.md): [R-048-1](../../riesgos.md#048) (la caducidad reanuda sin la persona; sin
 tope de vueltas por turno), [R-048-2](../../riesgos.md#048) (confirmación lenta y «sin confirmar»), [R-048-3](../../riesgos.md#048)

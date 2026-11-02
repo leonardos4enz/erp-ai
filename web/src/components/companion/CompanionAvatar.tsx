@@ -337,7 +337,7 @@ export function CompanionAvatar({ state, size = 40 }: { state: AvatarState; size
   const id = idRef.current;
   const svg = useRef<SVGSVGElement>(null);
   const eyes = useRef<Eyes | null>(null);
-  const small = size < 48;
+  const small = size < 32;
 
   useEffect(() => {
     const root = svg.current!;
