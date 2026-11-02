@@ -337,8 +337,13 @@ test('H5 CA1 (móvil): el botón no tapa el título del formulario', async ({ br
   const page = await pageAs(browser, 'comprador');
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`/c/OrdenCompra/${ids.oc}`);
-  const title = await page.getByRole('heading', { level: 1 }).boundingBox();
-  const button = await page.getByRole('button', { name: 'Descargar PDF' }).boundingBox();
+  // CI de `8371867` (R-030-5): `boundingBox()` no espera a que el título se vea; en el runner lento lo medía antes y daba null.
+  const heading = page.getByRole('heading', { level: 1 });
+  const download = page.getByRole('button', { name: 'Descargar PDF' });
+  await expect(heading).toBeVisible();
+  await expect(download).toBeVisible();
+  const title = await heading.boundingBox();
+  const button = await download.boundingBox();
   expect(title!.width).toBeGreaterThan(180);
   const overlap = !(button!.x >= title!.x + title!.width || button!.x + button!.width <= title!.x || button!.y >= title!.y + title!.height || button!.y + button!.height <= title!.y);
   expect(overlap).toBe(false);
