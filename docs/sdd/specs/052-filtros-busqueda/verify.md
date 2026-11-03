@@ -110,3 +110,7 @@ Playwright que inicia sesión leyendo el archivo de la instancia (la contraseña
 ## 5. Riesgos residuales
 Registrados en [riesgos.md](../../riesgos.md#052): R-052-1 (lo guardado no se revisa después), R-052-2, R-052-3, R-052-4 y
 R-052-5 (interbloqueo preexistente de altas con partidas).
+
+## 6. CI del push
+Corrida [41538958164](https://github.com/leonardos4enz/erp-ai/actions/runs/41538958164) de `9f98e6b`: **en verde** (`success`,
+terminó 23:05 UTC; unitarias, integración y E2E completa). Comprobado al abrir la 053.

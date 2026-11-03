@@ -386,6 +386,15 @@ export function WorkflowDesigner({ workflow, onChange, savedStates, savedTransit
             <h3 className="ld-pane-title">Propiedades</h3>
             <p className="subtle">Selecciona un estado o una transición del diagrama para editarlo.</p>
             <p className="subtle">{w.states.length} estados · {w.transitions.length} transiciones · inicial: {labelOf(w.initial)}</p>
+            {/* Spec 053: la autorización por matriz se declara por paquete o con el asistente; aquí se muestra. */}
+            {w.approval && (
+              <p className="subtle">
+                Autorización por matriz en «{labelOf(w.approval.state)}»: al completarse, «{w.approval.approve}»; al rechazar, «{w.approval.reject}».
+                {w.approval.amount ? ` Monto: ${w.approval.amount}.` : ''}
+                {w.approval.conditions?.length ? ` Condiciones: ${w.approval.conditions.join(', ')}.` : ''}
+                {` Autorizadores: ${w.approval.approvers}. Quién autoriza se configura en Configuración › Autorizaciones.`}
+              </p>
+            )}
           </>
         )}
       </aside>

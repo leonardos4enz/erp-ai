@@ -354,7 +354,9 @@ public sealed partial class RecordService(Db db, MetadataStore store)
         var existingLines = await LoadDraftAsync(cn, tx, e, model, id, ct);
         await SaveLinesAsync(cn, tx, e, model, id, draft, existingLines, user.Id, ct);
         await Audit.WriteAsync(cn, tx, http, AuditActions.Update, e.Name, id.ToString(), before, AuditAfter(draft, warnings));
-        await FireAsync(new AutoCtx(cn, tx, model, user, http, 0, [], ct), e, id, AutomationEvents.Update, null);
+        var c = new AutoCtx(cn, tx, model, user, http, 0, [], ct);
+        await ApprovalOnChangeAsync(c, e, id, draft); // spec 053: cambiar el monto o una condición reinicia la autorización
+        await FireAsync(c, e, id, AutomationEvents.Update, null);
         // Spec 006: no se puede sacar un registro del propio alcance (p. ej. cambiarlo a otro departamento).
         if (RecordFilter.For(e, user, write: true, model) is { } scope && !await MatchesAsync(cn, tx, e, id, scope, ct))
             throw new Forbidden("No se guardó: el registro quedaría fuera de los que tu rol puede modificar.");
@@ -465,6 +467,8 @@ public sealed partial class RecordService(Db db, MetadataStore store)
         await UpdateHeaderAsync(c.Cn, c.Tx, e, id, draft.Header, rowVersion, c.User.Id, c.Ct);
         await WriteHistoryAsync(c.Cn, c.Tx, e, id, from, t.To, t.Name, comment, c.User.Id, c.Ct);
         await Audit.WriteAsync(c.Cn, c.Tx, c.Http, AuditActions.WorkflowPrefix + t.Name, e.Name, id.ToString(), before, AuditAfter(draft, warnings));
+        // Spec 053: entrar al estado que se autoriza por matriz empieza la corrida (falla cerrado); salir por otra la cancela.
+        await ApprovalOnTransitionAsync(c, e, id, draft, from, t);
         await FireAsync(c, e, id, AutomationEvents.Transition, t.Name);
         await FireAsync(c, e, id, AutomationEvents.EnterState, t.To);
     }
@@ -571,6 +575,7 @@ public sealed partial class RecordService(Db db, MetadataStore store)
         foreach (var lf in e.ActiveFields.Where(f => f.Type == FieldTypes.Lines))
             if (model.TryGetValue(lf.ChildEntity!, out var child))
                 await SoftDeleteAsync(cn, tx, child, $"{Quote(child.ParentField!.Name)} = @id", id, user.Id, ct);
+        await ApprovalOnDeleteAsync(new AutoCtx(cn, tx, model, user, http, 0, [], ct), e, id); // spec 053 (F-11)
         await Audit.WriteAsync(cn, tx, http, AuditActions.Delete, e.Name, id.ToString(), before: Snapshot(draft));
         await tx.CommitAsync(ct);
     }
@@ -1065,7 +1070,8 @@ public sealed partial class RecordService(Db db, MetadataStore store)
     {
         foreach (var f in e.MultiFields)
         {
-            if (values.GetValueOrDefault(f.Name) is not IReadOnlyCollection<long> ids) continue;
+            // Spec 053: la lista de autorizadores solo la escribe el motor (con su candado); aquí se leyó y no se pisa.
+            if (IsApprovers(e, f) || values.GetValueOrDefault(f.Name) is not IReadOnlyCollection<long> ids) continue;
             var table = JoinTable(e.Name, f.Name);
             await using var cmd = new SqlCommand($"""
                 DELETE FROM {table} WHERE [OwnerId] = @id AND [ValueId] NOT IN (SELECT CAST([value] AS bigint) FROM OPENJSON(@ids));
@@ -1285,6 +1291,8 @@ public sealed partial class RecordService(Db db, MetadataStore store)
                     };
                 }).ToList(),
             };
+            // Spec 053: el panel de autorización (la última corrida, si hubo).
+            if (wf.Approval is not null && await ApprovalOutputAsync(cn, tx, e, id, draft, user, ct) is { } approval) row["_approval"] = approval;
         }
         if (HasConditions(e))
         {

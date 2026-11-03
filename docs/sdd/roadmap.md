@@ -893,32 +893,17 @@ modelador. Compras 1.13.0 lo ejerce (proveedor y producto activos). **Fuera** (p
 varios valores y de persona, el diálogo de transición con filtro (R-052-4) y el interbloqueo preexistente de altas concurrentes con
 partidas (R-052-5, para el siguiente endurecimiento).
 
-### 053 — Matriz de autorización: núcleo (propuesta)
-Capacidad genérica del motor (en SAP, *estrategia de liberación*): **quién autoriza deja de estar escrito en el proceso y pasa a
-ser una tabla que llena un administrador**; el motor la consulta en cada documento.
-- **Declaración en el catálogo (metadatos):** el proceso usa la matriz desde un estado (p. ej. «Pendiente»), pasa a otro al
-  completar los niveles («Autorizada») y a otro al rechazar («Rechazada»); los campos que sirven de condición (grupo, centro,
-  tipo, total) y el campo de monto.
-- **Configuración por empresa (datos, pantalla para el administrador):**
-  - **Reglas**: condiciones por campos o con una expresión del lenguaje de fórmulas, monto comparado en la moneda base (010),
-    prioridad cuando aplican varias (gana la más específica o la de mayor prioridad), vigencia opcional.
-  - **Niveles** de cada regla, en orden; en cada nivel un **perfil** («Gerente de compras»).
-  - **Perfiles** con sus **personas** (alta y baja sin tocar el proceso) y **rango de montos** por perfil.
-- **Cálculo del motor:** qué regla aplica, qué niveles pide (un nivel sin personas **se salta**), en qué nivel va y quién puede
-  autorizar **ahora**. Al autorizar el último, ejecuta la transición de salida; al rechazar, la de rechazo **con motivo
-  obligatorio**.
-- **Bandeja «Pendientes de mi autorización»** (un documento solo aparece a quien le toca ahora) y, en el registro, el avance
-  por nivel (quién, cuándo, comentario).
-- **Reglas congeladas al empezar:** cambiar la tabla no altera los documentos en curso. **Reinicio** si cambia el monto u otro
-  campo de condición después de autorizar un nivel. Cada autorización guarda la **huella** de lo que vio la persona
-  (021: «revisar → aplicar con huella»).
-- **Segregación de funciones:** nadie autoriza lo que creó ni dos niveles del mismo documento (021-1: «el beneficiario no se
-  aprueba»); nadie se asigna a un perfil que no administra.
-- **Bitácora** completa (regla, nivel, persona, decisión, comentario, huella), exportable.
-- La regla vale en **todos los caminos**: pantalla, API, importación, automatizaciones, MCP, Studio y el Acompañante (que
-  puede proponer autorizar, con la confirmación de la persona, ADR-0010). Concurrencia: dos autorizadores del mismo nivel a la
-  vez → una sola decisión cuenta.
-- **Es delegación de privilegios** → dispara la **auditoría 10** al cerrar.
+### ~~053 — Matriz de autorización: núcleo~~ Implementado ([spec](specs/053-matriz-autorizacion/spec.md), [verify](specs/053-matriz-autorizacion/verify.md))
+`workflow.approval` declara el estado que se autoriza por matriz (transiciones de salida `system`, monto, hasta 5 campos de
+condición y el campo `multiuser` de autorizadores que mantiene el motor). La matriz es configuración por empresa en
+**Configuración › Autorizaciones** (perfiles con personas y rango de montos; reglas con condiciones, prioridad, vigencia y niveles),
+con la compuerta de seguridad de la 015. Al entrar al estado el motor elige la regla y la congela, salta los niveles fuera de rango
+(al empezar) y los vacíos (al llegar), y **falla cerrado** sin regla o sin niveles. Decidir es `POST /api/data/{e}/{id}/approval`
+con la huella (versión del registro y de la autorización): nadie autoriza lo que creó ni dos niveles, el superusuario solo si está
+en el perfil, nadie cambia su propia pertenencia; un cambio de monto o condición reinicia; salir por otra transición cancela. La
+visibilidad «solo cuando te toca» es la pertenencia de la 051 sobre la lista de autorizadores (bandeja por catálogo = vista
+«Autorizadores contiene yo»). Panel de avance en el registro y bitácora `approval.*`. **División (CLARIFY, dueño, 2026-11-02):**
+pasan a la 055 la bandeja global, exportar la bitácora, el Acompañante proponiendo autorizar y las condiciones con expresión libre.
 
 ### 054 — Adjuntos en registros y selección de partidas (propuesta)
 - **Adjuntos:** archivos en un registro (tipos y tamaño permitidos, antivirus o validación de tipo como `ImageValidator`,
@@ -930,6 +915,9 @@ ser una tabla que llena un administrador**; el motor la consulta en cada documen
 - **Riesgo:** un punto de entrada nuevo (subida de archivos): límites de tamaño y tasa, tipos, ruta de descarga con permiso.
 
 ### 055 — Matriz de autorización: fase 2 (propuesta)
+- **Lo que la 053 dejó** (división del CLARIFY): bandeja global «Pendientes de mi autorización» entre catálogos, exportar la
+  bitácora de autorizaciones, el Acompañante (y el MCP) proponiendo autorizar con la confirmación de la persona (ADR-0010) y
+  condiciones de regla con una expresión libre del lenguaje de fórmulas.
 - **Dentro de un nivel:** «uno de varios» (la 053), **todos**, **N de M** («2 de los 3 directores») y **en paralelo**
   (finanzas y legal en el mismo nivel, cada uno por su lado).
 - **Autorizador por relación:** sale de los datos («el jefe de quien creó», «el responsable del centro», «el dueño del

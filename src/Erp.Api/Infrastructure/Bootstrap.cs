@@ -990,6 +990,91 @@ public static class Bootstrap
         -- Spec 046 (H4 CA4): de dónde vino un cambio (null = la pantalla o la API; 'acompañante' = una acción confirmada).
         IF COL_LENGTH('meta.AuditLog', 'Origin') IS NULL ALTER TABLE meta.AuditLog ADD Origin nvarchar(20) NULL;
 
+        -- Spec 053: caben los tipos de solicitud de la matriz («approvalprofile.create», 22).
+        IF COL_LENGTH('meta.SecurityChange', 'Kind') < 80 ALTER TABLE meta.SecurityChange ALTER COLUMN Kind nvarchar(40) NOT NULL;
+        -- Spec 053: matriz de autorización por empresa (perfiles con personas, reglas con niveles) y sus corridas por documento.
+        IF OBJECT_ID('meta.ApprovalProfile') IS NULL
+        CREATE TABLE meta.ApprovalProfile (
+            Id int IDENTITY PRIMARY KEY,
+            CompanyId int NOT NULL REFERENCES meta.Company(Id),
+            Name nvarchar(100) NOT NULL,
+            MinAmount decimal(19,4) NULL,
+            MaxAmount decimal(19,4) NULL,
+            IsActive bit NOT NULL DEFAULT 1,
+            CreatedAt datetime2(3) NOT NULL DEFAULT SYSUTCDATETIME(),
+            CreatedBy int NOT NULL,
+            UpdatedAt datetime2(3) NULL,
+            UpdatedBy int NULL,
+            RowVer rowversion,
+            CONSTRAINT UX_ApprovalProfile_Name UNIQUE (CompanyId, Name)
+        );
+        IF OBJECT_ID('meta.ApprovalProfileMember') IS NULL
+        CREATE TABLE meta.ApprovalProfileMember (
+            ProfileId int NOT NULL REFERENCES meta.ApprovalProfile(Id),
+            UserId int NOT NULL REFERENCES meta.[User](Id),
+            AddedAt datetime2(3) NOT NULL DEFAULT SYSUTCDATETIME(),
+            AddedBy int NOT NULL,
+            PRIMARY KEY (ProfileId, UserId)
+        );
+        IF OBJECT_ID('meta.ApprovalRule') IS NULL
+        CREATE TABLE meta.ApprovalRule (
+            Id int IDENTITY PRIMARY KEY,
+            CompanyId int NOT NULL REFERENCES meta.Company(Id),
+            EntityName nvarchar(64) NOT NULL,
+            Name nvarchar(100) NOT NULL,
+            Priority int NOT NULL,
+            IsActive bit NOT NULL DEFAULT 1,
+            ValidFrom date NULL,
+            ValidTo date NULL,
+            MinAmount decimal(19,4) NULL,
+            MaxAmount decimal(19,4) NULL,
+            ConditionsJson nvarchar(max) NOT NULL,
+            LevelsJson nvarchar(max) NOT NULL,
+            CreatedAt datetime2(3) NOT NULL DEFAULT SYSUTCDATETIME(),
+            CreatedBy int NOT NULL,
+            UpdatedAt datetime2(3) NULL,
+            UpdatedBy int NULL,
+            RowVer rowversion,
+            CONSTRAINT UX_ApprovalRule_Name UNIQUE (CompanyId, EntityName, Name)
+        );
+        IF OBJECT_ID('meta.ApprovalRun') IS NULL
+        CREATE TABLE meta.ApprovalRun (
+            Id bigint IDENTITY PRIMARY KEY,
+            EntityName nvarchar(64) NOT NULL,
+            RecordId bigint NOT NULL,
+            CompanyId int NOT NULL,
+            RuleId int NOT NULL,
+            RuleJson nvarchar(max) NOT NULL,
+            Amount decimal(19,4) NULL,
+            ConditionsHash varbinary(32) NOT NULL,
+            CurrentLevel int NULL,
+            Status nvarchar(10) NOT NULL,
+            StartedAt datetime2(3) NOT NULL DEFAULT SYSUTCDATETIME(),
+            StartedBy int NOT NULL,
+            EndedAt datetime2(3) NULL,
+            RowVer rowversion
+        );
+        IF COL_LENGTH('meta.ApprovalRun', 'CreatorId') IS NULL ALTER TABLE meta.ApprovalRun ADD CreatorId int NULL;
+        IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_ApprovalRun_Pending')
+            CREATE UNIQUE INDEX UX_ApprovalRun_Pending ON meta.ApprovalRun (EntityName, RecordId) WHERE Status = 'pending';
+        IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_ApprovalRun_Record')
+            CREATE INDEX IX_ApprovalRun_Record ON meta.ApprovalRun (EntityName, RecordId, Id);
+        IF OBJECT_ID('meta.ApprovalDecision') IS NULL
+        CREATE TABLE meta.ApprovalDecision (
+            Id bigint IDENTITY PRIMARY KEY,
+            RunId bigint NOT NULL REFERENCES meta.ApprovalRun(Id),
+            Level int NOT NULL,
+            ProfileId int NOT NULL,
+            UserId int NULL,
+            Decision nvarchar(10) NOT NULL,
+            Comment nvarchar(1000) NULL,
+            Fingerprint varbinary(32) NULL,
+            Superseded bit NOT NULL DEFAULT 0,
+            At datetime2(3) NOT NULL DEFAULT SYSUTCDATETIME()
+        );
+        IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_ApprovalDecision_Run')
+            CREATE INDEX IX_ApprovalDecision_Run ON meta.ApprovalDecision (RunId, Level);
+
         -- Constitución II.4: la auditoría es de solo inserción, incluso para la propia aplicación.
         IF OBJECT_ID('meta.TR_AuditLog_Immutable') IS NULL
             EXEC('CREATE TRIGGER meta.TR_AuditLog_Immutable ON meta.AuditLog INSTEAD OF UPDATE, DELETE AS

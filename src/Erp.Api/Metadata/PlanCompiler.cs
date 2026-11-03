@@ -129,6 +129,10 @@ public static partial class PlanCompiler
             foreach (var e in working.Values.Where(e => !e.IsArchived && e.Automations is { Count: > 0 }))
                 foreach (var message in AutomationRules.Validate(e, working, knownRoles))
                     errors.Add(new(lastOp.GetValueOrDefault(e.Name, -1), message));
+            // Spec 053: la autorización por matriz no tiene atajos (otra automatización, una tarea o una asignación).
+            foreach (var e in working.Values.Where(e => !e.IsArchived && e.Workflow?.Approval is not null))
+                foreach (var message in ApprovalRules.Validate(e, working))
+                    errors.Add(new(lastOp.GetValueOrDefault(e.Name, -1), message));
             if (AutomationRules.FindCycle(working) is { } cycle)
                 errors.Add(new(-1, $"Ciclo de automatizaciones: {string.Join(" → ", cycle)}. Una automatización no puede terminar disparándose a sí misma."));
 
@@ -522,7 +526,8 @@ public static partial class PlanCompiler
             ? e with { Workflow = w, Fields = [.. e.Fields, stateField] }
             : ReplaceField(e with { Workflow = w }, stateField);
         return new(updated,
-            $"{(existing is null ? "Definir" : "Actualizar")} proceso de '{e.Label}': {w.States.Count} estados, {w.Transitions.Count} transiciones",
+            $"{(existing is null ? "Definir" : "Actualizar")} proceso de '{e.Label}': {w.States.Count} estados, {w.Transitions.Count} transiciones" +
+            (w.Approval is { } ap ? $", autorización por matriz en «{w.FindState(ap.State)?.Label ?? ap.State}»" : ""),
             existing is null ? DdlGenerator.AddStateColumn(e.Name, w.Initial!) : []);
     }
 

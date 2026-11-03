@@ -3,7 +3,7 @@ import type {
   AppSummary, SearchHit, AuditEntry, AutomationRun, AutomationRunDetail, ScheduleSummary, ChangePlan, Company, EntityOrigin, ExprFunction, FieldDef, ExchangeRate, ChangeSetSummary, DashboardResult, DashboardSummary, EntityDef, HistoryEntry, LayoutState, LookupItem, Me, PrintChoice, PrintTemplate, StoredImage,
   ApiKey, AssistantStatus, CompanionAction, CompanionConversation, CompanionScreen, CompanionStatus, CompanionSummary, McpAuthorizeInfo, McpConnections, StudioScope, StudioSession, StudioStatusInfo, StudioSummary, OAuthClient, OAuthScope, BusinessUnit, PendingChange, SecurityChange, Team, Conversation, ConversationSummary, Proposal, EnvironmentInfo, ExportableCatalogs, ExportPreview, ExportRequest, ImportResult, ModuleInfo, PackageImport, ModulePreview, WebhookDelivery, WebhookSummary, Paged, PlanPreview, ReportResult, ReportSummary, Role, Row, RowList, SavedView, User, ViewFilter, ViewList,
   PersonalReport, PersonalReportDef, PersonalReportSummary, ReportSource, ReportSourceFields,
-  PersonalDashboardList, PersonalDashboardResult, PersonalWidget, SharedReportSummary, ShareResult,
+  PersonalDashboardList, PersonalDashboardResult, PersonalWidget, SharedReportSummary, ShareResult, ApprovalConfig,
 } from './types';
 
 const enc = encodeURIComponent;
@@ -98,6 +98,9 @@ export const dataApi = {
     }),
   transition: (entity: string, id: number | string, input: TransitionInput) =>
     api<Row>(`/data/${enc(entity)}/${enc(String(id))}/transition`, { method: 'POST', body: input }),
+  /** Spec 053: autorizar o rechazar el nivel en curso, con las versiones que vio la persona. */
+  decide: (entity: string, id: number | string, input: { decision: 'approve' | 'reject'; comment?: string; _rowVersion?: string; approvalVersion: string }) =>
+    api<Row>(`/data/${enc(entity)}/${enc(String(id))}/approval`, { method: 'POST', body: input }),
   /** Spec 027: plantillas de impresión que aplican al registro y al usuario (la predeterminada primero). */
   printChoices: (entity: string, id: number | string, signal?: AbortSignal) =>
     api<PrintChoice[]>(`/data/${enc(entity)}/${enc(String(id))}/print`, { signal }),
@@ -200,6 +203,22 @@ export const myDashboardsApi = {
     api<PersonalDashboardResult>(`/my-dashboards/${id}`, { method: 'PUT', body: { label, description, widgets, version } }),
   remove: (id: number, version: number) => api<void>(`/my-dashboards/${id}`, { method: 'DELETE', query: { version } }),
   share: (id: number, roles: string[], version: number) => api<ShareResult>(`/my-dashboards/${id}/share`, { method: 'PUT', body: { roles, version } }),
+};
+
+/** Spec 053: la matriz de autorización de la empresa actual. Un cambio puede quedar como solicitud (202, `securityChange`). */
+export interface ApprovalProfileInput { name: string; minAmount: number | null; maxAmount: number | null; isActive: boolean; memberIds: number[]; version?: string }
+export interface ApprovalRuleInput {
+  entity: string; name: string; priority: number; isActive: boolean; validFrom: string | null; validTo: string | null;
+  minAmount: number | null; maxAmount: number | null; conditions: Record<string, (string | number | boolean)[]>; levels: number[]; version?: string;
+}
+export type ApprovalSaveResult = { id: number; version: string } | { securityChange: { id: number; summary: string } };
+
+export const approvalsApi = {
+  config: (signal?: AbortSignal) => api<ApprovalConfig>('/admin/approvals', { signal }),
+  saveProfile: (id: number | null, input: ApprovalProfileInput) =>
+    api<ApprovalSaveResult>(id ? `/admin/approvals/profiles/${id}` : '/admin/approvals/profiles', { method: id ? 'PUT' : 'POST', body: input }),
+  saveRule: (id: number | null, input: ApprovalRuleInput) =>
+    api<ApprovalSaveResult>(id ? `/admin/approvals/rules/${id}` : '/admin/approvals/rules', { method: id ? 'PUT' : 'POST', body: input }),
 };
 
 export const usersApi = {

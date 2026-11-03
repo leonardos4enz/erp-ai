@@ -180,9 +180,37 @@ public sealed record Workflow
     public required string Initial { get; init; }
     public IReadOnlyList<WorkflowState> States { get; init; } = [];
     public IReadOnlyList<WorkflowTransition> Transitions { get; init; } = [];
+    /// <summary>Spec 053: el estado que se autoriza por matriz (se omite en nulo: forma canónica de los paquetes).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public WorkflowApproval? Approval { get; init; }
 
     public WorkflowState? FindState(string? name) =>
         States.FirstOrDefault(s => string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase));
+
+    public WorkflowTransition? FindTransition(string? name) =>
+        Transitions.FirstOrDefault(t => string.Equals(t.Name, name, StringComparison.OrdinalIgnoreCase));
+}
+
+/// <summary>
+/// Spec 053: en <c>State</c> quién autoriza lo decide la matriz de la empresa (perfiles y reglas), no el proceso. Al completar los
+/// niveles el motor ejecuta <c>Approve</c>; al rechazar, <c>Reject</c> (ambas <c>system</c>). <c>Amount</c> y <c>Conditions</c> son
+/// campos propios que eligen la regla; <c>Approvers</c>, el campo <c>multiuser</c> no editable que el motor mantiene con quienes
+/// pueden autorizar ahora (la visibilidad, con la pertenencia de la 051).
+/// </summary>
+public sealed record WorkflowApproval
+{
+    public const int MaxConditions = 5;
+    public required string State { get; init; }
+    public required string Approve { get; init; }
+    public required string Reject { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Amount { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? Conditions { get; init; }
+    public required string Approvers { get; init; }
+
+    public bool IsExit(string? transition) =>
+        string.Equals(transition, Approve, StringComparison.OrdinalIgnoreCase) || string.Equals(transition, Reject, StringComparison.OrdinalIgnoreCase);
 }
 
 public sealed record BusinessRule

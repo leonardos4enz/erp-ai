@@ -76,6 +76,7 @@ public static class ErpApp
         services.AddSingleton(EnvironmentOptions.From(config));
         services.AddScoped<EnvironmentService>();
         services.AddSingleton<SecurityApproval>(); // spec 015
+        services.AddScoped<Erp.Api.Approvals.ApprovalConfig>(); // spec 053
         // Spec 011: asistente IA. La clave de Anthropic la guarda un administrador desde la app (cifrada con Data Protection);
         // si el servidor la trae por configuración (user-secrets o variable de entorno), esa manda.
         services.AddSingleton(AssistantOptions.From(config));
@@ -241,6 +242,7 @@ public static class ErpApp
         app.MapData();
         app.MapAdmin();
         app.MapSecurityChanges(); // spec 015
+        app.MapApprovals(); // spec 053
         app.MapAudit();
         app.MapAnalytics();
         app.MapIntegrations();

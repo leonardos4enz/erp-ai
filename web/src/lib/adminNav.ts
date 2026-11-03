@@ -1,5 +1,5 @@
 import {
-  Blocks, Bot, Building2, CalendarClock, GitCompareArrows, History, Image, Network, ShieldCheck, Sparkles, Webhook, Workflow, type LucideIcon,
+  Blocks, Bot, Building2, CalendarClock, GitCompareArrows, History, Image, ListChecks, Network, ShieldCheck, Sparkles, Webhook, Workflow, type LucideIcon,
 } from 'lucide-react';
 import type { Me } from '../api/types';
 
@@ -28,6 +28,7 @@ export const ADMIN_GROUPS: AdminGroup[] = [
     label: 'Seguridad',
     items: [
       { to: '/admin/security', label: 'Usuarios y roles', description: 'Usuarios, roles, equipos y unidades de negocio.', icon: ShieldCheck, allow: users },
+      { to: '/admin/approvals', label: 'Autorizaciones', description: 'Quién autoriza cada documento: perfiles, personas, niveles y montos.', icon: ListChecks, allow: users },
       { to: '/admin/companies', label: 'Empresas', description: 'Empresas, monedas base y tipos de cambio.', icon: Building2, allow: superuser },
     ],
   },

@@ -35,6 +35,8 @@ export const PANTALLAS: Record<string, Pantalla> = {
   'admin/integrations': { sinCaptura: 'webhooks, claves y clientes OAuth de la corrida; integraciones.spec.ts (riesgo R-030-3)' },
   'admin/automations': { sinCaptura: 'bandeja con fechas y duraciones de la corrida; programadas.spec.ts (riesgo R-030-3)' },
   'admin/environments': { sinCaptura: 'paquetes e historial de la corrida; entornos.spec.ts (riesgo R-030-3)' },
+  // Spec 053: la matriz de autorización (perfiles y reglas que crea el propio archivo).
+  'admin/approvals': { capturas: ['light', 'dark', 'movil'].map((t) => `autorizaciones.spec.ts/matriz-${t}.png`) },
   'admin/companies': { sinCaptura: 'empresas y tipos de cambio de la corrida; multiempresa.spec.ts (riesgo R-030-3)' },
   'admin/assistant': { sinCaptura: 'conversación simulada; asistente.spec.ts compara sus márgenes con Entornos (011 F-05)' },
   'admin/studio': { capturas: ['light', 'dark', 'movil'].flatMap((t) => [`studio.spec.ts/studio-chat-${t}.png`, `studio.spec.ts/studio-bienvenida-${t}.png`]) },

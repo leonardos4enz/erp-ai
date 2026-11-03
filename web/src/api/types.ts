@@ -377,7 +377,17 @@ export interface WorkflowTransitionDef {
   onWarning?: 'confirm' | 'block' | 'allow';
 }
 
-export interface Workflow { initial: string; states: WorkflowState[]; transitions: WorkflowTransitionDef[] }
+export interface Workflow { initial: string; states: WorkflowState[]; transitions: WorkflowTransitionDef[]; approval?: WorkflowApproval }
+
+/** Spec 053: el estado que se autoriza por matriz (quién autoriza lo configura cada empresa). */
+export interface WorkflowApproval {
+  state: string;
+  approve: string;
+  reject: string;
+  amount?: string;
+  conditions?: string[];
+  approvers: string;
+}
 
 export type AutomationEvent = 'create' | 'update' | 'enterState' | 'transition';
 
@@ -615,6 +625,41 @@ export interface RecordWorkflow {
   editable: boolean;
   transitions: RecordTransition[];
 }
+
+/** Spec 053: el panel de autorización del registro (la última corrida). */
+export type ApprovalLevelStatus = 'approved' | 'rejected' | 'current' | 'pending' | 'skipped';
+
+export interface RecordApproval {
+  status: 'pending' | 'approved' | 'rejected' | 'cancelled' | 'reset';
+  rule: string;
+  level: number | null;
+  version: string;
+  startedAt: string;
+  endedAt: string | null;
+  levels: {
+    level: number;
+    profile: string;
+    status: ApprovalLevelStatus;
+    reason: string | null;
+    decisions: { user: string | null; decision: 'approve' | 'reject'; comment: string | null; at: string; fingerprint: string | null }[];
+  }[];
+  approvers: string[];
+  canDecide: boolean;
+  waitingReason: string | null;
+}
+
+/** Spec 053: la matriz de la empresa actual (pantalla de administración). */
+export interface ApprovalConditionDef { field: string; label: string; type: string; options?: string[] | null; referenceEntity?: string | null }
+export interface ApprovalEntity { name: string; label: string; amount: string | null; conditions: ApprovalConditionDef[] }
+export interface ApprovalProfile {
+  id: number; name: string; minAmount: number | null; maxAmount: number | null; isActive: boolean;
+  members: { id: number; label: string }[]; version: string;
+}
+export interface ApprovalRule {
+  id: number; entity: string; name: string; priority: number; isActive: boolean; validFrom: string | null; validTo: string | null;
+  minAmount: number | null; maxAmount: number | null; conditions: Record<string, string[]>; levels: number[]; version: string;
+}
+export interface ApprovalConfig { company: string; entities: ApprovalEntity[]; profiles: ApprovalProfile[]; rules: ApprovalRule[] }
 
 export interface HistoryEntry {
   at: string;

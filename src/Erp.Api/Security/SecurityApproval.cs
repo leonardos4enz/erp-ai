@@ -24,6 +24,12 @@ public static class SecurityChangeKinds
     public const string OAuthClientCreate = "oauthclient.create";
     public const string OAuthClientUpdate = "oauthclient.update";
 
+    /// <summary>Spec 053: perfiles (con sus personas) y reglas de la matriz de autorización.</summary>
+    public const string ApprovalProfileCreate = "approvalprofile.create";
+    public const string ApprovalProfileUpdate = "approvalprofile.update";
+    public const string ApprovalRuleCreate = "approvalrule.create";
+    public const string ApprovalRuleUpdate = "approvalrule.update";
+
     /// <summary>Las claves de API (spec 008) y los clientes OAuth (spec 018) los administra solo el superusuario; sus solicitudes también.</summary>
     public static bool IsIntegration(string kind) =>
         kind.StartsWith("apikey.", StringComparison.Ordinal) || kind.StartsWith("oauthclient.", StringComparison.Ordinal);
@@ -273,6 +279,21 @@ public sealed class SecurityApproval(Db db, EnvironmentOptions env)
                 // Con «unitTree», quien tiene la unidad nueva superior (o una de más arriba) gana lo que ve la unidad movida.
                 return GainsUnit(user, Int(before, "parentId"), Int(payload, "parentId"), units ?? [])
                     ? "Mover la unidad bajo la tuya te deja ver sus registros: lo aprueba otro administrador." : null;
+            case SecurityChangeKinds.ApprovalProfileCreate or SecurityChangeKinds.ApprovalProfileUpdate:
+            {
+                // Spec 053: el beneficiario no se aprueba: quien entra o sale del perfil no revisa el cambio.
+                // Revisión adversarial 053 (F-08): la matriz es de una empresa; la revisa quien tiene acceso a ella.
+                if (Int(payload, "companyId") is { } pc && !user.IsSuperuser && user.Companies.All(c => c.Id != pc))
+                    return "El cambio es de la matriz de otra empresa: lo aprueba un administrador de esa empresa.";
+                var now = Ints(payload, "memberIds");
+                var was = Ints(before, "memberIds");
+                return now.Except(was).Concat(was.Except(now)).Contains(user.Id)
+                    ? "El cambio te agrega o te quita de un perfil de autorización: lo aprueba otro administrador." : null;
+            }
+            case SecurityChangeKinds.ApprovalRuleCreate or SecurityChangeKinds.ApprovalRuleUpdate:
+                // Spec 053: una regla no da capacidades; quién autoriza lo dicen los perfiles (y nadie autoriza lo que creó).
+                return Int(payload, "companyId") is { } rc && !user.IsSuperuser && user.Companies.All(c => c.Id != rc)
+                    ? "El cambio es de la matriz de otra empresa: lo aprueba un administrador de esa empresa." : null;
             case SecurityChangeKinds.ApiKeyCreate or SecurityChangeKinds.ApiKeyUpdate
                 or SecurityChangeKinds.OAuthClientCreate or SecurityChangeKinds.OAuthClientUpdate:
                 // Las revisa solo el superusuario (CanReview), que ya tiene todo; la cuenta de servicio no es de quien aprueba.

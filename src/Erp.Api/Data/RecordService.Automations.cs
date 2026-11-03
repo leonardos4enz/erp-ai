@@ -349,6 +349,7 @@ public sealed partial class RecordService
         await UpdateHeaderAsync(c.Cn, c.Tx, root, rootId, draft.Header, rowVersion: null, c.User.Id, c.Ct);
         await SaveLinesAsync(c.Cn, c.Tx, root, c.Model, rootId, draft, draft, c.User.Id, c.Ct);
         await Audit.WriteAsync(c.Cn, c.Tx, c.Http, AuditActions.AutomationUpdate, root.Name, rootId.ToString(CultureInfo.InvariantCulture), before, AuditAfter(draft, warnings));
+        await ApprovalOnChangeAsync(c, root, rootId, draft); // spec 053
         await FireAsync(c, root, rootId, AutomationEvents.Update, null);
     }
 
@@ -375,6 +376,9 @@ public sealed partial class RecordService
     /// <summary>Transición del destino si está en uno de sus estados de origen (si no, se omite).</summary>
     private async Task SystemTransitionAsync(AutoCtx c, EntityDef target, long id, WorkflowTransition t, string comment)
     {
+        // Revisión adversarial 053 (F-12): defensa en profundidad además del plan: la salida de la matriz no la ejecuta el motor.
+        if (target.Workflow?.Approval?.IsExit(t.Name) == true)
+            throw new AppException(400, $"«{t.Label}» solo la ejecuta la matriz de autorización.");
         if (await LockRootAsync(c, target, id) is null) throw new AppException(400, $"El registro relacionado de {target.Label} no existe.");
         var draft = (await LoadDraftAsync(c.Cn, c.Tx, target, c.Model, id, c.Ct))!;
         if (!t.From.Contains(draft.Header.GetValueOrDefault(Workflow.StateField) as string ?? "", StringComparer.OrdinalIgnoreCase)) return;

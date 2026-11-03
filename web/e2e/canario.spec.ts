@@ -595,6 +595,9 @@ test('H2 CA2: tampoco las rutas que no son GET y devuelven datos (tomadas del in
       check('editar', await l.put(`/api/data/CnDoc/${mine!.id}`, { data: { Nombre: 'Del lector (editado)', _rowVersion: mine!._rowVersion } })),
     'POST /api/data/{entity}/{id:long}/transition': async () =>
       check('transición', await l.post(`/api/data/CnDoc/${ids.doc}/transition`, { data: { transition: 'cerrar', _rowVersion: await version(state.ids.doc) } })),
+    // Spec 053: decidir una autorización (el catálogo del canario no se autoriza por matriz: 400 sin el dato).
+    'POST /api/data/{entity}/{id:long}/approval': async () =>
+      check('autorizar', await l.post(`/api/data/CnDoc/${ids.doc}/approval`, { data: { decision: 'approve', _rowVersion: await version(state.ids.doc), approvalVersion: 'AAAAAAAAAAA=' } })),
     // El lector no borra (403); el cuerpo del rechazo tampoco lleva el dato.
     'DELETE /api/data/{entity}/{id:long}': async () => check('borrar', await l.delete(`/api/data/CnDoc/${mine!.id}`)),
     // Spec 038: el servidor MCP, con un token del lector con `datos` (sus herramientas de registros y de catálogos).

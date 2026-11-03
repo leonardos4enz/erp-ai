@@ -66,6 +66,10 @@ public static class DataEndpoints
         g.MapPost("/{id:long}/transition", (string entity, long id, TransitionRequest req, HttpContext http, RecordService records, CancellationToken ct) =>
             records.TransitionAsync(entity, id, req, http, ct)).Requires(Capability.Records).Writes(Effect.Data);
 
+        // Spec 053: autorizar o rechazar el nivel en curso de la matriz (con la huella de lo que vio la persona).
+        g.MapPost("/{id:long}/approval", (string entity, long id, DecisionRequest req, HttpContext http, RecordService records, CancellationToken ct) =>
+            records.DecideAsync(entity, id, req, http, ct)).Requires(Capability.Records).Writes(Effect.Data).AppliesReviewed("_rowVersion + approvalVersion");
+
         g.MapPost("/", async (string entity, JsonElement body, HttpContext http, RecordService records, CancellationToken ct) =>
         {
             var row = await records.CreateAsync(entity, body, http, ct);

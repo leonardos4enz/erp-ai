@@ -37,6 +37,15 @@ public static class AuditActions
     public const string ModuleUpgrade = "module.upgrade";
     /// <summary>Prefijo de una transición del proceso (<c>workflow.{nombre}</c>).</summary>
     public const string WorkflowPrefix = "workflow.";
+    /// <summary>Spec 053: la matriz de autorización de un documento (empezar, autorizar, rechazar, reiniciar, cancelar).</summary>
+    public const string ApprovalStart = "approval.start";
+    public const string ApprovalApprove = "approval.approve";
+    public const string ApprovalReject = "approval.reject";
+    public const string ApprovalReset = "approval.reset";
+    public const string ApprovalCancel = "approval.cancel";
+    /// <summary>Spec 053: alta o cambio de un perfil (con sus personas) o de una regla de la matriz.</summary>
+    public const string ApprovalProfileChange = "approval.profile";
+    public const string ApprovalRuleChange = "approval.rule";
     public const string Import = "data.import";
     public const string Export = "data.export";
     /// <summary>Spec 009: paquetes de metadatos entre entornos (exportar, subir, rechazo al subir, aprobar, rechazar, aplicar).</summary>

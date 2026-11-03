@@ -9,7 +9,7 @@ sin compuerta, si es costosa sin límite o si aplica lo revisado sin huella. `we
 Capacidades: **anónima** (lista blanca) · **sesión** (lo propio del usuario) · **registros** (el motor exige permiso del
 catálogo, alcance por registro y seguridad por campo) · **modelador** · **usuarios** · **auditoría** · **superusuario**.
 
-Total: 193 rutas.
+Total: 199 rutas.
 
 | Método | Ruta | Capacidad | Efecto | Compuerta | Costosa | Huella |
 |---|---|---|---|---|---|---|
@@ -21,6 +21,11 @@ Total: 193 rutas.
 | PUT | `/api/admin/api-keys/{id:int}` | superusuario | seguridad | aprobación de seguridad |  |  |
 | POST | `/api/admin/api-keys/{id:int}/revoke` | superusuario | seguridad | no amplía acceso |  |  |
 | POST | `/api/admin/api-keys/{id:int}/rotate` | superusuario | seguridad | no amplía acceso |  |  |
+| GET | `/api/admin/approvals/` | usuarios |  |  |  |  |
+| POST | `/api/admin/approvals/profiles` | usuarios | seguridad | aprobación de seguridad |  |  |
+| PUT | `/api/admin/approvals/profiles/{id:int}` | usuarios | seguridad | aprobación de seguridad |  |  |
+| POST | `/api/admin/approvals/rules` | usuarios | seguridad | aprobación de seguridad |  |  |
+| PUT | `/api/admin/approvals/rules/{id:int}` | usuarios | seguridad | aprobación de seguridad |  |  |
 | GET | `/api/admin/automations/runs` | superusuario |  |  |  |  |
 | GET | `/api/admin/automations/runs/{id:long}` | superusuario |  |  |  |  |
 | POST | `/api/admin/automations/runs/{id:long}/retry` | superusuario | datos |  |  |  |
@@ -117,6 +122,7 @@ Total: 193 rutas.
 | DELETE | `/api/data/{entity}/{id:long}` | registros | datos |  |  |  |
 | GET | `/api/data/{entity}/{id:long}` | registros |  |  |  |  |
 | PUT | `/api/data/{entity}/{id:long}` | registros | datos |  |  |  |
+| POST | `/api/data/{entity}/{id:long}/approval` | registros | datos |  |  | _rowVersion + approvalVersion |
 | GET | `/api/data/{entity}/{id:long}/history` | registros |  |  |  |  |
 | GET | `/api/data/{entity}/{id:long}/pdf` | registros | bitácora |  | genera un PDF (print) |  |
 | GET | `/api/data/{entity}/{id:long}/print` | registros |  |  |  |  |

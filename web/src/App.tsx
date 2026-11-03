@@ -17,6 +17,7 @@ import { IntegrationsPage } from './pages/IntegrationsPage';
 import { AutomationsPage } from './pages/AutomationsPage';
 import { EnvironmentsPage } from './pages/EnvironmentsPage';
 import { CompaniesPage } from './pages/CompaniesPage';
+import { ApprovalsPage } from './pages/ApprovalsPage';
 import { AssistantPage } from './pages/AssistantPage';
 import { StudioPage } from './pages/StudioPage';
 import { ExplorerPage } from './pages/ExplorerPage';
@@ -74,6 +75,7 @@ export function App() {
         <Route path="admin/explorer" element={<Guard allow={!!(me?.canManageModel || me?.isSuperuser)}><ExplorerPage /></Guard>} />
         <Route path="admin/images" element={<Guard allow={!!(me?.canManageModel || me?.isSuperuser)}><ImagesPage /></Guard>} />
         <Route path="admin/security" element={<Guard allow={!!(me?.canManageUsers || me?.isSuperuser)}><SecurityPage /></Guard>} />
+        <Route path="admin/approvals" element={<Guard allow={!!(me?.canManageUsers || me?.isSuperuser)}><ApprovalsPage /></Guard>} /> {/* spec 053 */}
         <Route path="admin/modules" element={<Guard allow={!!me?.isSuperuser}><ModulesPage /></Guard>} />
         <Route path="admin/integrations" element={<Guard allow={!!me?.isSuperuser}><IntegrationsPage /></Guard>} />
         <Route path="admin/automations" element={<Guard allow={!!me?.isSuperuser}><AutomationsPage /></Guard>} />

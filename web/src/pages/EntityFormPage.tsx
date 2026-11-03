@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, RefreshCw, Save, Trash2 } from 'lucide-react';
 import { ApiError, fieldError } from '../api/client';
 import { dataApi, type Warnings } from '../api/endpoints';
-import type { EntityDef, FieldDef, LayoutState, RecordAccess, RecordTransition, RecordWorkflow, Row } from '../api/types';
+import type { EntityDef, FieldDef, LayoutState, RecordAccess, RecordApproval, RecordTransition, RecordWorkflow, Row } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { ConfirmDialog } from '../components/Dialog';
 import { resolveIcon } from '../components/DynamicIcon';
@@ -13,6 +13,7 @@ import { PrintMenu } from '../components/PrintMenu';
 import { useToast } from '../components/Toast';
 import { WarningsAlert } from '../components/Warnings';
 import { HistoryPanel, stateLabel, TransitionDialog, WorkflowBar } from '../components/Workflow';
+import { ApprovalPanel } from '../components/ApprovalPanel';
 import { Alert, Button, LoadingBlock, PageHeader, Tabs } from '../components/ui';
 import { formSections, formTabs, hasLayoutConditions, placedFields, type FormSection } from '../lib/layout';
 import {
@@ -450,8 +451,16 @@ export function EntityFormPage() {
     />
   );
 
+  // Spec 053: el panel de la matriz de autorización, bajo la barra del proceso.
+  const approval = !isNew ? (row?._approval as RecordApproval | undefined) : undefined;
   const workflowArea = wf && row ? (
-    <WorkflowBar workflow={wf} blockedReason={dirty ? 'Guarda los cambios antes de cambiar el estado.' : undefined} onTransition={setTransition} />
+    <>
+      <WorkflowBar workflow={wf} blockedReason={dirty ? 'Guarda los cambios antes de cambiar el estado.' : undefined} onTransition={setTransition} />
+      {approval && (
+        <ApprovalPanel def={def} row={row} approval={approval} blockedReason={dirty ? 'Guarda los cambios antes de decidir.' : undefined}
+          onDone={(r) => (r._gone ? navigate(`/c/${def.name}`) : applyRow(r))} onConflict={() => setConflict(true)} />
+      )}
+    </>
   ) : isNew && def.workflow ? (
     <div className="workflow-bar" role="group" aria-label="Proceso del documento">
       <div className="row workflow-state">
