@@ -71,7 +71,7 @@ en orden, no en paralelo: casi todas tocan el núcleo del motor (`PlanCompiler`,
 | Entornos (sandbox → producción) | ~~No se exporta lo hecho en el modelador~~ Resuelto en la 009: paquetes exportados con el formato de los módulos, firmados, con diff contra el destino (plan mínimo por el Plan de Cambios), aplicación versionada y aprobación de otro administrador en producción | **009** |
 | Multi-empresa y multi-moneda real | ~~Una sola empresa; el tipo de cambio se captura a mano~~ Resuelto en la 010: empresas con moneda base, catálogos compartidos o por empresa (filtro en el servidor junto con la 006, también para el superusuario), tipos de cambio por fecha y `RATE`/`CONVERT`/`BASECURRENCY()` en fórmulas | **010** |
 | Extensión con código | Prohibida por la constitución (I.1), a propósito | Decisión abajo |
-| Procesos complejos (revisión del dueño, 2026-11-02) | El motor cubre bien lo documental, pero no la pertenencia de un usuario a varios registros, los campos de varios valores, los filtros de búsqueda compuestos, la autorización configurable por datos (niveles, perfiles, montos), los adjuntos con reglas ni elegir qué partidas pasan al siguiente documento | **050–057** ([detalle](#specs-planeadas-después-de-la-049-piezas-para-procesos-complejos)) |
+| Procesos complejos (revisión del dueño, 2026-11-02) | El motor cubre bien lo documental, pero no la pertenencia de un usuario a varios registros, los campos de varios valores, los filtros de búsqueda compuestos, la autorización configurable por datos (niveles, perfiles, montos), los adjuntos con reglas ni elegir qué partidas pasan al siguiente documento | **050–058** (endurecimiento 9 en la 054; [detalle](#specs-planeadas-después-de-la-049-piezas-para-procesos-complejos)) |
 
 ## Orden y razón
 ```
@@ -412,7 +412,8 @@ ya marcados) y sus hallazgos se vuelven una spec de endurecimiento.
 | 2026-10-31, auditoría 7, al cerrar la 039 (servidor MCP, flujo SSE y multi-turno de Studio, reportes a dos saltos) | 034–039 | 12 defectos (1 medio: el registro dinámico del MCP se agota —con direcciones IPv6 sin cuenta, o para siempre con una cuenta, porque los clientes que tuvieron conexión no se barren— y bloquea conexiones nuevas; 11 bajos: tope de pendientes por dirección detrás de un proxy, cola de Studio que vence sesiones en un solo lote, `RenewSeconds` sin relación con `LeaseSeconds`, salidas de `datos` sin purgar si el servidor no vuelve, conversación que cambia de empresa, tope de uniones de la 039 que no existe, «#id» en lugar de «(sin acceso)», canario sin reportes a dos saltos, entre otros) y 3 observaciones. Sin fugas ni escaladas verificadas; los 25 riesgos marcados siguen abiertos. Propone la **040 — Endurecimiento 6**; el dueño la puso antes de los reportes personales (2026-10-31), que pasan a la 041, Ventas a la 042 y MCP 2 a la 043 |
 | 2026-11-01, auditoría 8, al cerrar la 044 (registro dinámico endurecido, reportes y tableros personales con reparto, Ventas, copia aislada por conexión MCP con su barrido, escrituras con clave y propuestas por MCP) | 040–044 | 11 defectos (1 alto: explorar o reportar sobre las partidas de un documento salta un campo de partidas oculto —el motor las oculta en el registro, OData, la bitácora y las fórmulas, pero los reportes solo piden leer el documento—, desde la 007 y al alcance de cualquier usuario desde la 041; 1 medio: el vendedor crea un cliente sin límite de crédito, que no puede fijar, y confirma a crédito sin tope; 9 bajos: «Público en general» editable por todo vendedor, borrar el pedido de una cotización aceptada, un campo único que revela registros fuera de alcance, exportar reportes sin bitácora, compartidos sin tope, tres en las claves y la copia del MCP y una carrera del barrido del registro) y 3 observaciones ([detalle](#045--endurecimiento-7-auditoría-8-propuesta)). Las correcciones de la 040 se sostienen; el oráculo por campo oculto de R-043-6 no se reproduce en ningún camino. Propone la **045 — Endurecimiento 7**; el dueño decide su lugar |
 | 2026-11-02, auditoría 9, adelantada al cerrar la 046 (el Acompañante agrega un punto de entrada —`/api/companion`—, un trabajo asíncrono —su cola, su barrido y la reanudación al decidir— y delegación: escribe con los permisos de la persona cuando ella confirma, ADR-0010) y hecha tras la 048 por decisión del dueño | 045–048 | 3 defectos (1 medio: `Companion:Enabled=false` no apaga lo que ya está en marcha —el trabajador sigue reclamando turnos, confirmar y descartar reanudan y el barrido reanuda las propuestas caducadas, así que se sigue llamando al proveedor y escribiendo—; 2 bajos: una propuesta sobrevive a un turno que termina sin llegar a «esperando» —«Detener», un tope o la identidad en la herramienta siguiente de la misma respuesta— y su resultado no vuelve al modelo; sin tope de entrada por petición, el «prompt is too long» del proveedor se dice «error inesperado») y 5 observaciones ([detalle](#049--endurecimiento-8-auditoría-9-propuesta)). Sin fugas ni escaladas verificadas: identidad, dueña, empresa, orden de bloqueos, «una vez» y reanudación se sostienen. Propone la **049 — Endurecimiento 8**; el dueño decide su lugar |
-| **Siguiente: auditoría 10** (cada 5 specs: tras la 053 —la matriz de autorización, delegación de privilegios—, o antes si una spec agrega un punto de entrada, un trabajo asíncrono o delegación; la 051 deja R-051-1: quien edita la lista que consulta un permiso por registro da ese acceso) | 049– | Pendiente |
+| 2026-11-03, auditoría 10, al cerrar la 053 (la matriz de autorización es delegación de privilegios: perfiles, personas, niveles y montos por empresa; una ruta nueva para decidir; visibilidad por la pertenencia de la 051) | 049–053 | 5 defectos (2 medios: quien está en un perfil de autorización amplía el rango de su perfil, lo reactiva o lo pone como nivel de una regla y así se da poder de autorizar y visibilidad sin cambiar su pertenencia, también como revisor de la compuerta; quitar o mover `approval` del proceso con documentos en espera deja la lista de autorizadores dando visibilidad para siempre; 3 bajos: el candado de autorizaciones y un 1205 responden 500, un `multiuser` acepta personas inactivas y cuentas de servicio, y ninguna guarda para R-051-1 fuera de la matriz) y 5 observaciones ([detalle](#054--endurecimiento-9-auditoría-10-propuesta)). Sin fugas por camino alterno: la lista de autorizadores solo la escribe el motor y `RecordFilter` con el modelo está en todos los caminos de lectura. Propone la **054 — Endurecimiento 9** con R-052-5 y el diálogo de R-052-4; el dueño decide su lugar |
+| **Siguiente: auditoría 11** (cada 5 specs: tras la 058, o antes si una spec agrega un punto de entrada —la 055 agrega la subida de archivos—, un trabajo asíncrono o delegación —la 056 agrega delegación con fechas—) | 054– | Pendiente |
 
 La auditoría 5 (adelantada, sobre la 029) confirmó que las 139 rutas conservan una capacidad igual o más estricta y
 encontró que la regla «lo vivo con el alcance de quien lo ve» de la 029 no llegaba a la importación, a las transiciones ni
@@ -725,8 +726,10 @@ En este orden, por decisión del dueño (2026-10-25):
     responde 503; una propuesta no sobrevive a un turno que termina sin preguntar y su resultado vuelve al modelo; tope de entrada
     por llamada (`MaxInputTokens`, también en Studio) y `too_long`; decidir reanuda con el sello de ahora; partidas ocultas fuera
     de la procedencia, la búsqueda y la ruta del modelo; detener y borrar piden la empresa; y (O-02, decisión del dueño) quien no
-    modela no recibe reglas ni condiciones que nombran un campo que no ve. **Siguiente: auditoría 10** (tras la 053, o antes si
-    una spec agrega un punto de entrada, un trabajo asíncrono o delegación).
+    modela no recibe reglas ni condiciones que nombran un campo que no ve. Siguen 050–053 (piezas para procesos complejos, [abajo](#specs-planeadas-después-de-la-049-piezas-para-procesos-complejos)).
+    **Auditoría 10** (049–053) hecha el 2026-11-03 en una sesión aparte ([resultado](#auditorías)): propone la
+    [054 — Endurecimiento 9](#054--endurecimiento-9-auditoría-10-propuesta) (2 medios: el beneficiario de la matriz y `approval`
+    quitado con documentos en espera); adjuntos, matriz 2 y 3 y el banco de pruebas se recorren a 055–058. El dueño decide su lugar.
 15. **Pólizas en moneda extranjera** (pendiente de la 020).
 16. **Revaluación de existencias** (pendiente de la 020).
 17. **Reversa de pólizas con otra póliza** (pendiente de la 020).
@@ -853,8 +856,8 @@ conteo), pero no lo que hace configurable a un proceso así:
 | Quién autoriza lo configura el administrador (perfiles, personas, niveles, montos) | Quién ejecuta una transición son roles fijos del proceso | 053 |
 | Niveles en orden; un nivel vacío se salta | El proceso tiene estados fijos | 053 |
 | Solo ves el documento cuando te toca autorizarlo | Necesita la pertenencia de la 051 y la matriz de la 053 | 053 |
-| Adjuntar los documentos de los proveedores (mínimo los que pida el subgrupo); no editar si ya tiene | No hay adjuntos en los registros (solo imágenes del sistema) | 054 |
-| Elegir qué partidas de la requisición pasan a la cotización | `createLines.from` copia todas las que cumplan su `when`; no hay pantalla de selección | 054 |
+| Adjuntar los documentos de los proveedores (mínimo los que pida el subgrupo); no editar si ya tiene | No hay adjuntos en los registros (solo imágenes del sistema) | 055 |
+| Elegir qué partidas de la requisición pasan a la cotización | `createLines.from` copia todas las que cumplan su `when`; no hay pantalla de selección | 055 |
 
 **División (CLARIFY de la 050, dueño, 2026-11-02):** la 050 pasaba de ~2 500 líneas y juntaba seguridad con UI nueva: la
 **050** es el campo de varios valores y la **051** «pertenece a» y los filtros compuestos. Lo que seguía se recorre un número
@@ -863,6 +866,9 @@ conteo), pero no lo que hace configurable a un proceso así:
 ~2 500 líneas: la **051** es «pertenece a» (expresiones, reglas, transiciones y seguridad por registro con `EXISTS`) y asignar o
 quitar un valor desde una transición o una automatización; la **052**, los filtros de búsqueda compuestos. Se recorre otra vez:
 matriz 053, 055 y 056; adjuntos 054; banco de pruebas 057.
+**Auditoría 10 (2026-11-03):** el endurecimiento 9 entra como **054** y lo demás se recorre otra vez: adjuntos 055, matriz 056 y
+057, banco de pruebas 058 (la spec 053 y su verify citan los números anteriores: su «055» es la 056 y su «054», la 055). Si el
+dueño pospone el endurecimiento, vuelven a su número.
 
 ### ~~050 — Campos de varios valores~~ Implementado ([spec](specs/050-campos-varios-valores/spec.md), [verify](specs/050-campos-varios-valores/verify.md))
 `multireference` (varios registros de un catálogo) y `multiuser` (varias personas) en una tabla de unión `app.[Catalogo__Campo]`
@@ -903,9 +909,67 @@ con la huella (versión del registro y de la autorización): nadie autoriza lo q
 en el perfil, nadie cambia su propia pertenencia; un cambio de monto o condición reinicia; salir por otra transición cancela. La
 visibilidad «solo cuando te toca» es la pertenencia de la 051 sobre la lista de autorizadores (bandeja por catálogo = vista
 «Autorizadores contiene yo»). Panel de avance en el registro y bitácora `approval.*`. **División (CLARIFY, dueño, 2026-11-02):**
-pasan a la 055 la bandeja global, exportar la bitácora, el Acompañante proponiendo autorizar y las condiciones con expresión libre.
+pasan a la 055 (ahora 056) la bandeja global, exportar la bitácora, el Acompañante proponiendo autorizar y las condiciones con expresión libre.
 
-### 054 — Adjuntos en registros y selección de partidas (propuesta)
+### 054 — Endurecimiento 9 (auditoría 10): propuesta
+Origen: la auditoría externa 10 (2026-11-03, solo lectura al cerrar la 053, commit `7cf1eb4`, specs 049–053). Lectura del
+motor de la matriz (`RecordService.Approval.cs`, `Approvals/ApprovalConfig.cs`, `ApprovalMatrix.cs`, `Metadata/ApprovalRules.cs`,
+`ApprovalEndpoints.cs`, la compuerta en `SecurityApproval.cs`, los ganchos en `RecordService.cs` y `RecordService.Automations.cs`,
+`PlanService`) y de los caminos de lectura y escritura de la 050–052 (`RecordFilter`, `RecordService.Lookup.cs`, `ParseMulti`,
+`ApplyMember`, `ReportService`, OData, impresión, importación). No se cambió código ni pruebas y no se corrió la suite. Cada D-xx
+debe volverse una prueba que falle con `7cf1eb4`. Va antes de los adjuntos y de la fase 2 de la matriz: la 056 agrega delegación con
+fechas sobre los mismos perfiles, y D-01 debe estar cerrado antes.
+
+| # | Defecto · dónde | Escenario |
+|---|---|---|
+| D-01 | **Media** · el beneficiario se aprueba. `ApprovalConfig.SaveProfileAsync` solo impide cambiar la **propia pertenencia** (`ApprovalConfig.cs:160-163`); el rango y el «activo» de un perfil no se miran. `SaveRuleAsync` (`:237-329`) no revisa quién se beneficia. En la compuerta, el revisor de un perfil solo se excluye si el cambio lo agrega o lo quita (`SecurityApproval.cs:282-291`), y en una regla solo se mira la empresa («una regla no da capacidades», `:293-296`) | Ana administra usuarios y está en el perfil «Gerentes» (rango hasta 50 000). Cambia el máximo de su perfil a vacío: los documentos de 80 000 ya no saltan ese nivel y ahora los autoriza ella. O pone «Gerentes» como nivel de la regla de *Servicios*, que antes autorizaba «Finanzas»: gana la autorización y, con la regla de la 051, la visibilidad de esos documentos. Sin la compuerta se aplica al momento. Con la compuerta, otro miembro de «Gerentes» puede revisarlo. Contradice la regla del proyecto (021-1) y la «nadie cambia su propia pertenencia» de la 053, que se rodea sin tocar la pertenencia. Corrección: quien pide y quien revisa no pueden ser miembros de un perfil que el cambio amplía (rango, activo) ni de un perfil que entra o sale de los niveles de una regla, ni de los perfiles de una regla cuyas condiciones, vigencia, prioridad o rango cambian. Se revisa siempre, con o sin compuerta (como la propia pertenencia), en `ApprovalConfig` y en `SecurityApproval` |
+| D-02 | **Media** · R-053-4 es peor de lo registrado. `ApprovalOnTransitionAsync` sale de inmediato si el catálogo ya no declara `approval` (`RecordService.Approval.cs:141`), así que salir del estado ya no cancela la corrida ni vacía la lista (`:147-152`). `ApprovalOutputAsync` tampoco la muestra (`:354`). El plan no mira la base (`ApprovalRules` es puro), aunque `PlanService.RemovedStatesInUseAsync` (`PlanService.cs:170-189`) ya lo hace para los estados que se quitan | Un paquete o un modelador quita `approval` de *Requisición* (o cambia su `state` o su `approvers`) con 30 documentos en espera. Las corridas quedan `pending` para siempre. Las personas del nivel en curso siguen en la lista, y con la regla `CURRENTUSER() IN Autorizadores` siguen viendo esos documentos también **después** de que salen del estado por «devolver», y para siempre. Declarar `approval` sobre un estado con documentos los deja sin corrida, y nadie los puede autorizar (falla cerrado). Corrección: con corridas pendientes, el plan rechaza quitar `approval` o cambiar su `state`, `approvers`, `approve` o `reject` (como un estado en uso), y también declararla sobre un estado con registros. Como defensa, al aplicar el plan se cancelan las corridas huérfanas y se vacía la lista anterior |
+| D-03 | Baja · el tiempo límite del candado (`THROW 51053`, `RecordService.Approval.cs:56-61`) y un interbloqueo 1205 llegan como 500 en las rutas interactivas. Solo el trabajo en segundo plano los clasifica como reintentables (`RecordService.Background.cs:25-28`) | Diez personas autorizan mientras un administrador cambia un perfil grande, o R-052-5: la persona ve «error inesperado» en lugar de «otra operación está en curso, intenta de nuevo». No escribe nada (una transacción), pero la bitácora de errores se llena y el panel no dice qué hacer. Corrección: 409 con mensaje propio para 51053 y 1205 en las rutas de datos (o un reintento de 1205), junto con R-052-5 |
+| D-04 | Baja · un `multiuser` acepta personas inactivas y cuentas de servicio. `ParseMulti` (`RecordService.cs:851`) y `ApplyMember` (`:506`) solo exigen `IsTeam: false`; `loader.Principal` (`Scopes.cs:201`) lee `IsActive` y no lo usa, e `IsService` ni se lee. El campo `user` simple tiene el mismo hueco desde antes. El buscador de usuarios sí los excluye (`RecordService.cs:213`) | Quien edita `Departamento.Responsables` manda por API el id de la cuenta de servicio de una integración. Con la regla de la 051, esa credencial gana lectura de las requisiciones del departamento. Una persona dada de baja que se agrega a la lista recupera el acceso al reactivarse. (La matriz no se afecta: sus perfiles sí exigen `IsActive = 1 AND IsService = 0`.) Corrección: exigir activo y no de servicio a todo id nuevo de `user` y `multiuser`; los ids que el registro ya tenía se conservan. R-050-10 |
+| D-05 | Baja (riesgo medio R-051-1) · ninguna guarda para la delegación por datos fuera de la matriz. `SecurityRules` (`SecurityRules.cs:78`) solo valida la traducción, y nadie impide agregarse a sí mismo. Una asignación `add CURRENTUSER()` de una transición escribe con la autoridad del motor | Un módulo declara `CURRENTUSER() IN Proyecto.Miembros` como permiso de lectura y deja `Miembros` editable para quien edita proyectos. Cualquiera que edite un proyecto se agrega y ve todo lo del proyecto. El modelador no recibe ningún aviso. Corrección: en el plan, aviso (o error salvo `allowSelfGrant`) cuando una lista que consulta un permiso por registro no tiene seguridad por campo; en las escrituras directas (formulario, API, importación, Acompañante, MCP), quien agrega su propio id a esa lista necesita poder editar el campo con un rol que ya vea esos registros. Lo decide el dueño en el CLARIFY |
+
+También entran: **R-052-5** (Media; el interbloqueo preexistente de altas concurrentes con partidas al releerlas en `LoadOutputAsync`.
+Primero la IT que lo provoca, con 20 altas a la vez de dos en dos con los mismos productos; luego, según la causa, un índice por el
+padre en las partidas, releer después del commit o un reintento), con D-03, y **el diálogo de transición con filtro de R-052-4**
+(el buscador del diálogo usa `lookupFilter`, como el formulario; Baja).
+
+Observaciones (sin defecto verificado): **O-01** el monto de `approval` puede ser un campo capturable (`ApprovalRules.cs:46-47`
+solo exige que sea numérico). Si el modelo captura un «monto estimado» aparte del total que calculan las partidas, quien crea el
+documento elige la regla más barata. Es decisión de quien modela, pero valdría un aviso en el plan si el monto es editable en el
+estado de donde sale el envío. **O-02** la vigencia de las reglas se compara con `DateTime.Today` del servidor
+(`RecordService.Approval.cs:210`), como R-016-4 y R-007-1. **O-03** quien administra usuarios sin ser superusuario agrega o quita
+al superusuario de un perfil (034 A-01: nadie actúa sobre quien tiene más que él); solo cambia lo que el superusuario autoriza.
+**O-04** R-051-2 también ocurre en el filtro fijo de un reporte (`ReportService.cs:75-79`): `ReadsHidden` sí, `CanReadPath` no
+(la ruta se arma en SQL con la autoridad del motor); sigue aceptado. **O-05** eliminar un registro y agregarlo a la vez a una lista
+de varios valores se cruzan sin bloqueo (R-050-11), igual que una referencia simple.
+
+Sin hallazgo (comprobado): **Matriz.** Salir autorizado o rechazado solo pasa por `DecideAsync`: las salidas son `system`, la ruta
+de transiciones las rechaza (`RecordService.cs:722`), el plan prohíbe que una automatización o una tarea las ejecute o asigne la
+lista (`ApprovalRules.cs:61-75`) y `SystemTransitionAsync` lo vuelve a impedir (`RecordService.Automations.cs:379-381`). Ninguna otra
+transición lleva al estado autorizado. La lista de autorizadores solo la escribe el motor (`SaveMultiAsync` la salta). El MCP, el
+Acompañante y Studio no tienen una ruta a `/approval` (el Acompañante usa tres rutas fijas; la de transición rechaza las salidas). Las
+claves de API y OAuth son cuentas de servicio y no entran a un perfil. Decidir pide leer el catálogo y ver el registro (404). Bloquea
+el documento y comprueba la versión del registro y la de la corrida (huella guardada, dos veces → 409). Comprueba el turno al
+momento: perfil activo de la empresa, persona activa, no equipo ni servicio, con la empresa, no creador, no quien lo envió y sin
+haber decidido otro nivel de la corrida. Todo va en una transacción con la salida y sus automatizaciones. El estado en espera no es
+editable ni se elimina (409); una automatización que cambia el monto o una condición reinicia bajo el candado. Configuración: solo
+de la empresa actual (404 si el id es de otra), con versión y huella en la compuerta (`Verify` del antes), topes de perfiles,
+reglas, personas, niveles y valores, y nadie cambia su propia pertenencia. Bitácora: `approval.*` se filtra como acción de registro y
+sin los campos del documento. **R-053-1**: el orden documento → destinos de las automatizaciones → candado → corrida se respeta al
+decidir, entrar, salir, reiniciar y borrar; la configuración toma el candado primero y no lee la fila del documento
+(`RefreshApproversAsync`, F-07). No se encontró un ciclo, más allá de la cadena exótica que ya registra el riesgo. **050–052.**
+`RecordFilter.For` recibe el modelo en todas sus llamadas (registro, lista, buscador, búsqueda, reportes, exportación, importación,
+OData, webhooks, segundo plano, bitácora, impresión, autorización); sin el modelo, una ruta de la 051 falla cerrado. Las etiquetas
+de un `multireference` salen con el alcance del destino. El `POST /lookup` de la 052 exige crear o editar, `CanSee` del campo,
+alcance y empresa del destino, `TOP 20` y el borrador leído con lo que la persona puede capturar. Un salto del origen fuera de su
+alcance es nulo y no ofrece nada. El SQL usa identificadores de los metadatos y valores como parámetros. **049**: las correcciones
+D-01–D-03 de la auditoría 9 se sostienen por sus pruebas (`CompanionApagadoTests`, `Hardening8Tests`, `CompanionTests.H049_*`).
+
+Riesgos que la auditoría no cierra: R-053-3 (colusión con un tercero) y R-053-1 siguen aceptados, ambos medios y con prueba. R-051-1
+pasa a D-05. Los 21 medios o altos marcados **auditoría** (R-001-1 … R-022-3, R-039-4) siguen sin prueba y fuera de 049–053:
+ninguno cambió en el código. R-043-5 sigue por decidir con el dueño.
+
+### 055 — Adjuntos en registros y selección de partidas (propuesta)
 - **Adjuntos:** archivos en un registro (tipos y tamaño permitidos, antivirus o validación de tipo como `ImageValidator`,
   almacenamiento fuera de la fila), con permisos del registro, bitácora y el canario; **reglas sobre ellos**: «mínimo N
   adjuntos» (N puede venir de otro registro, p. ej. del subgrupo), «no se edita si tiene adjuntos», «se exige para ejecutar la
@@ -914,7 +978,7 @@ pasan a la 055 la bandeja global, exportar la bitácora, el Acompañante proponi
   con `createLines` que respete la selección; las ya usadas quedan marcadas (cantidades pendientes como en la 005).
 - **Riesgo:** un punto de entrada nuevo (subida de archivos): límites de tamaño y tasa, tipos, ruta de descarga con permiso.
 
-### 055 — Matriz de autorización: fase 2 (propuesta)
+### 056 — Matriz de autorización: fase 2 (propuesta)
 - **Lo que la 053 dejó** (división del CLARIFY): bandeja global «Pendientes de mi autorización» entre catálogos, exportar la
   bitácora de autorizaciones, el Acompañante (y el MCP) proponiendo autorizar con la confirmación de la persona (ADR-0010) y
   condiciones de regla con una expresión libre del lenguaje de fórmulas.
@@ -928,7 +992,7 @@ pasan a la 055 la bandeja global, exportar la bitácora, el Acompañante proponi
 - **Regresar para corrección** (no solo rechazar): vuelve a quien lo creó y, según la regla, retoma desde el nivel 1 o desde
   donde se quedó.
 
-### 056 — Matriz de autorización: fase 3 y avisos (propuesta)
+### 057 — Matriz de autorización: fase 3 y avisos (propuesta)
 - **Avisos dentro del ERP** (campanita con bandeja por persona): no requiere correo; sirve también al Acompañante y a las
   automatizaciones. El correo llega después por **SMTP genérico** (cualquier proveedor); para desarrollo y pruebas, un SMTP
   falso local (smtp4dev o Papercut) que atrapa los correos sin enviarlos.
@@ -940,7 +1004,7 @@ pasan a la 055 la bandeja global, exportar la bitácora, el Acompañante proponi
 - **Simulador** para el administrador: «¿quién autorizaría una cotización de cómputo por 80 000 en el centro X?», sin crear
   documentos (también como herramienta del Acompañante).
 
-### 057 — Banco de pruebas de complejidad (propuesta)
+### 058 — Banco de pruebas de complejidad (propuesta)
 - Un paquete de ejemplo **inventado** («Compras 2»: requisición con centros por persona, grupo → subgrupo → producto o
   servicio, autorización por niveles, cotización con varios proveedores y adjuntos, autorización por montos, orden de compra)
   instalado por `modules/` sin código propio, con su E2E.
@@ -951,8 +1015,8 @@ pasan a la 055 la bandeja global, exportar la bitácora, el Acompañante proponi
   (reservas), **cálculo recursivo** (lista de materiales multinivel, MRP), **tablas de búsqueda en fórmulas** (listas de precios
   por escala), **validación síncrona contra un sistema externo** antes de guardar, **temporizadores por registro**.
 
-**Auditoría 10:** tras la 053 (la matriz de autorización es delegación de privilegios y cierra la cuenta 049–053). Revisa también
-R-051-1 (quien edita la lista que consulta un permiso por registro da ese acceso).
+**Auditoría 10:** hecha el 2026-11-03 sobre la 049–053 (ver [054](#054--endurecimiento-9-auditoría-10-propuesta)). **Auditoría 11:**
+tras la 058, o antes: la 055 agrega un punto de entrada (subida de archivos) y la 056, delegación con fechas.
 
 ### Ideas sin orden (revisión del dueño, 2026-11-02)
 - **Portal externo** para clientes y proveedores: usuarios externos amarrados a un cliente o proveedor **de cada empresa**, que
@@ -960,7 +1024,7 @@ R-051-1 (quien edita la lista que consulta un permiso por registro da ese acceso
   (006) y la 050–051; es un punto de entrada nuevo (auditoría).
 - **PWA móvil:** la misma SPA instalable en el celular (icono, pantalla completa, cámara para códigos de barras), con
   pantallas pensadas para el dedo (recibir mercancía, buscar un producto, autorizar).
-- **Correo y actividades** sobre registros (mandar el PDF de una cotización, tareas y recordatorios), con el SMTP de la 056.
+- **Correo y actividades** sobre registros (mandar el PDF de una cotización, tareas y recordatorios), con el SMTP de la 057.
 - **Acompañante proactivo:** «¿qué pasa si…?», avisos programados en la campanita (una revisión al día, no en cada cambio, por
   costo) y anomalías (duplicados, precios fuera de rango, existencias negativas); siempre propone, nunca ejecuta solo.
 - **Bloqueadas por falta de datos o accesos** (el dueño no tiene PAC, respaldos de otros sistemas ni documentos reales):
