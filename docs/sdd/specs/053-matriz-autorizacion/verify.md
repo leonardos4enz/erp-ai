@@ -127,4 +127,5 @@ Registrados en [riesgos.md](../../riesgos.md#053): R-053-1 (candado global), R-0
 R-053-4 (cambios al proceso con corridas pendientes), R-053-5 (avisos de la salida), R-053-6, R-053-7, R-053-8 y R-053-9.
 
 ## 6. CI del push
-Se registra en la sesión que abre la 054 (o la auditoría 10), que comprueba la corrida de este push antes de cambiar código.
+Corrida [41576204209](https://github.com/leonardos4enz/erp-ai/actions/runs/41576204209) de `98713f3`: **en verde** (`success`; unitarias,
+integración y E2E completa).
